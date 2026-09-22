@@ -1,0 +1,61 @@
+{
+  "name": "bordev",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "tools/eslint"
+  ],
+  "engines": {
+    "node": "26.x"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 4173 --strictPort",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "e2e": "playwright test",
+    "lint": "eslint .",
+    "typecheck": "tsc -b",
+    "art:build": "tsx tools/art-build.ts",
+    "art:pack": "tsx tools/pack-atlas.ts",
+    "art:terrain": "blender -b --factory-startup --python art/blender/render_terrain.py",
+    "map:gen": "tsx tools/mapgen.ts",
+    "sim:headless": "tsx tools/sim-headless.ts",
+    "bench:sim": "tsx tools/bench-sim.ts",
+    "balance": "tsx tools/balance.ts",
+    "desktop:dev": "electron .",
+    "desktop:build": "electron-builder"
+  },
+  "dependencies": {
+    "@babylonjs/core": "9.27.1",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "zustand": "5.0.15"
+  },
+  "devDependencies": {
+    "vite": "8.3.0",
+    "typescript": "7.0.2",
+    "vitest": "5.0.1",
+    "@playwright/test": "1.63.0",
+    "sharp": "0.35.4",
+    "maxrects-packer": "2.7.3",
+    "tsx": "4.23.15",
+    "eslint": "10.11.0",
+    "@bordev/eslint-config": "0.0.0",
+    "prettier": "3.9.8",
+    "@vitejs/plugin-react": "6.1.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@types/node": "26.6.2"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true
+  },
+  "overrides": {
+    "ts-api-utils": {
+      "typescript": "6.0.3"
+    }
+  }
+}
