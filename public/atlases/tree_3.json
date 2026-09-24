@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "id": "tree_3",
+  "pages": [
+    {
+      "image": "tree_3_0.png",
+      "mask": "tree_3_0_mask.png",
+      "shadow": "tree_3_0_shadow.png"
+    }
+  ],
+  "fps": 12,
+  "anims": {
+    "idle": {
+      "frames": 1,
+      "loop": true,
+      "dirs": 1
+    }
+  },
+  "frames": {
+    "idle/0/0": {
+      "page": 0,
+      "x": 2,
+      "y": 2,
+      "w": 213,
+      "h": 184,
+      "ax": 62,
+      "ay": 156
+    }
+  }
+}

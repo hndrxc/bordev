@@ -40,10 +40,16 @@ Phases:
 6. `render_terrain.py` producing grass, dirt, sand, shallow, water, rock-ground textures.
 
 Goalposts:
-- [ ] `npm run art:build && npm run art:pack` regenerates all M1 atlases from scratch on this machine; a second run skips everything (cache).
-- [ ] Calibration test passes.
-- [ ] Each atlas JSON validates against the overview format (Vitest schema test over `public/atlases/*.json`).
-- [ ] Terrain textures tile seamlessly (Vitest: left/right and top/bottom edge pixel columns differ by mean < 3/255).
+- [x] `npm run art:build && npm run art:pack` regenerates all M1 atlases from scratch on this machine; a second run skips everything (cache).
+- [x] Calibration test passes.
+- [x] Each atlas JSON validates against the overview format (Vitest schema test over `public/atlases/*.json`).
+- [x] Terrain textures tile seamlessly (Vitest: left/right and top/bottom edge pixel columns differ by mean < 3/255).
+
+M1 verified on Blender 5.2.2 LTS: generated all 15 assets (650 atlas frames, 1,325 raw body/mask/shadow passes), 15 atlas pages and six 512×512 terrain textures. The initial render was interrupted after sprites completed; resuming generated terrain and packed every atlas. A subsequent `npm run art:build && npm run art:pack` skipped all 15 assets, terrain, and all atlas packs in 2.4 s.
+
+`npm run typecheck`, `npm run lint`, `npm test` (16 tests), and `npm run build` passed. Calibration is exactly 96×48 with anchor (48,24), red +X right/down and blue +Z left/down; arrow direction tests pass. Public atlas schema/frame-count/pass-alignment tests and all six terrain seam tests pass. A full raw-image smoke found zero occupied outer-edge pixels across all 1,325 passes and visible changes in every multi-frame animation; the packed asset contact sheet was inspected. Freestyle was confirmed by an actual on/off render comparison; building/doodad shadows are separate ground-cast shadows, not duplicated body silhouettes.
+
+Art commands, cache inputs, partial-render invocation, atlas page/trim conventions, and Blender 5.2 compositor details are documented in the overview. The existing non-fatal Vite 500 kB chunk warning remains unchanged. M2 world rendering is not part of this milestone.
 
 ### M2 — World rendering
 

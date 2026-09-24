@@ -20,7 +20,7 @@
     "typecheck": "tsc -b",
     "art:build": "tsx tools/art-build.ts",
     "art:pack": "tsx tools/pack-atlas.ts",
-    "art:terrain": "blender -b --factory-startup --python art/blender/render_terrain.py",
+    "art:terrain": "blender -b --factory-startup -t 2 --python-exit-code 1 --python art/blender/render_terrain.py",
     "map:gen": "tsx tools/mapgen.ts",
     "sim:headless": "tsx tools/sim-headless.ts",
     "bench:sim": "tsx tools/bench-sim.ts",

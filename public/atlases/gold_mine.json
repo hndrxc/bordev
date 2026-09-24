@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "id": "gold_mine",
+  "pages": [
+    {
+      "image": "gold_mine_0.png",
+      "mask": "gold_mine_0_mask.png",
+      "shadow": "gold_mine_0_shadow.png"
+    }
+  ],
+  "fps": 12,
+  "anims": {
+    "idle": {
+      "frames": 1,
+      "loop": true,
+      "dirs": 1
+    }
+  },
+  "frames": {
+    "idle/0/0": {
+      "page": 0,
+      "x": 2,
+      "y": 2,
+      "w": 157,
+      "h": 138,
+      "ax": 58,
+      "ay": 96
+    }
+  }
+}

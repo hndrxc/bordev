@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "id": "tree_4",
+  "pages": [
+    {
+      "image": "tree_4_0.png",
+      "mask": "tree_4_0_mask.png",
+      "shadow": "tree_4_0_shadow.png"
+    }
+  ],
+  "fps": 12,
+  "anims": {
+    "idle": {
+      "frames": 1,
+      "loop": true,
+      "dirs": 1
+    }
+  },
+  "frames": {
+    "idle/0/0": {
+      "page": 0,
+      "x": 2,
+      "y": 2,
+      "w": 133,
+      "h": 147,
+      "ax": 41,
+      "ay": 124
+    }
+  }
+}

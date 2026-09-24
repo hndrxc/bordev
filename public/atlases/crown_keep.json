@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "id": "crown_keep",
+  "pages": [
+    {
+      "image": "crown_keep_0.png",
+      "mask": "crown_keep_0_mask.png",
+      "shadow": "crown_keep_0_shadow.png"
+    }
+  ],
+  "fps": 12,
+  "anims": {
+    "construct": {
+      "frames": 3,
+      "loop": false,
+      "dirs": 1
+    },
+    "damaged": {
+      "frames": 1,
+      "loop": false,
+      "dirs": 1
+    },
+    "idle": {
+      "frames": 1,
+      "loop": true,
+      "dirs": 1
+    },
+    "rubble": {
+      "frames": 1,
+      "loop": false,
+      "dirs": 1
+    }
+  },
+  "frames": {
+    "construct/0/0": {
+      "page": 0,
+      "x": 2,
+      "y": 659,
+      "w": 481,
+      "h": 327,
+      "ax": 192,
+      "ay": 230
+    },
+    "construct/0/1": {
+      "page": 0,
+      "x": 2,
+      "y": 329,
+      "w": 492,
+      "h": 328,
+      "ax": 192,
+      "ay": 230
+    },
+    "construct/0/2": {
+      "page": 0,
+      "x": 496,
+      "y": 329,
+      "w": 482,
+      "h": 328,
+      "ax": 192,
+      "ay": 230
+    },
+    "damaged/0/0": {
+      "page": 0,
+      "x": 2,
+      "y": 2,
+      "w": 499,
+      "h": 325,
+      "ax": 206,
+      "ay": 228
+    },
+    "idle/0/0": {
+      "page": 0,
+      "x": 503,
+      "y": 2,
+      "w": 470,
+      "h": 325,
+      "ax": 188,
+      "ay": 228
+    },
+    "rubble/0/0": {
+      "page": 0,
+      "x": 485,
+      "y": 659,
+      "w": 317,
+      "h": 179,
+      "ax": 179,
+      "ay": 84
+    }
+  }
+}
