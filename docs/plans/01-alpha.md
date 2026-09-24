@@ -66,6 +66,10 @@ Goalposts:
 - [ ] Sprites behind (north of) a Keep are hidden by it; sprites in front draw over it.
 - [ ] Draw calls for the debug scene ≤ 30 (`scene.getEngine()._drawCalls` / instrumentation logged in `stats()`).
 
+Implementation notes (M0/M1 review):
+- `tools/pack-atlas.ts` sizes pages to their content (`smart: true, pot: false`; e.g. `calib_tile` 100×52, `crown_peasant` 1254×1202), not 2048×2048, and the atlas JSON records no page dimensions. `AtlasCache`/`SpriteBatch` must normalise `iUV` by each loaded texture's actual size. Correct the overview's "packs into 2048×2048 pages" wording in the same change.
+- Building, mine and doodad sprites anchor at the footprint centre (Blender origin). Place them at top-left tile + size/2; the Keep footprint goalpost verifies this. Document the anchor rule in the overview's Sprite pipeline and Map format sections.
+
 ### M3 — Simulation core
 
 Phases:
@@ -95,6 +99,9 @@ Goalposts:
 - [ ] Ctrl+1 then 1 reselects the group; hotkey `W` stops them.
 - [ ] HUD numbers match sim state after cheats (`cheats.resources(1000)` → TopBar shows 1000 food and gold).
 
+Implementation notes (M0/M1 review): fix before M5 starts rendering cart loading.
+- `crown_ox_cart` `load` is declared `loop: true` in `art/manifest.json` and `anim.CART_ANIMS`, but the clip is a one-way fill (cargo scale 0.12 → 1.0). At 12 fps it would refill about 18 times per 6 s load. Set `loop: false` in both places (last frame holds) or make the clip cyclic, then rebuild and repack `crown_ox_cart`.
+
 ### M5 — Economy and construction
 
 Phases:
@@ -108,6 +115,12 @@ Goalposts:
 - [ ] Headless test: from standard start with scripted commands (build 2 farms, 1 cottage, train 1 more cart), after 5 game-minutes food ≥ 600 and gold ≥ 500 collected in total (sim counters).
 - [ ] Building a barracks while faith produced is 5 and used would become 7 puts the player in Low Faith; a unit then trains in 2× its listed time (Vitest).
 - [ ] A mine with 3 carts never has more than 2 loading at once and depletes exactly at 6000 delivered + carried.
+
+Implementation notes (M0/M1 review): harden the sprite pipeline before phase 5 renders new building art (and before M6 adds the remaining Crown units).
+- `art:pack` must refuse an asset whose `build/renders/<id>/.hash` marker is missing. Today it packs whatever frames exist, so running it after an interrupted `art:build` writes a mix of stale and new frames into tracked `public/atlases/` and exits 0.
+- Add the resolved `maxrects-packer` version to the atlas cache key (`tools/pack-atlas.ts`, next to `sharp.versions`); it alone decides frame placement and page splits.
+- Frame counts live in both `art/manifest.json` and `art/blender/lib/anim.py`, but `render_asset.py` only cross-checks animation names. Validate counts and loop flags too.
+- Delete unused `anim.keyframe`, `anim.STATIC_ANIMS` and the no-op per-frame `scene.frame_set` in `render_asset.py`: clips pose objects directly.
 
 ### M6 — Production and progression
 

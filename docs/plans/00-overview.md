@@ -206,6 +206,8 @@ M0 development setup: Node 26 (`.nvmrc` pins 26.8.1), npm 12, then `npm ci`. Run
 
 TypeScript 7.0.2 runs typecheck/build. Current typescript-eslint 8.70.1 requires the TypeScript 6 compiler API, so `tools/eslint/` is an npm workspace with TypeScript 6.0.3 solely for linting. The `ts-api-utils` override keeps that parser dependency from resolving against the incompatible TypeScript 7 API. Do not use `--force` or `--legacy-peer-deps`. npm 12 explicitly permits the pinned esbuild install script via `allowScripts`.
 
+`tsc -b` covers three projects: `tsconfig.app.json` (browser `src/` outside sim/data, excluding tests), `tsconfig.sim.json` (all of `src/sim` and `src/data`, including their tests; ES2023 only, no DOM or Node types) and `tsconfig.node.json` (configs, `tools/`, `tests/`, and every other `src/**/*.test.ts`). New Vitest files are type-checked by whichever project owns their directory.
+
 All fixed script names were reserved in M0. M1 implements `art:build`, `art:pack`, and `art:terrain`; map generation, headless simulation, benchmarks, balance, and desktop commands remain assigned to their later milestones.
 
 M1 art setup: Blender 5.2 LTS must be available as `blender` on `PATH` (verified with 5.2.2 on this machine). Run `npm run art:build && npm run art:pack` to generate sprites, all six terrain textures, and atlases. Generated `public/atlases/` and `public/terrain/` files belong in version control; raw renders, logs, and caches live in ignored `build/`. `npm test` consumes the generated public files and does not require Blender.
