@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { Renderer } from '../render/Renderer';
+import { GameSession } from '../game/GameSession';
 
 export function GameScreen() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -8,8 +8,8 @@ export function GameScreen() {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const renderer = new Renderer(canvas);
-    return () => renderer.dispose();
+    const session = new GameSession(canvas);
+    return () => session.dispose();
   }, []);
 
   return (

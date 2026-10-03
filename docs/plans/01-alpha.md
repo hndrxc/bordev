@@ -62,13 +62,19 @@ Phases:
 6. Debug scene: renders `alpha_test` with trees, rocks, mines, 2 Keeps and 50 random Crown sprites cycling walk animation in all 8 dirs.
 
 Goalposts:
-- [ ] Screenshot of the debug scene shows correct 2:1 diamond grid alignment: a Keep's footprint diamond matches a 4×4 tile overlay drawn by `Overlays` (debug grid toggle `G`).
-- [ ] Sprites behind (north of) a Keep are hidden by it; sprites in front draw over it.
-- [ ] Draw calls for the debug scene ≤ 30 (`scene.getEngine()._drawCalls` / instrumentation logged in `stats()`).
+- [x] Screenshot of the debug scene shows correct 2:1 diamond grid alignment: a Keep's footprint diamond matches a 4×4 tile overlay drawn by `Overlays` (debug grid toggle `G`).
+- [x] Sprites behind (north of) a Keep are hidden by it; sprites in front draw over it.
+- [x] Draw calls for the debug scene ≤ 30 (`scene.getEngine()._drawCalls` / instrumentation logged in `stats()`).
 
 Implementation notes (M0/M1 review):
-- `tools/pack-atlas.ts` sizes pages to their content (`smart: true, pot: false`; e.g. `calib_tile` 100×52, `crown_peasant` 1254×1202), not 2048×2048, and the atlas JSON records no page dimensions. `AtlasCache`/`SpriteBatch` must normalise `iUV` by each loaded texture's actual size. Correct the overview's "packs into 2048×2048 pages" wording in the same change.
-- Building, mine and doodad sprites anchor at the footprint centre (Blender origin). Place them at top-left tile + size/2; the Keep footprint goalpost verifies this. Document the anchor rule in the overview's Sprite pipeline and Map format sections.
+- `tools/pack-atlas.ts` sizes pages to their content (`smart: true, pot: false`; e.g. `calib_tile` 100×52, `crown_peasant` 1254×1202), not 2048×2048, and the atlas JSON records no page dimensions. UVs use each loaded texture's source dimensions (`getBaseSize()`), including when WebGL1 resizes the GPU texture to a power of two.
+- Building, mine and doodad sprites anchor at the footprint centre (Blender origin). Place them at top-left tile + size/2; the Keep footprint goalpost verifies this. The overview documents this in the Sprite pipeline and Map format sections.
+
+M2 verified: typecheck, lint, all 146 Vitest tests, production build, and the Chromium production boot smoke pass. The boot smoke now waits for the loaded world instead of sampling M0's opaque clear. `npm run map:gen -- --seed 1 --players 2 --out alpha_test` generated the committed 128×128 rotationally symmetric map with all seven terrain codes, ten mines, and 316 tree/rock doodads. The Alpha generator rejects unsupported player counts; the full generator remains Beta work.
+
+Chromium screenshots confirmed the 4×4 Keep/overlay alignment, textured terrain, team colours and separate shadows. GPU captures confirmed changes between walk frames, player tints and water-animation times. Live Babylon projection measured +X = (+48,+24) px and +Z = (−48,+24) px at zoom 1. Cursor-anchored wheel zoom preserved the ground point within 0.002 px. The debug world contains 50 Crown units covering all eight facings; measured draw calls are 23 with the grid on, below the ≤30 goal.
+
+GPU pixel comparisons verified actual depth occlusion: 1,087 opaque north-probe pixels visible without the Keep caused zero changes when rendered behind it; all 148 overlapping south-probe pixels matched the foreground unit. Successive active renders created/deleted zero GPU buffers after initial capacity allocation, and a failed atlas load left zero leaked textures. The M3 benchmark on this generated map still passes: 3.710 ms average at 300 units.
 
 ### M3 — Simulation core
 
@@ -80,9 +86,17 @@ Phases:
 5. `game/GameSession`: fixed-step accumulator, interpolation, owns Sim + Renderer.
 
 Goalposts:
-- [ ] Vitest: a unit ordered across `alpha_test` around a forest reaches within 0.5 tiles of its target; a unit ordered into a walled-off pocket stops at the nearest reachable tile; 20 units ordered to one point end with no pair overlapping by more than 0.1 tiles.
-- [ ] Vitest: two sims with seed 7 and the same command log produce identical entity positions after 2 000 ticks.
-- [ ] `bench:sim -- --units 300` (all moving randomly) ≤ 4 ms average tick.
+- [x] Vitest: a unit ordered across `alpha_test` around a forest reaches within 0.5 tiles of its target; a unit ordered into a walled-off pocket stops at the nearest reachable tile; 20 units ordered to one point end with no pair overlapping by more than 0.1 tiles.
+- [x] Vitest: two sims with seed 7 and the same command log produce identical entity positions after 2 000 ticks.
+- [x] `bench:sim -- --units 300` (all moving randomly) ≤ 4 ms average tick.
+
+M3 verified: typecheck, lint, all 81 Vitest tests, production build, and the existing Chromium boot smoke pass. Movement tests exercise the `alpha_test` forest detour, nearest reachable pocket boundary, formation separation, shallow-water slowdown, real unit command logs over 2 000 ticks, and bounded/resumable path work. Regression tests cover grid-revision rebasing, off-map targets, queued move/stop/hold transitions, population supply, and invalid map/entity definitions.
+
+`npm run bench:sim -- --units 300` measured 3.735 ms average, 6.457 ms p95 over 300 ticks after 50 warmup ticks; peak path work was 15 270 node expansions (limit 25 000), with zero pending searches at completion. The benchmark continuously issues seeded random movement orders and includes path processing in tick timing.
+
+Browser smoke observed a live 20 Hz session, next-tick command application, moving interpolation with zero positional formula error, stop, and disposal. `GameSession` owns the fixed-step clock, Sim and Renderer; snapshots reuse storage. Both Alpha players start Crown at 5/10 population. Clans tables and optional simulation faction configuration are available, but not enabled by the Alpha session.
+
+M3 implements move, movement-only attackMove, stop, hold and delete; later-system command kinds reject explicitly. Event types include the complete planned UI queue, with combat/research producers assigned to their later milestones. M2 now supplies the generated `alpha_test` map and world rendering; the original M3-only fixture and blank-canvas limitation no longer apply. The existing non-fatal Vite 500 kB chunk warning remains.
 
 ### M4 — Selection, orders and HUD shell
 

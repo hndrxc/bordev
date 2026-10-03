@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import type { GameSession, SessionStats } from '../../src/game/GameSession';
 
 test('boots a full-window game canvas without browser errors', async ({
   page,
@@ -11,7 +12,7 @@ test('boots a full-window game canvas without browser errors', async ({
   });
   page.on('pageerror', (error) => pageErrors.push(error.message));
 
-  await page.goto('/');
+  await page.goto('/?debug=1');
 
   const canvas = page.getByLabel('Game view', { exact: true });
   await expect(canvas).toBeVisible();
@@ -32,31 +33,27 @@ test('boots a full-window game canvas without browser errors', async ({
       height: viewport!.height,
     });
 
-  // Sample during animation frames, before the browser discards the WebGL
-  // drawing buffer. An untouched canvas is transparent; M0 renders an opaque clear.
-  await page.waitForFunction(
-    () => {
-      const gameCanvas = document.querySelector<HTMLCanvasElement>(
-        'canvas[aria-label="Game view"]',
-      );
-      if (!gameCanvas || gameCanvas.width === 0 || gameCanvas.height === 0)
-        return false;
+  await page.waitForFunction(() => {
+    const bordev = window.__bordev;
+    if (!bordev) return false;
 
-      const sample = document.createElement('canvas');
-      sample.width = 1;
-      sample.height = 1;
-      const context = sample.getContext('2d');
-      if (!context)
-        throw new Error('Could not create a canvas sampling context');
-      context.drawImage(gameCanvas, 0, 0, 1, 1);
-      return context.getImageData(0, 0, 1, 1).data[3] === 255;
-    },
-    undefined,
-    { polling: 'raf' },
-  );
+    const session: GameSession = bordev.session;
+    if (session.loadError) {
+      throw new Error(`Game session failed to load: ${session.loadError}`);
+    }
 
-  // Only query WebGL after observing a rendered frame, so the test cannot
-  // initialize a context on an otherwise unused canvas and claim boot succeeded.
+    const stats: SessionStats = bordev.stats();
+    if (stats.loadError) {
+      throw new Error(`Game session failed to load: ${stats.loadError}`);
+    }
+
+    return (
+      session.isLoaded &&
+      stats.isLoaded &&
+      stats.renderer?.isReady === true
+    );
+  });
+
   const hasWebGL = await canvas.evaluate((element: HTMLCanvasElement) => {
     const context = element.getContext('webgl2') ?? element.getContext('webgl');
     return context !== null && !context.isContextLost();
