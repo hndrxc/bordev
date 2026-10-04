@@ -6,6 +6,9 @@ import { cloneCommand } from '../sim/commands';
 import type { GameMap } from '../sim/map';
 import type { Command } from '../sim/commands';
 import type { Entity } from '../sim/entity';
+import { InputController } from '../input/InputController';
+import { publishHud, resetHud } from '../ui/hud';
+
 export { SIM_DT };
 export const DEFAULT_MAP_URL = '/maps/alpha_test.json';
 export const DEFAULT_SEED = 7;
@@ -32,6 +35,7 @@ export interface InterpolatedEntity {
   built?: boolean;
   buildProgress?: number;
   goldRemaining?: number;
+  rallyPoint?: { x: number; z: number };
   raw: Entity;
 }
 
@@ -63,8 +67,113 @@ export interface GameSessionOptions {
   debugScene?: boolean;
 }
 
+export interface GameCheats {
+  resources: (n: number) => void;
+  spawnPeasants: (count: number, x: number, z: number) => number[];
+}
+
+interface PassableGrid {
+  isPassable(x: number, z: number, player: number): boolean;
+}
+
+function findNearbyPassablePoints(
+  grid: PassableGrid,
+  size: number,
+  player: number,
+  centerX: number,
+  centerZ: number,
+  count: number,
+  existingEntities: readonly (Entity | undefined)[],
+): Array<{ x: number; z: number }> {
+  const points: Array<{ x: number; z: number }> = [];
+  const cx = Math.floor(centerX);
+  const cz = Math.floor(centerZ);
+
+  const maxSearchRadius = Math.min(
+    size,
+    Math.max(15, Math.ceil(Math.sqrt(count) * 3)),
+  );
+  const nearbyEntities: Array<{
+    x: number;
+    z: number;
+    minClearanceSq: number;
+  }> = [];
+  for (let i = 0; i < existingEntities.length; i++) {
+    const e = existingEntities[i];
+    if (!e) continue;
+    const dx = e.x - centerX;
+    const dz = e.z - centerZ;
+    if (
+      Math.abs(dx) <= maxSearchRadius + 2 &&
+      Math.abs(dz) <= maxSearchRadius + 2
+    ) {
+      const radius =
+        'radius' in e && typeof e.radius === 'number' ? e.radius : 0.4;
+      const minClearance = radius + 0.3;
+      nearbyEntities.push({
+        x: e.x,
+        z: e.z,
+        minClearanceSq: minClearance * minClearance,
+      });
+    }
+  }
+
+  const candidates: Array<{ dx: number; dz: number; distSq: number }> = [];
+  for (let r = 0; r <= maxSearchRadius; r++) {
+    for (let dx = -r; dx <= r; dx++) {
+      for (let dz = -r; dz <= r; dz++) {
+        if (Math.max(Math.abs(dx), Math.abs(dz)) === r) {
+          candidates.push({ dx, dz, distSq: dx * dx + dz * dz });
+        }
+      }
+    }
+  }
+  candidates.sort((a, b) => a.distSq - b.distSq);
+
+  for (let i = 0; i < candidates.length && points.length < count; i++) {
+    const cand = candidates[i];
+    const tx = cx + cand.dx;
+    const tz = cz + cand.dz;
+    if (tx < 0 || tx >= size || tz < 0 || tz >= size) continue;
+
+    const px = tx + 0.5;
+    const pz = tz + 0.5;
+
+    if (!grid.isPassable(px, pz, player)) continue;
+
+    let overlaps = false;
+    for (let j = 0; j < points.length; j++) {
+      const pt = points[j];
+      const ddx = pt.x - px;
+      const ddz = pt.z - pz;
+      if (ddx * ddx + ddz * ddz < 0.64) {
+        overlaps = true;
+        break;
+      }
+    }
+    if (overlaps) continue;
+
+    for (let j = 0; j < nearbyEntities.length; j++) {
+      const ne = nearbyEntities[j];
+      const ddx = ne.x - px;
+      const ddz = ne.z - pz;
+      if (ddx * ddx + ddz * ddz < ne.minClearanceSq) {
+        overlaps = true;
+        break;
+      }
+    }
+    if (overlaps) continue;
+
+    points.push({ x: px, z: pz });
+  }
+
+  return points;
+}
+
 export class GameSession {
   readonly renderer: Renderer;
+  readonly input: InputController;
+  private readonly _cheats: GameCheats;
 
   private _sim: Sim | null = null;
   private _map: GameMap | null = null;
@@ -94,10 +203,66 @@ export class GameSession {
   private readonly _abortController = new AbortController();
   private readonly _pendingCommands: Command[] = [];
 
+  private _lastHudTick = -1;
+
   constructor(canvas: HTMLCanvasElement, options?: GameSessionOptions) {
     this._maxAccumulator = options?.maxAccumulator ?? DEFAULT_MAX_ACCUMULATOR;
     this._debugSceneEnabled = options?.debugScene ?? true;
+
+    // Reset HUD on session initialization
+    resetHud();
+
+    // Construct renderer, then input controller
     this.renderer = new Renderer(canvas);
+    this.input = new InputController(canvas, this);
+
+    this._cheats = {
+      resources: (n: number) => {
+        if (!this._sim) return;
+        for (let i = 0; i < this._sim.world.players.length; i++) {
+          const p = this._sim.world.players[i];
+          p.food = n;
+          p.gold = n;
+        }
+        publishHud(this);
+      },
+      spawnPeasants: (count: number, x: number, z: number) => {
+        if (!this._sim || count <= 0) return [];
+
+        const world = this._sim.world;
+        const grid = world.grid;
+        const mapSize = world.map.size;
+        const player0Faction = world.players[0]?.faction ?? 'crown';
+
+        const points = findNearbyPassablePoints(
+          grid,
+          mapSize,
+          0,
+          x,
+          z,
+          count,
+          world.entities,
+        );
+
+        const createdIds: number[] = [];
+        for (let i = 0; i < points.length; i++) {
+          const pt = points[i];
+          const unit = world.spawnUnit(
+            0,
+            'peasant',
+            pt.x,
+            pt.z,
+            player0Faction,
+          );
+          createdIds.push(unit.id);
+        }
+
+        this.updateSnapshot(this._alpha);
+        publishHud(this);
+
+        return createdIds;
+      },
+    };
 
     // Initial explicit render clears canvas immediately
     this.renderer.render();
@@ -136,6 +301,9 @@ export class GameSession {
   get snapshot(): SessionSnapshot | null {
     return this._sim !== null ? this._snapshot : null;
   }
+  get cheats(): GameCheats {
+    return this._cheats;
+  }
 
   issue(cmd: Command): void {
     if (this._disposed) return;
@@ -166,7 +334,8 @@ export class GameSession {
       accumulator: Math.round(this._accumulator * 1000) / 1000,
       alpha: Math.round(this._alpha * 1000) / 1000,
       entitiesCount: this._sim
-        ? this._sim.world.entities.filter((e): e is Entity => e !== undefined).length
+        ? this._sim.world.entities.filter((e): e is Entity => e !== undefined)
+            .length
         : 0,
       isLoaded: this._sim !== null,
       loadError: this._loadError,
@@ -200,9 +369,11 @@ export class GameSession {
     }
 
     // Step simulation at authoritative fixed SIM_DT
+    let stepped = false;
     while (this._accumulator >= SIM_DT) {
       if (this._sim) {
         this._sim.step();
+        stepped = true;
       }
       this._accumulator -= SIM_DT;
     }
@@ -211,6 +382,18 @@ export class GameSession {
 
     // Update snapshot with interpolated entity positions
     this.updateSnapshot(this._alpha);
+
+    // Publish HUD at 10 Hz measured in sim ticks/time (every 2 sim ticks = 0.10s)
+    if (this._sim && stepped) {
+      const currentTick = this._sim.world.tick;
+      if (currentTick - this._lastHudTick >= 2) {
+        this._lastHudTick = currentTick;
+        publishHud(this);
+      }
+    }
+
+    // Update input controller BEFORE render (updates camera, pruning, setInteraction)
+    this.input.update(delta, now);
 
     // Explicitly render canvas frame with snapshot and render time
     this.renderer.render(this._sim ? this._snapshot : undefined, now / 1000);
@@ -270,6 +453,7 @@ export class GameSession {
       slot.built = 'built' in e ? e.built : undefined;
       slot.buildProgress = 'buildProgress' in e ? e.buildProgress : undefined;
       slot.goldRemaining = 'goldRemaining' in e ? e.goldRemaining : undefined;
+      slot.rallyPoint = 'rallyPoint' in e ? e.rallyPoint : undefined;
       count++;
     }
 
@@ -287,7 +471,9 @@ export class GameSession {
       });
 
       if (!response.ok) {
-        throw new Error(`Failed to load map from ${mapUrl}: HTTP ${response.status}`);
+        throw new Error(
+          `Failed to load map from ${mapUrl}: HTTP ${response.status}`,
+        );
       }
 
       const json = (await response.json()) as unknown;
@@ -319,6 +505,10 @@ export class GameSession {
 
       // Initial snapshot
       this.updateSnapshot(0);
+
+      // Initial HUD publish after map load
+      this._lastHudTick = sim.world.tick;
+      publishHud(this);
     } catch (error) {
       if (
         this._disposed ||
@@ -348,6 +538,7 @@ export class GameSession {
         },
         issue: (cmd: Command) => this.issue(cmd),
         stats: () => this.getStats(),
+        cheats: this._cheats,
       };
     }
   }
@@ -362,7 +553,9 @@ export class GameSession {
     }
 
     this._abortController.abort();
+    this.input.dispose();
     this.renderer.dispose();
+    resetHud();
 
     if (typeof window !== 'undefined' && window.__bordev?.session === this) {
       delete window.__bordev;
@@ -370,14 +563,17 @@ export class GameSession {
   }
 }
 
+export interface BordevDebugApi {
+  session: GameSession;
+  renderer?: Renderer;
+  readonly sim: Sim | null;
+  issue: (cmd: Command) => void;
+  stats: () => SessionStats;
+  cheats: GameCheats;
+}
+
 declare global {
   interface Window {
-    __bordev?: {
-      session: GameSession;
-      renderer?: Renderer;
-      readonly sim: Sim | null;
-      issue: (cmd: Command) => void;
-      stats: () => SessionStats;
-    };
+    __bordev?: BordevDebugApi;
   }
 }

@@ -175,7 +175,7 @@ bordev/
     main.tsx            React root
     app/                screens: MainMenu, SkirmishSetup, GameScreen, Results, Settings
     ui/                 HUD components: TopBar, SelectionPanel, CommandCard, Minimap, Alerts; zustand store hud.ts
-    game/               GameSession: owns Sim, Renderer, Input; fixed-step loop; HUD snapshots
+    game/               GameSession: owns Sim, Renderer, InputController; fixed-step loop; HUD zustand 10 Hz snapshots
     input/              CameraController, SelectionController, OrderController, Hotkeys, PlacementController
     render/             Renderer, IsoCamera, Terrain, SpriteBatch, AtlasCache, FogTexture, Overlays (selection ellipses, health bars, placement ghost, rally lines)
     sim/                PURE TypeScript. Must not import babylon, react, DOM or src/render|ui|input (enforced by eslint no-restricted-imports)
@@ -203,6 +203,8 @@ bordev/
 `dev` (vite), `build` (tsc -b && vite build), `preview`, `test` (vitest run), `test:watch`, `e2e` (playwright test), `lint`, `typecheck`, `art:build` (tsx tools/art-build.ts), `art:pack` (tsx tools/pack-atlas.ts), `art:terrain`, `map:gen` (tsx tools/mapgen.ts), `sim:headless` (tsx tools/sim-headless.ts), `bench:sim` (tsx tools/bench-sim.ts), `balance` (tsx tools/balance.ts), `desktop:dev`, `desktop:build` (Pre-release).
 
 M0 development setup: Node 26 (`.nvmrc` pins 26.8.1), npm 12, then `npm ci`. Run `npm run dev` for development. Browser tests require `npx playwright install --with-deps chromium` (Linux system dependencies need sudo), followed by `npm run build && npm run e2e`. CI performs these steps on Ubuntu.
+
+Playwright runs one worker: simultaneous SwiftShader worlds contend for CPU and can starve browser queries on headless hosts. The suite retains real mouse/keyboard interaction and WebGL rendering; it does not use retries or replace the renderer with mocks.
 
 TypeScript 7.0.2 runs typecheck/build. Current typescript-eslint 8.70.1 requires the TypeScript 6 compiler API, so `tools/eslint/` is an npm workspace with TypeScript 6.0.3 solely for linting. The `ts-api-utils` override keeps that parser dependency from resolving against the incompatible TypeScript 7 API. Do not use `--force` or `--legacy-peer-deps`. npm 12 explicitly permits the pinned esbuild install script via `allowScripts`.
 
@@ -232,6 +234,10 @@ M3 runtime: `new Sim(map, seed, playerFactions?)` defaults every player to Crown
 
 Run `npm run bench:sim -- --units 300`; optional flags are `--ticks`, `--warmup`, `--seed`, `--map <path>`, and `--max-ms`. Defaults: 300 measured ticks, 50 warmup ticks, seed 42, `public/maps/alpha_test.json`, 4 ms limit. The report includes tick percentiles and path-expansion counters; at 300 or more units a missed average limit exits nonzero.
 
+`GameSession` owns `InputController` plus `Sim` and `Renderer`. The fixed-step loop advances `Sim` at 20 Hz, updates `InputController` before rendering, and drives explicit `Renderer` frames using interpolated entity snapshots. State synchronization samples game state to the React `zustand` HUD store at 10 Hz (every 2 sim ticks / 0.10 s). Supported command kinds in sim are `move`, movement-only `attackMove`, `stop`, `hold`, `delete`, and `setRally`. The supported `setRally` command is applied at the start of the next tick and is owner-validated: verifying `ent && ent.kind === 'building' && ent.player === cmd.player` before updating `ent.rallyPoint = { x: cmd.x, z: cmd.z }`. Other command kinds throw until their systems land.
+
+Contextual orders and future systems: Right-clicking with units or buildings routes orders contextually. Incomplete future systems display informative HUD status messages instead of issuing unhandled commands: enemy attack orders notify that combat requires Milestone 7; gold mine targeting with carts notifies that the mining economy requires Milestone 5; farm targeting with peasants notifies that the farming economy requires Milestone 5; and targeting unfinished or damaged buildings with peasants notifies that construction and repair require Milestone 5. On the command card, peasant economic and military construction submenus are disabled with tooltips requiring Milestone 5 (Economy & Construction), and Town Center unit training (peasant, ox cart) buttons are disabled with tooltips requiring Milestone 6 (Production). Right-clicking the ground while a single owned building is selected issues the supported `setRally` command.
+
 ### Rendering contract
 
 - One Babylon `Engine` + `Scene`. Orthographic camera, pitch 30° below horizontal, yaw 45°, so a 1×1 world tile projects to a 96×48 px diamond at zoom 1. Pixels per world unit `PPU = 96/√2 ≈ 67.882`. Ortho bounds = `±canvasPx/2 / (PPU·zoom)`.
@@ -239,8 +245,9 @@ Run `npm run bench:sim -- --units 300`; optional flags are `--ticks`, `--warmup`
 - Terrain: one 128×128 ground mesh, `ShaderMaterial` blending tiling ground textures by two RGBA splat textures (splat0 = grass, dirt, sand, shallow; splat1 = water, rock-ground, unused, unused) built CPU-side at 4 texels per tile with bilinear filtering and noise-perturbed lookup; ground texture repeats once per 4 tiles; water animates UV. Terrain renders in rendering group 0 with depth write off.
 - Sprites: one `SpriteBatch` per atlas page = a unit quad with thin instances. Per-instance attributes: `iPos` (vec3 world anchor), `iUV` (vec4 atlas rect), `iSize` (vec4 w, h, anchorX, anchorY in px), `iTint` (vec4 team rgb, alpha). Vertex shader builds a camera-facing quad; the whole quad has the anchor's depth. Fragment: discard alpha < 0.5, alpha blend, depth test + write. Team colour: `rgb = mix(base.rgb, base.rgb * team * 1.25, mask.r)` from the page's mask texture. Instance buffers are updated in place each frame from interpolated sim state; capacity grows only when necessary.
 - Unit shadows are procedural ellipse quads (alpha 0.35, sized from unit radius) drawn after terrain, before sprites, no depth write. Building/doodad shadows come from a rendered shadow atlas layer drawn in the same pass.
-- Overlays: selection ellipses (under sprites), health bars and rally lines (on top, no depth test), placement ghost (building sprite, 50 % alpha, tinted green valid / red invalid per footprint tile).
-- Picking: screen → ground by ray/plane(y=0) math. Entity picking tests the cursor against each visible entity's trimmed sprite rect and chooses the one with the greatest iso depth (front-most).
+- Overlays: pooled thin instances and dynamic line vertex buffers updated in place without reallocation after initial warmup (keeping WebGL `createBuffer`/`deleteBuffer` counters at 0/0 during active movement): selection ellipses (rendering group 1, under sprites, thin instances), billboarded health bars (rendering group 3, on top, thin instances), drag selection marquee (group 3 quad), and order/rally lines (rendering group 3 dynamic line vertex buffer). Placement ghost uses building sprite at 50 % alpha, tinted green valid / red invalid per footprint tile.
+- Picking: screen → ground by ray/plane(y=0) math. Entity picking performs exact trimmed-frame picking against cached screen-space bounding boxes computed from each visible entity's trimmed atlas frame (`w, h, ax, ay` in px) and chooses the frontmost entity with the greatest iso depth.
+- Camera control: `CameraController` owns all camera user input: mouse wheel zoom (clamped 0.5–1.5 around cursor), middle-mouse drag pan with pointer capture, keyboard arrow keys, screen-edge scroll (8 px margin), `H` key centering on Town Center, and double-tapping control groups (0–9) to center camera on group members. `IsoCamera` maintains no user input listeners, providing projection only (orthographic Babylon camera setup, bounds clamping, world ↔ screen ↔ ground coordinate conversions).
 - Fog: `R8` 128×128 texture (0 / 128 / 255) with linear filtering; terrain darkens explored to 50 % desaturated, unexplored to black; sprites of non-visible enemies are not submitted.
 
 ### Sprite pipeline
@@ -256,7 +263,7 @@ Run `npm run bench:sim -- --units 300`; optional flags are `--ticks`, `--warmup`
   - Atlas JSON does not store page dimensions. Normalise pixel rectangles by each loaded PNG's source dimensions (`Texture.getBaseSize()`), not its potentially power-of-two-resized GPU dimensions (`getSize()`).
   - Unit anchors are their ground positions. Building, mine and doodad anchors are footprint centres: top-left tile + `(width/2, height/2)`, with a 1×1 footprint for doodads. This preserves Blender's projected origin after trimming.
 - `tools/art-build.ts` runs `blender -b --factory-startup --python art/blender/render_asset.py -- --asset <id> --out build/renders/<id>`, 4 processes in parallel with `-t 2` threads each, skipping assets whose script + lib hash (stored in `build/renders/<id>/.hash`) is unchanged.
-- Icons: per unit/building/upgrade a 64×64 portrait (kind `icon`), packed into `public/atlases/icons.json`.
+- Icons: per unit/building/upgrade a 64×64 portrait (kind `icon`), packed into `public/atlases/icons.json`. Portraits crop loaded atlas frames (e.g. `walk/0/0` for units, `idle/0/0` for buildings) using frame metadata and atlas sheet dimensions until dedicated icon assets arrive.
 - Terrain textures: `render_terrain.py` renders 512×512 seamless top-down textures using 4D noise on a torus mapping (vector = (cos u, sin u, cos v), W = sin v), Kuwahara-filtered, to `public/terrain/<type>.png`.
 
 ### Map format
@@ -267,7 +274,12 @@ M2 supplies the deterministic Alpha generator: `npm run map:gen -- --seed 1 --pl
 
 ### Debug hooks
 
-With `import.meta.env.DEV` or URL `?debug=1`: `window.__bordev = { session, sim, issue(cmd), cheats: { resources(n), reveal(), instantBuild(on) }, stats() }`. Playwright specs drive the game through these hooks.
+With `import.meta.env.DEV` or URL `?debug=1`: `window.__bordev = { session, renderer, sim, issue(cmd), cheats: { resources(n), spawnPeasants(count, x, z) }, stats() }`. Playwright specs drive the game through these hooks.
+
+Cheats:
+- `__bordev.cheats.resources(n)` immediately sets both food and gold to exact `n` for ALL players (`sim.world.players[i].food = n; p.gold = n`) and triggers a HUD publication.
+- `__bordev.cheats.spawnPeasants(count, x, z): number[]` spawns `count` peasants for player 0 at passable locations around (x, z), updates the session snapshot, publishes the HUD, and returns the array of created entity numeric IDs.
+- Unavailable cheats: `reveal()` and `instantBuild(on)` do not exist and are not exposed before their respective milestone systems (fog M8, construction M5) land.
 
 M3 exposes `session`, a live `sim` getter (null while loading), `issue`, and `stats`. `session.snapshot` contains `tick`, interpolation `alpha`, and entity previous/current/interpolated coordinates. `stats()` reports load/error/disposal state, frame count, tick, simulation time, FPS and accumulator. Economy/fog/construction cheats are not exposed before their systems exist.
 

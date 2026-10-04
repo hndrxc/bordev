@@ -131,25 +131,27 @@ export type Command =
   | CancelResearchCommand
   | SetRallyCommand;
 
-export const SUPPORTED_M3_COMMAND_KINDS = [
+export const SUPPORTED_COMMAND_KINDS = [
   'move',
   'attackMove',
   'stop',
   'hold',
   'delete',
+  'setRally',
 ] as const;
 
-export type SupportedM3CommandKind = (typeof SUPPORTED_M3_COMMAND_KINDS)[number];
+export type SupportedCommandKind = (typeof SUPPORTED_COMMAND_KINDS)[number];
 
-export function isSupportedM3CommandKind(
+export function isSupportedCommandKind(
   kind: Command['kind'],
-): kind is SupportedM3CommandKind {
+): kind is SupportedCommandKind {
   return (
     kind === 'move' ||
     kind === 'attackMove' ||
     kind === 'stop' ||
     kind === 'hold' ||
-    kind === 'delete'
+    kind === 'delete' ||
+    kind === 'setRally'
   );
 }
 

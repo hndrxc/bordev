@@ -1,21 +1,29 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { GameSession } from '../game/GameSession';
+import { Hud } from '../ui/HUD';
 
 export function GameScreen() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [session, setSession] = useState<GameSession | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const session = new GameSession(canvas);
-    return () => session.dispose();
+    const gameSession = new GameSession(canvas);
+    setSession(gameSession);
+
+    return () => {
+      setSession(null);
+      gameSession.dispose();
+    };
   }, []);
 
   return (
     <main className="game-screen">
       <canvas ref={canvasRef} aria-label="Game view" />
       <h1 className="title-overlay">bordev</h1>
+      <Hud session={session} />
     </main>
   );
 }

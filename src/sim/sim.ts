@@ -7,12 +7,11 @@ import {
   type Command,
   type SimEvent,
   cloneCommand,
-  isSupportedM3CommandKind,
+  isSupportedCommandKind,
 } from './commands.js';
 import type { UnitEntity } from './entity.js';
 import { assignFormationSlots, updateMovement } from './systems/movement.js';
 export const SIM_DT = 0.05;
-
 
 export class Sim {
   readonly world: World;
@@ -21,16 +20,20 @@ export class Sim {
 
   private pendingCommands: Command[] = [];
 
-  constructor(map: GameMap, seed = 1, playerFactions?: Record<number, Faction>) {
+  constructor(
+    map: GameMap,
+    seed = 1,
+    playerFactions?: Record<number, Faction>,
+  ) {
     this.rng = new Rng(seed);
     this.world = new World(map, this.rng, playerFactions);
     this.pathQueue = this.world.pathQueue;
   }
 
   issue(cmd: Command): void {
-    if (!isSupportedM3CommandKind(cmd.kind)) {
+    if (!isSupportedCommandKind(cmd.kind)) {
       throw new Error(
-        `Command kind '${cmd.kind}' is not supported in Milestone 3 (requires M4+ / M5)`,
+        `Command kind '${cmd.kind}' is not supported in Milestone 4 (requires future milestone)`,
       );
     }
     this.pendingCommands.push(cloneCommand(cmd));
@@ -69,8 +72,20 @@ export class Sim {
       case 'delete':
         this.applyDeleteCommand(cmd);
         break;
+      case 'setRally':
+        this.applySetRallyCommand(cmd);
+        break;
       default:
-        throw new Error('Unsupported command in Milestone 3');
+        throw new Error(`Unsupported command: ${(cmd as Command).kind}`);
+    }
+  }
+
+  private applySetRallyCommand(
+    cmd: Extract<Command, { kind: 'setRally' }>,
+  ): void {
+    const ent = this.world.entities[cmd.buildingId];
+    if (ent && ent.kind === 'building' && ent.player === cmd.player) {
+      ent.rallyPoint = { x: cmd.x, z: cmd.z };
     }
   }
 

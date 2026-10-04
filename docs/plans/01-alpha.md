@@ -109,12 +109,18 @@ Phases:
 6. `Minimap` canvas (terrain, units as player-colour dots, camera trapezoid), click to jump, right-click to move.
 
 Goalposts:
-- [ ] E2E: box-select 5 debug-spawned peasants via mouse drag; right-click ground; within 20 s game time all 5 are within 2 tiles of the target (`__bordev.sim` query).
-- [ ] Ctrl+1 then 1 reselects the group; hotkey `W` stops them.
-- [ ] HUD numbers match sim state after cheats (`cheats.resources(1000)` → TopBar shows 1000 food and gold).
+- [x] E2E: box-select 5 debug-spawned peasants via mouse drag; right-click ground; within 20 s game time all 5 are within 2 tiles of the target (`__bordev.sim` query).
+- [x] Ctrl+1 then 1 reselects the group; hotkey `W` stops them.
+- [x] HUD numbers match sim state after cheats (`cheats.resources(1000)` → TopBar shows 1000 food and gold).
 
 Implementation notes (M0/M1 review): fix before M5 starts rendering cart loading.
 - `crown_ox_cart` `load` is declared `loop: true` in `art/manifest.json` and `anim.CART_ANIMS`, but the clip is a one-way fill (cargo scale 0.12 → 1.0). At 12 fps it would refill about 18 times per 6 s load. Set `loop: false` in both places (last frame holds) or make the clip cyclic, then rebuild and repack `crown_ox_cart`.
+
+M4 verified:
+- Selection, contextual orders, camera controls, pooled selection/health/rally/waypoint overlays, the 10 Hz Zustand HUD and interactive minimap are wired end to end. The command card uses one shared 3×5 slot layout for buttons and hotkeys. Portraits crop loaded atlas metadata; build/train entries remain disabled for their assigned M5/M6 systems, and economy/combat contexts report their unavailable milestone instead of silently moving.
+- Typecheck, lint, all 147 Vitest tests across 13 files, production build and all nine Chromium specs pass. Browser coverage includes the three goalposts, click/Shift/type selection, queued orders, attack-move, card submenu hotkeys, minimap and camera controls, building group centres, recycled entity IDs, focus loss and transient marker lifetime. Playwright uses one worker to avoid concurrent SwiftShader worlds starving browser queries.
+- Independent live Chromium smoke confirmed five peasants within 2 tiles after 2.8 game seconds, Ctrl+1/1 recall, five `W` stop orders, and `cheats.resources(1000)` matching sim and TopBar. Screenshots confirmed cropped portraits, selection ellipses, HP bars above units/buildings and a Keep rally line. Minimap jump/move, middle drag, 8 px edge scroll and `H` centring at the Keep footprint midpoint were exercised. Active movement used 26 draw calls and created/deleted zero WebGL buffers after warmup.
+- The non-fatal Vite >500 kB chunk warning remains (main approximately 1.41 MB, 362 kB gzip). No M5 economy, M6 production or M7 combat systems were added; the cart-load art prerequisite above remains unchanged.
 
 ### M5 — Economy and construction
 

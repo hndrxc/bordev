@@ -143,7 +143,12 @@ describe('Sim Core Consumer Regressions', () => {
     let keepId = -1;
     for (let i = 0; i < sim.world.entities.length; i++) {
       const ent = sim.world.entities[i];
-      if (ent && ent.kind === 'building' && ent.isTownCenter && ent.player === 0) {
+      if (
+        ent &&
+        ent.kind === 'building' &&
+        ent.isTownCenter &&
+        ent.player === 0
+      ) {
         keepId = ent.id;
         break;
       }
@@ -212,5 +217,51 @@ describe('Sim Core Consumer Regressions', () => {
         tiles: invalidTiles,
       });
     }).toThrow(/Invalid terrain code 99/);
+  });
+
+  it('setRally command updates building rallyPoint on next tick with owner validation', () => {
+    const map = makeTestMap(32);
+    const sim = new Sim(map, 1);
+
+    const keep = sim.world.spawnBuilding(0, 'keep', 10, 10, true);
+    expect(keep.rallyPoint).toBeUndefined();
+
+    // Issue setRally for owner player 0
+    sim.issue({
+      kind: 'setRally',
+      player: 0,
+      buildingId: keep.id,
+      x: 25,
+      z: 30,
+    });
+
+    // Next-tick semantics: rallyPoint must NOT be updated before sim.step()
+    expect(keep.rallyPoint).toBeUndefined();
+
+    sim.step();
+    expect(keep.rallyPoint).toEqual({ x: 25, z: 30 });
+
+    // Non-owner player 1 cannot change player 0's building rally point
+    sim.issue({
+      kind: 'setRally',
+      player: 1,
+      buildingId: keep.id,
+      x: 5,
+      z: 5,
+    });
+    sim.step();
+    expect(keep.rallyPoint).toEqual({ x: 25, z: 30 });
+
+    // Command targeting non-building entity (e.g. peasant) is safely ignored
+    const peasant = sim.world.spawnUnit(0, 'peasant', 12, 12);
+    sim.issue({
+      kind: 'setRally',
+      player: 0,
+      buildingId: peasant.id,
+      x: 15,
+      z: 15,
+    });
+    sim.step();
+    expect('rallyPoint' in peasant).toBe(false);
   });
 });

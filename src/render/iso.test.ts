@@ -64,31 +64,6 @@ function createMockCanvas(width = 800, height = 600): MockCanvas {
   } as unknown as MockCanvas;
 }
 
-function createMockWheelEvent(deltaY: number, clientX: number, clientY: number): Event {
-  return Object.assign(new Event('wheel'), {
-    deltaY,
-    clientX,
-    clientY,
-    preventDefault: () => {},
-  });
-}
-
-function createMockPointerEvent(
-  type: string,
-  button: number,
-  clientX: number,
-  clientY: number,
-  buttons = 0,
-): Event {
-  return Object.assign(new Event(type), {
-    button,
-    clientX,
-    clientY,
-    buttons,
-    preventDefault: () => {},
-  });
-}
-
 describe('iso projection pure math', () => {
   const baseView: IsoView = {
     targetX: 0,
@@ -150,7 +125,13 @@ describe('iso projection pure math', () => {
       { targetX: 64, targetZ: 64, width: 1920, height: 1080, zoom: 0.5 },
       { targetX: 128, targetZ: 128, width: 1280, height: 720, zoom: 1.5 },
       { targetX: -4, targetZ: 132, width: 1024, height: 768, zoom: 0.85 },
-      { targetX: 37.125, targetZ: 89.625, width: 1440, height: 900, zoom: 1.25 },
+      {
+        targetX: 37.125,
+        targetZ: 89.625,
+        width: 1440,
+        height: 900,
+        zoom: 1.25,
+      },
     ];
 
     const testCoords = [
@@ -201,18 +182,30 @@ describe('iso projection pure math', () => {
 
   it('has consistent basis vectors and camera direction constants', () => {
     // Orthonormal right and up vectors
-    const rDotR = ISO_RIGHT_BASIS.x ** 2 + ISO_RIGHT_BASIS.y ** 2 + ISO_RIGHT_BASIS.z ** 2;
-    const uDotU = ISO_UP_BASIS.x ** 2 + ISO_UP_BASIS.y ** 2 + ISO_UP_BASIS.z ** 2;
-    const dirDotDir = ISO_CAMERA_DIR.x ** 2 + ISO_CAMERA_DIR.y ** 2 + ISO_CAMERA_DIR.z ** 2;
+    const rDotR =
+      ISO_RIGHT_BASIS.x ** 2 + ISO_RIGHT_BASIS.y ** 2 + ISO_RIGHT_BASIS.z ** 2;
+    const uDotU =
+      ISO_UP_BASIS.x ** 2 + ISO_UP_BASIS.y ** 2 + ISO_UP_BASIS.z ** 2;
+    const dirDotDir =
+      ISO_CAMERA_DIR.x ** 2 + ISO_CAMERA_DIR.y ** 2 + ISO_CAMERA_DIR.z ** 2;
 
     expect(rDotR).toBeCloseTo(1.0, 10);
     expect(uDotU).toBeCloseTo(1.0, 10);
     expect(dirDotDir).toBeCloseTo(1.0, 10);
 
     // Mutual orthogonality
-    const rDotU = ISO_RIGHT_BASIS.x * ISO_UP_BASIS.x + ISO_RIGHT_BASIS.y * ISO_UP_BASIS.y + ISO_RIGHT_BASIS.z * ISO_UP_BASIS.z;
-    const rDotDir = ISO_RIGHT_BASIS.x * ISO_CAMERA_DIR.x + ISO_RIGHT_BASIS.y * ISO_CAMERA_DIR.y + ISO_RIGHT_BASIS.z * ISO_CAMERA_DIR.z;
-    const uDotDir = ISO_UP_BASIS.x * ISO_CAMERA_DIR.x + ISO_UP_BASIS.y * ISO_CAMERA_DIR.y + ISO_UP_BASIS.z * ISO_CAMERA_DIR.z;
+    const rDotU =
+      ISO_RIGHT_BASIS.x * ISO_UP_BASIS.x +
+      ISO_RIGHT_BASIS.y * ISO_UP_BASIS.y +
+      ISO_RIGHT_BASIS.z * ISO_UP_BASIS.z;
+    const rDotDir =
+      ISO_RIGHT_BASIS.x * ISO_CAMERA_DIR.x +
+      ISO_RIGHT_BASIS.y * ISO_CAMERA_DIR.y +
+      ISO_RIGHT_BASIS.z * ISO_CAMERA_DIR.z;
+    const uDotDir =
+      ISO_UP_BASIS.x * ISO_CAMERA_DIR.x +
+      ISO_UP_BASIS.y * ISO_CAMERA_DIR.y +
+      ISO_UP_BASIS.z * ISO_CAMERA_DIR.z;
 
     expect(rDotU).toBeCloseTo(0.0, 10);
     expect(rDotDir).toBeCloseTo(0.0, 10);
@@ -303,8 +296,16 @@ describe('IsoCamera with Babylon.js engine', () => {
     const vpm = vm.multiply(pm);
 
     const anchor = new Vector3(50, 0, 50);
-    const rightOffset = anchor.add(new Vector3(ISO_RIGHT_BASIS.x, ISO_RIGHT_BASIS.y, ISO_RIGHT_BASIS.z).scale(10));
-    const upOffset = anchor.add(new Vector3(ISO_UP_BASIS.x, ISO_UP_BASIS.y, ISO_UP_BASIS.z).scale(10));
+    const rightOffset = anchor.add(
+      new Vector3(
+        ISO_RIGHT_BASIS.x,
+        ISO_RIGHT_BASIS.y,
+        ISO_RIGHT_BASIS.z,
+      ).scale(10),
+    );
+    const upOffset = anchor.add(
+      new Vector3(ISO_UP_BASIS.x, ISO_UP_BASIS.y, ISO_UP_BASIS.z).scale(10),
+    );
 
     const clipAnchor = Vector3.TransformCoordinates(anchor, vpm);
     const clipRight = Vector3.TransformCoordinates(rightOffset, vpm);
@@ -334,7 +335,11 @@ describe('IsoCamera with Babylon.js engine', () => {
     // Execute 200 random pans and zooms
     for (let i = 0; i < 200; i++) {
       isoCam.pan((i % 7) - 3, (i % 5) - 2);
-      isoCam.zoomAt(400 + (i % 10) * 10, 300 + (i % 10) * 10, 0.5 + ((i * 17) % 100) / 100);
+      isoCam.zoomAt(
+        400 + (i % 10) * 10,
+        300 + (i % 10) * 10,
+        0.5 + ((i * 17) % 100) / 100,
+      );
     }
 
     // Return to target (0, 0) and zoom 1.0
@@ -352,7 +357,10 @@ describe('IsoCamera with Babylon.js engine', () => {
     expect(finalDeltaX.z).toBeCloseTo(initialDeltaX.z, 6);
 
     // Elevation angle must be strictly preserved
-    expect(isoCam.camera.position.y).toBeCloseTo(ISO_SIN30 * ISO_CAMERA_DISTANCE, 6);
+    expect(isoCam.camera.position.y).toBeCloseTo(
+      ISO_SIN30 * ISO_CAMERA_DISTANCE,
+      6,
+    );
 
     isoCam.dispose();
     scene.dispose();
@@ -441,7 +449,11 @@ describe('IsoCamera with Babylon.js engine', () => {
         isoCam.zoomAt(cursor.x, cursor.y, targetZoom);
 
         // Pure math check
-        const screenAfter = worldToScreen(groundBefore.x, groundBefore.z, isoCam.view);
+        const screenAfter = worldToScreen(
+          groundBefore.x,
+          groundBefore.z,
+          isoCam.view,
+        );
         expect(screenAfter.x).toBeCloseTo(cursor.x, 9);
         expect(screenAfter.y).toBeCloseTo(cursor.y, 9);
 
@@ -450,7 +462,10 @@ describe('IsoCamera with Babylon.js engine', () => {
         const pm = isoCam.camera.getProjectionMatrix(true);
         const vpm = vm.multiply(pm);
 
-        const clip = Vector3.TransformCoordinates(new Vector3(groundBefore.x, 0, groundBefore.z), vpm);
+        const clip = Vector3.TransformCoordinates(
+          new Vector3(groundBefore.x, 0, groundBefore.z),
+          vpm,
+        );
         const bScreenX = (clip.x + 1) * 0.5 * isoCam.view.width;
         const bScreenY = (1 - clip.y) * 0.5 * isoCam.view.height;
 
@@ -465,17 +480,28 @@ describe('IsoCamera with Babylon.js engine', () => {
     isoCam.resize();
 
     const resizeCursor = { x: 1400, y: 800 };
-    const groundBeforeResize = screenToGround(resizeCursor.x, resizeCursor.y, isoCam.view);
+    const groundBeforeResize = screenToGround(
+      resizeCursor.x,
+      resizeCursor.y,
+      isoCam.view,
+    );
 
     isoCam.zoomAt(resizeCursor.x, resizeCursor.y, 1.35);
-    const screenAfterResize = worldToScreen(groundBeforeResize.x, groundBeforeResize.z, isoCam.view);
+    const screenAfterResize = worldToScreen(
+      groundBeforeResize.x,
+      groundBeforeResize.z,
+      isoCam.view,
+    );
     expect(screenAfterResize.x).toBeCloseTo(resizeCursor.x, 9);
     expect(screenAfterResize.y).toBeCloseTo(resizeCursor.y, 9);
 
     const vmr = isoCam.camera.getViewMatrix(true);
     const pmr = isoCam.camera.getProjectionMatrix(true);
     const vpmr = vmr.multiply(pmr);
-    const clipR = Vector3.TransformCoordinates(new Vector3(groundBeforeResize.x, 0, groundBeforeResize.z), vpmr);
+    const clipR = Vector3.TransformCoordinates(
+      new Vector3(groundBeforeResize.x, 0, groundBeforeResize.z),
+      vpmr,
+    );
     const bScreenXR = (clipR.x + 1) * 0.5 * isoCam.view.width;
     const bScreenYR = (1 - clipR.y) * 0.5 * isoCam.view.height;
 
@@ -487,7 +513,7 @@ describe('IsoCamera with Babylon.js engine', () => {
     engine.dispose();
   });
 
-  it('handles middle mouse drag and wheel input with lifecycle cleanup', () => {
+  it('disposes camera and associated resources cleanly', () => {
     const engine = new NullEngine();
     const scene = new Scene(engine);
     const canvas = createMockCanvas(800, 600);
@@ -495,48 +521,7 @@ describe('IsoCamera with Babylon.js engine', () => {
     const isoCam = new IsoCamera(scene, canvas, 128);
     isoCam.centerOn(50, 50);
 
-    // Wheel zoom: scrolling up (deltaY < 0) zooms in
-    const wheelEvent = createMockWheelEvent(-100, 400, 300);
-    canvas.dispatchEvent(wheelEvent);
-    expect(isoCam.view.zoom).toBeCloseTo(1.1, 6);
-
-    // Horizontal wheel event (deltaY = 0) must be ignored and not change zoom
-    const horizontalWheel = Object.assign(new Event('wheel'), {
-      deltaX: 120,
-      deltaY: 0,
-      clientX: 400,
-      clientY: 300,
-      preventDefault: () => {},
-    });
-    canvas.dispatchEvent(horizontalWheel);
-    expect(isoCam.view.zoom).toBeCloseTo(1.1, 6);
-
-    // Middle-button drag (button = 1)
-    const pointerDown = createMockPointerEvent('pointerdown', 1, 400, 300);
-    canvas.dispatchEvent(pointerDown);
-
-    const targetBeforeDragX = isoCam.view.targetX;
-    const targetBeforeDragZ = isoCam.view.targetZ;
-    const dragZoom = isoCam.view.zoom;
-
-    const pointerMove = createMockPointerEvent('pointermove', 1, 448, 324, 4);
-    canvas.dispatchEvent(pointerMove);
-
-    // Dragged mouse right and down (+48, +24 screen delta)
-    // Screen (+48, +24) corresponds to pure world +X (+1 / zoom, 0)
-    // To grab-pan, camera target shifts opposite: (-1 / zoom, 0)
-    expect(isoCam.view.targetX).toBeCloseTo(targetBeforeDragX - 1 / dragZoom, 9);
-    expect(isoCam.view.targetZ).toBeCloseTo(targetBeforeDragZ, 9);
-    const pointerUp = createMockPointerEvent('pointerup', 1, 448, 324);
-    canvas.dispatchEvent(pointerUp);
-
-    // Subsequent move after pointer up does not pan
-    const targetAfterUpX = isoCam.view.targetX;
-    const pointerMove2 = createMockPointerEvent('pointermove', 1, 500, 400);
-    canvas.dispatchEvent(pointerMove2);
-    expect(isoCam.view.targetX).toBe(targetAfterUpX);
-
-    // Dispose cleans up listeners
+    expect(isoCam.camera.isDisposed()).toBe(false);
     isoCam.dispose();
     expect(isoCam.camera.isDisposed()).toBe(true);
 

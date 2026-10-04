@@ -9,26 +9,462 @@ body,
 }
 
 body {
-  font-family: system-ui, sans-serif;
+  font-family:
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+  background-color: #0c0e12;
+  color: #f4f1e8;
 }
 
 .game-screen {
   position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
 }
 
-canvas {
+/* World canvas fills the entire screen */
+.game-screen > canvas:not(.minimap-canvas):not(.portrait-canvas) {
   display: block;
   width: 100%;
   height: 100%;
+  position: absolute;
+  inset: 0;
 }
 
+/* Title overlay: accessible heading positioned within TopBar */
 .title-overlay {
   position: absolute;
-  top: 1rem;
-  left: 1.5rem;
+  top: 7px;
+  left: 16px;
   margin: 0;
-  color: #f4f1e8;
-  font-size: 1.5rem;
-  font-weight: 600;
+  color: #facc15;
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  line-height: 24px;
   pointer-events: none;
+  z-index: 20;
+}
+
+/* -------------------------------------------------------------------------
+ * HUD Overlay Shell (pointer-events: none on root, auto on interactive children)
+ * ------------------------------------------------------------------------- */
+.hud-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  user-select: none;
+  z-index: 10;
+}
+
+/* -------------------------------------------------------------------------
+ * TopBar: Faith, Pop, Food, Gold, Age, Status ticker
+ * ------------------------------------------------------------------------- */
+.hud-topbar {
+  pointer-events: auto;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  background: rgba(18, 20, 24, 0.92);
+  backdrop-filter: blur(4px);
+  border-bottom: 2px solid #333842;
+  color: #f4f1e8;
+  font-size: 0.9rem;
+  font-weight: 500;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.topbar-title {
+  font-weight: 700;
+  font-size: 1.1rem;
+  color: #facc15;
+  letter-spacing: 0.5px;
+}
+
+.topbar-faction-age {
+  font-size: 0.8rem;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.topbar-resources {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.resource-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.resource-icon {
+  font-size: 0.95rem;
+}
+
+.resource-value {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #f8fafc;
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+}
+
+.topbar-status {
+  padding: 3px 10px;
+  border-radius: 4px;
+  background: rgba(239, 68, 68, 0.2);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #fca5a5;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+/* -------------------------------------------------------------------------
+ * Bottom Bar Container: Minimap (Left) | Selection (Center) | Command (Right)
+ * ------------------------------------------------------------------------- */
+.hud-bottom-bar {
+  pointer-events: auto;
+  display: flex;
+  align-items: stretch;
+  height: 184px;
+  background: rgba(18, 20, 24, 0.94);
+  backdrop-filter: blur(6px);
+  border-top: 2px solid #333842;
+  color: #f4f1e8;
+  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.5);
+}
+
+/* -------------------------------------------------------------------------
+ * Minimap
+ * ------------------------------------------------------------------------- */
+.minimap-container {
+  width: 180px;
+  height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0c0e12;
+  border-right: 2px solid #333842;
+  overflow: hidden;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.minimap-canvas {
+  width: 180px;
+  height: 180px;
+  display: block;
+  cursor: crosshair;
+}
+
+/* -------------------------------------------------------------------------
+ * Selection Panel
+ * ------------------------------------------------------------------------- */
+.hud-selection-panel {
+  flex: 1;
+  min-width: 260px;
+  border-right: 2px solid #333842;
+  padding: 10px 14px;
+  display: flex;
+  gap: 12px;
+  overflow: hidden;
+}
+
+.hud-selection-panel.empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #64748b;
+  font-style: italic;
+  font-size: 0.9rem;
+}
+
+.selection-portrait-wrapper {
+  width: 64px;
+  height: 64px;
+  border: 2px solid #475569;
+  border-radius: 6px;
+  background: #0f172a;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: inset 0 0 8px rgba(0, 0, 0, 0.6);
+}
+
+.portrait-canvas {
+  display: block;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+.portrait-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 1.1rem;
+  color: #94a3b8;
+  background: #1e293b;
+}
+
+.selection-details {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.selection-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.selection-name {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #f1f5f9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.selection-hp-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.hp-bar-container {
+  flex: 1;
+  height: 8px;
+  background: #334155;
+  border-radius: 3px;
+  overflow: hidden;
+  border: 1px solid #1e293b;
+}
+
+.hp-bar-fill {
+  height: 100%;
+  transition: width 0.15s ease;
+}
+
+.hp-text {
+  font-weight: 600;
+  color: #e2e8f0;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.selection-stats-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.stat-badge {
+  font-size: 0.75rem;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #cbd5e1;
+}
+
+/* Multi-selection styles */
+.hud-selection-panel.multi {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.multi-selection-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.multi-count {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #94a3b8;
+}
+
+.multi-clear-btn {
+  font-size: 0.75rem;
+  background: #334155;
+  color: #cbd5e1;
+  border: none;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.multi-clear-btn:hover {
+  background: #475569;
+}
+
+.multi-portrait-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(40px, 1fr));
+  gap: 4px;
+  overflow-y: auto;
+  max-height: 136px;
+}
+
+.multi-portrait-card {
+  position: relative;
+  width: 40px;
+  height: 46px;
+  border: 1px solid #475569;
+  border-radius: 4px;
+  background: #0f172a;
+  padding: 0;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  overflow: hidden;
+}
+
+.multi-portrait-card:hover {
+  border-color: #38bdf8;
+}
+
+.multi-hp-mini {
+  width: 100%;
+  height: 4px;
+  background: #1e293b;
+  margin-top: auto;
+}
+
+.multi-hp-fill {
+  height: 100%;
+}
+
+/* -------------------------------------------------------------------------
+ * Command Card: 3x5 Grid (QWERT / ASDFG / ZXCVB)
+ * ------------------------------------------------------------------------- */
+.hud-command-card {
+  width: 290px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: #111318;
+  flex-shrink: 0;
+}
+
+.command-row {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 4px;
+  flex: 1;
+}
+
+.command-slot {
+  position: relative;
+  height: 48px;
+  background: #1e222b;
+  border: 1px solid #333842;
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 2px;
+  color: #e2e8f0;
+  transition:
+    background 0.1s,
+    border-color 0.1s;
+  user-select: none;
+}
+
+.command-slot.empty {
+  background: rgba(255, 255, 255, 0.02);
+  border-color: rgba(255, 255, 255, 0.05);
+  cursor: default;
+}
+
+.command-slot.enabled:hover {
+  background: #2d3340;
+  border-color: #60a5fa;
+  color: #ffffff;
+}
+
+.command-slot.active {
+  background: #1e3a8a;
+  border-color: #3b82f6;
+  box-shadow: inset 0 0 6px rgba(59, 130, 246, 0.5);
+}
+
+.command-slot.disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  background: #15181f;
+  border-color: #262a33;
+  color: #64748b;
+}
+
+.slot-hotkey {
+  position: absolute;
+  top: 2px;
+  left: 3px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: #facc15;
+}
+
+.slot-hotkey-dim {
+  position: absolute;
+  top: 2px;
+  left: 3px;
+  font-size: 0.65rem;
+  font-weight: 500;
+  color: #475569;
+}
+
+.slot-label {
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-align: center;
+  line-height: 1.1;
+  margin-top: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }

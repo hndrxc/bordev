@@ -7,8 +7,9 @@ import type { GameMap } from '../sim/map';
 import type { SessionSnapshot } from '../game/GameSession';
 import { AtlasCache, type LoadedAtlas } from './AtlasCache';
 import type { DebugSceneProbes } from './DebugScene';
+import type { IsoView } from './iso';
 import { IsoCamera } from './IsoCamera';
-import { Overlays } from './Overlays';
+import { Overlays, type OrderMarker, type SelectionBox } from './Overlays';
 import { SpriteBatch, type RenderSprite } from './SpriteBatch';
 import { Terrain } from './Terrain';
 import { UnitShadows } from './UnitShadows';
@@ -35,6 +36,24 @@ export interface RendererStats {
   probes?: DebugSceneProbes | null;
 }
 
+export interface EntityScreenRect {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+  depth: number;
+}
+
+export interface PortraitMetadata {
+  url: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  pageWidth: number;
+  pageHeight: number;
+}
+
 export const REQUIRED_ATLASES = [
   'crown_keep',
   'crown_peasant',
@@ -57,6 +76,18 @@ const TINT_PLAYER_0: readonly [number, number, number] = [0.2, 0.5, 0.9];
 const TINT_PLAYER_1: readonly [number, number, number] = [0.9, 0.2, 0.2];
 const TINT_NEUTRAL: readonly [number, number, number] = [1.0, 1.0, 1.0];
 
+const UNIT_ASSET_BY_TYPE: Record<string, string> = {
+  spearman: 'crown_spearman',
+  ox_cart: 'crown_ox_cart',
+  peasant: 'crown_peasant',
+};
+
+const BUILDING_ASSET_BY_TYPE: Record<string, string> = {
+  cottage: 'crown_cottage',
+  farm: 'crown_farm',
+  keep: 'crown_keep',
+};
+
 interface StaticEntityDescriptor {
   batch: SpriteBatch;
   frame: AtlasFrame;
@@ -67,6 +98,70 @@ interface StaticEntityDescriptor {
 interface UnitFrameEntry {
   batch: SpriteBatch;
   frame: AtlasFrame;
+}
+
+export interface CachedEntityRect extends EntityScreenRect {
+  id: number;
+  kind: string;
+  frameAy: number;
+  stamp: number;
+}
+
+export function writeSpriteScreenRect(
+  out: CachedEntityRect,
+  id: number,
+  kind: string,
+  anchorX: number,
+  anchorZ: number,
+  frame: AtlasFrame,
+  view: IsoView,
+  stamp: number,
+): void {
+  const zoom = view.zoom;
+  const dx = anchorX - view.targetX;
+  const dz = anchorZ - view.targetZ;
+  const anchorScreenX = view.width * 0.5 + (dx - dz) * 48 * zoom;
+  const anchorScreenY = view.height * 0.5 + (dx + dz) * 24 * zoom;
+
+  out.id = id;
+  out.kind = kind;
+  out.left = anchorScreenX - frame.ax * zoom;
+  out.top = anchorScreenY - frame.ay * zoom;
+  out.right = anchorScreenX + (frame.w - frame.ax) * zoom;
+  out.bottom = anchorScreenY + (frame.h - frame.ay) * zoom;
+  out.depth = anchorX + anchorZ;
+  out.frameAy = frame.ay;
+  out.stamp = stamp;
+}
+
+export function pickFrontmost(
+  rects: readonly CachedEntityRect[],
+  count: number,
+  x: number,
+  y: number,
+): number | undefined {
+  let bestId: number | undefined = undefined;
+  let bestDepth = -Infinity;
+
+  for (let i = 0; i < count; i++) {
+    const rect = rects[i];
+    if (rect.kind === 'doodad' || rect.kind === 'projectile') {
+      continue;
+    }
+    if (
+      x >= rect.left &&
+      x <= rect.right &&
+      y >= rect.top &&
+      y <= rect.bottom
+    ) {
+      if (rect.depth > bestDepth) {
+        bestDepth = rect.depth;
+        bestId = rect.id;
+      }
+    }
+  }
+
+  return bestId;
 }
 
 export class Renderer {
@@ -83,7 +178,10 @@ export class Renderer {
 
   private readonly batches = new Map<string, SpriteBatch>();
   private readonly loadedAtlases = new Map<string, LoadedAtlas>();
-  private readonly staticDescriptors = new Map<string, StaticEntityDescriptor>();
+  private readonly staticDescriptors = new Map<
+    string,
+    StaticEntityDescriptor
+  >();
   private readonly unitWalkTables = new Map<string, UnitFrameEntry[][]>();
   private readonly unitFps = new Map<string, number>();
 
@@ -97,6 +195,25 @@ export class Renderer {
     tint: TINT_NEUTRAL,
     alpha: 1.0,
     radius: 0.35,
+  };
+
+  // Interaction references for overlays
+  private interactionSelectedIds: readonly number[] = [];
+  private interactionMarkers: readonly OrderMarker[] = [];
+  private interactionBox: SelectionBox | null = null;
+
+  // Cached screen rectangles for entity picking, allocation-free after capacity grows
+  private readonly entityRectPool: CachedEntityRect[] = [];
+  private entityRectCount = 0;
+  private readonly entityRectMap = new Map<number, CachedEntityRect>();
+  private rectStamp = 0;
+
+  private readonly getFrameAy = (id: number): number | undefined => {
+    const cached = this.entityRectMap.get(id);
+    if (cached && cached.stamp === this.rectStamp) {
+      return cached.frameAy;
+    }
+    return undefined;
   };
 
   private instrumentation: SceneInstrumentation | null = null;
@@ -120,9 +237,9 @@ export class Renderer {
 
     // Rendering group depth configuration:
     // Group 0: Terrain (no depth write)
-    // Group 1: Shadows (no depth write)
+    // Group 1: Shadows & Selection Ellipses (no depth write)
     // Group 2: Sprites (depth test & write enabled)
-    // Group 3: Debug Overlays (drawn on top)
+    // Group 3: Debug Overlays & Health Bars (drawn on top)
     this.scene.setRenderingAutoClearDepthStencil(1, false);
     this.scene.setRenderingAutoClearDepthStencil(2, false);
     this.scene.setRenderingAutoClearDepthStencil(3, true);
@@ -142,6 +259,63 @@ export class Renderer {
 
   setDebugProbes(probes: DebugSceneProbes): void {
     this.debugProbes = probes;
+  }
+
+  setInteraction(
+    selectedIds: readonly number[],
+    markers: readonly OrderMarker[],
+    box: SelectionBox | null,
+  ): void {
+    this.interactionSelectedIds = selectedIds;
+    this.interactionMarkers = markers;
+    this.interactionBox = box;
+  }
+
+  getEntityScreenRect(id: number): EntityScreenRect | undefined {
+    const cached = this.entityRectMap.get(id);
+    if (cached && cached.stamp === this.rectStamp) {
+      return cached;
+    }
+    return undefined;
+  }
+
+  pickEntity(x: number, y: number): number | undefined {
+    return pickFrontmost(this.entityRectPool, this.entityRectCount, x, y);
+  }
+
+  getPortrait(entity: {
+    kind?: string;
+    type?: string;
+  }): PortraitMetadata | undefined {
+    const asset =
+      entity.kind === 'unit'
+        ? (UNIT_ASSET_BY_TYPE[entity.type ?? ''] ?? 'crown_peasant')
+        : entity.kind === 'building'
+          ? (BUILDING_ASSET_BY_TYPE[entity.type ?? ''] ?? 'crown_keep')
+          : entity.kind === 'mine'
+            ? 'gold_mine'
+            : (entity.type ?? 'tree_1');
+
+    const loaded = this.loadedAtlases.get(asset);
+    if (!loaded) return undefined;
+
+    const frameKey = entity.kind === 'unit' ? 'walk/0/0' : 'idle/0/0';
+    const frame =
+      loaded.atlas.frames[frameKey] ?? Object.values(loaded.atlas.frames)[0];
+    if (!frame) return undefined;
+
+    const page = loaded.pages[frame.page];
+    const url = page?.body?.url ?? `/atlases/${asset}.body.png`;
+
+    return {
+      url,
+      x: frame.x,
+      y: frame.y,
+      w: frame.w,
+      h: frame.h,
+      pageWidth: page?.width ?? 2048,
+      pageHeight: page?.height ?? 2048,
+    };
   }
 
   async initialize(map: GameMap): Promise<void> {
@@ -234,7 +408,11 @@ export class Renderer {
 
     this.unitWalkTables.clear();
     this.unitFps.clear();
-    const unitAssets = ['crown_peasant', 'crown_spearman', 'crown_ox_cart'] as const;
+    const unitAssets = [
+      'crown_peasant',
+      'crown_spearman',
+      'crown_ox_cart',
+    ] as const;
     for (let u = 0; u < unitAssets.length; u++) {
       const asset = unitAssets[u];
       const loaded = this.loadedAtlases.get(asset);
@@ -268,17 +446,73 @@ export class Renderer {
     this.isReady = true;
   }
 
+  private recordEntityScreenRect(
+    id: number,
+    kind: string,
+    anchorX: number,
+    anchorZ: number,
+    frame: AtlasFrame,
+  ): void {
+    if (!this.camera) return;
+    const view = this.camera.view;
+
+    let cached = this.entityRectMap.get(id);
+    if (!cached) {
+      cached = {
+        id,
+        kind,
+        left: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
+        depth: 0,
+        frameAy: 0,
+        stamp: 0,
+      };
+      this.entityRectMap.set(id, cached);
+    }
+
+    writeSpriteScreenRect(
+      cached,
+      id,
+      kind,
+      anchorX,
+      anchorZ,
+      frame,
+      view,
+      this.rectStamp,
+    );
+
+    if (this.entityRectCount >= this.entityRectPool.length) {
+      this.entityRectPool.push(cached);
+    } else {
+      this.entityRectPool[this.entityRectCount] = cached;
+    }
+    this.entityRectCount++;
+  }
+
   render(snapshot?: SessionSnapshot, timeSeconds?: number): void {
     if (this.isDisposed || this.scene.isDisposed || this.engine.isDisposed) {
       return;
     }
 
-    const t = timeSeconds ?? (typeof performance !== 'undefined' ? performance.now() / 1000 : 0);
+    const t =
+      timeSeconds ??
+      (typeof performance !== 'undefined' ? performance.now() / 1000 : 0);
 
     // Update animated terrain (water UV scrolling)
     if (this.terrain) {
       this.terrain.update(t);
     }
+
+    this.rectStamp++;
+    if (this.rectStamp === 0x7fffffff) {
+      this.rectStamp = 1;
+      for (const rect of this.entityRectMap.values()) {
+        rect.stamp = 0;
+      }
+    }
+    this.entityRectCount = 0;
 
     // Submit entities to sprite batches and unit shadows with zero allocations
     if (this.isReady && snapshot) {
@@ -316,7 +550,7 @@ export class Renderer {
 
           const table = this.unitWalkTables.get(asset);
           if (table) {
-            const dir = ((ent.facing ?? 0) % 8 + 8) % 8;
+            const dir = (((ent.facing ?? 0) % 8) + 8) % 8;
             const dirRow = table[dir];
             if (dirRow && dirRow.length > 0) {
               const fps = this.unitFps.get(asset) ?? 12;
@@ -339,6 +573,14 @@ export class Renderer {
 
                 entry.batch.add(entry.frame, this.scratchSprite);
                 spriteCount++;
+
+                this.recordEntityScreenRect(
+                  ent.id,
+                  'unit',
+                  anchorX,
+                  anchorZ,
+                  entry.frame,
+                );
               }
             }
           }
@@ -352,11 +594,14 @@ export class Renderer {
 
           const desc = this.staticDescriptors.get(asset);
           if (desc) {
+            const posX = ent.x + desc.anchorOffsetX;
+            const posZ = ent.z + desc.anchorOffsetZ;
+
             this.scratchSprite.asset = asset;
             this.scratchSprite.animation = 'idle';
             this.scratchSprite.facing = 0;
-            this.scratchSprite.x = ent.x + desc.anchorOffsetX;
-            this.scratchSprite.z = ent.z + desc.anchorOffsetZ;
+            this.scratchSprite.x = posX;
+            this.scratchSprite.z = posZ;
             this.scratchSprite.tint =
               ent.player === 0
                 ? TINT_PLAYER_0
@@ -368,36 +613,60 @@ export class Renderer {
             desc.batch.add(desc.frame, this.scratchSprite);
             spriteCount++;
             shadowCount++;
+
+            this.recordEntityScreenRect(
+              ent.id,
+              'building',
+              posX,
+              posZ,
+              desc.frame,
+            );
           }
         } else if (kind === 'mine') {
           const desc = this.staticDescriptors.get('gold_mine');
           if (desc) {
+            const posX = ent.x + desc.anchorOffsetX;
+            const posZ = ent.z + desc.anchorOffsetZ;
+
             this.scratchSprite.asset = 'gold_mine';
             this.scratchSprite.animation = 'idle';
             this.scratchSprite.facing = 0;
-            this.scratchSprite.x = ent.x + desc.anchorOffsetX;
-            this.scratchSprite.z = ent.z + desc.anchorOffsetZ;
+            this.scratchSprite.x = posX;
+            this.scratchSprite.z = posZ;
             this.scratchSprite.tint = TINT_NEUTRAL;
             this.scratchSprite.alpha = 1.0;
 
             desc.batch.add(desc.frame, this.scratchSprite);
             spriteCount++;
             shadowCount++;
+
+            this.recordEntityScreenRect(ent.id, 'mine', posX, posZ, desc.frame);
           }
         } else if (kind === 'doodad') {
           const desc = this.staticDescriptors.get(ent.type ?? 'tree_1');
           if (desc) {
+            const posX = ent.x + desc.anchorOffsetX;
+            const posZ = ent.z + desc.anchorOffsetZ;
+
             this.scratchSprite.asset = ent.type ?? 'tree_1';
             this.scratchSprite.animation = 'idle';
             this.scratchSprite.facing = 0;
-            this.scratchSprite.x = ent.x + desc.anchorOffsetX;
-            this.scratchSprite.z = ent.z + desc.anchorOffsetZ;
+            this.scratchSprite.x = posX;
+            this.scratchSprite.z = posZ;
             this.scratchSprite.tint = TINT_NEUTRAL;
             this.scratchSprite.alpha = 1.0;
 
             desc.batch.add(desc.frame, this.scratchSprite);
             spriteCount++;
             shadowCount++;
+
+            this.recordEntityScreenRect(
+              ent.id,
+              'doodad',
+              posX,
+              posZ,
+              desc.frame,
+            );
           }
         }
       }
@@ -409,6 +678,19 @@ export class Renderer {
 
       this.lastSpriteCount = spriteCount;
       this.lastShadowCount = shadowCount;
+    }
+
+    // Update overlays with interaction state before rendering the scene
+    if (this.overlays && this.camera) {
+      this.overlays.update(
+        snapshot,
+        this.camera.view,
+        this.interactionSelectedIds,
+        this.interactionMarkers,
+        this.interactionBox,
+        t,
+        this.getFrameAy,
+      );
     }
 
     // Scene render wrapped in beginFrame / endFrame
@@ -478,6 +760,10 @@ export class Renderer {
     this.overlays?.dispose();
     this.overlays = null;
 
+    this.entityRectCount = 0;
+    this.entityRectMap.clear();
+    this.entityRectPool.length = 0;
+    this.rectStamp = 0;
     // Note: camera is preserved across world resets and disposed in Renderer.dispose()
   }
 
