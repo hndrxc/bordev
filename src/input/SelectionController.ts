@@ -6,11 +6,11 @@ import type { SelectionBox } from '../render/Overlays';
 export type { SelectionBox };
 
 export class SelectionController {
-  private readonly canvas: HTMLCanvasElement;
   private readonly session: GameSession;
   private readonly cameraController: CameraController;
 
-  private _ids: number[] = [];
+  private selectedEntities: Entity[] = [];
+  private _cachedIds: readonly number[] = [];
   private readonly groups: Entity[][] = Array.from({ length: 10 }, () => []);
 
   // Marquee drag state
@@ -32,22 +32,16 @@ export class SelectionController {
 
   private isDisposed = false;
   private readonly selectionChangeListeners: (() => void)[] = [];
-  constructor(
-    canvas: HTMLCanvasElement,
-    session: GameSession,
-    cameraController: CameraController,
-  ) {
-    this.canvas = canvas;
+  constructor(session: GameSession, cameraController: CameraController) {
     this.session = session;
     this.cameraController = cameraController;
 
-    this.attachEvents();
+    // Keyboard listeners moved to Hotkeys dispatcher
   }
 
   get ids(): readonly number[] {
-    return this._ids;
+    return this._cachedIds;
   }
-
   get currentBox(): SelectionBox | null {
     return this._currentBox;
   }
@@ -69,39 +63,57 @@ export class SelectionController {
     }
   }
 
+  private isValidSelectionEntity(ent: Entity): boolean {
+    const sim = this.session.sim;
+    if (!sim) return false;
+    if (sim.world.getEntity(ent.id) !== ent) return false;
+    if (ent.kind === 'mine') return true;
+    if (ent.kind === 'unit' || ent.kind === 'building') {
+      return typeof ent.hp === 'number' ? ent.hp > 0 : true;
+    }
+    return false;
+  }
+
   public set(ids: readonly number[]): void {
-    const unique: number[] = [];
+    const sim = this.session.sim;
+    const uniqueEntities: Entity[] = [];
+    const uniqueIds: number[] = [];
     for (let i = 0; i < ids.length; i++) {
       const id = ids[i];
-      if (!unique.includes(id)) {
-        unique.push(id);
+      if (uniqueIds.includes(id)) continue;
+      if (sim) {
+        const ent = sim.world.getEntity(id);
+        if (ent && this.isValidSelectionEntity(ent)) {
+          uniqueEntities.push(ent);
+          uniqueIds.push(id);
+        }
+      } else {
+        uniqueIds.push(id);
       }
     }
-    this._ids = unique;
+    this.selectedEntities = uniqueEntities;
+    this._cachedIds = uniqueIds;
     this.notifySelectionChange();
   }
 
   public clear(): void {
-    this._ids = [];
+    if (this.selectedEntities.length === 0 && this._cachedIds.length === 0) {
+      return;
+    }
+    this.selectedEntities = [];
+    this._cachedIds = [];
     this.notifySelectionChange();
   }
 
   private pruneGroup(group: Entity[]): void {
     if (group.length === 0) return;
-    const sim = this.session.sim;
-    if (!sim) {
-      group.length = 0;
-      return;
-    }
-
     let writeIdx = 0;
     for (let i = 0; i < group.length; i++) {
       const ent = group[i];
       if (
-        sim.world.getEntity(ent.id) === ent &&
+        this.isValidSelectionEntity(ent) &&
         (ent.kind === 'unit' || ent.kind === 'building') &&
-        ent.player === 0 &&
-        ent.hp > 0
+        ent.player === 0
       ) {
         group[writeIdx++] = ent;
       }
@@ -118,34 +130,26 @@ export class SelectionController {
       this.pruneGroup(this.groups[g]);
     }
 
-    if (this._ids.length === 0) return;
+    if (this.selectedEntities.length === 0) return;
 
-    let hasDead = false;
-    for (let i = 0; i < this._ids.length; i++) {
-      const ent = sim.world.getEntity(this._ids[i]);
-      if (
-        !ent ||
-        ((ent.kind === 'unit' || ent.kind === 'building') && ent.hp <= 0)
-      ) {
-        hasDead = true;
+    let hasInvalid = false;
+    for (let i = 0; i < this.selectedEntities.length; i++) {
+      if (!this.isValidSelectionEntity(this.selectedEntities[i])) {
+        hasInvalid = true;
         break;
       }
     }
 
-    if (hasDead) {
+    if (hasInvalid) {
       let writeIdx = 0;
-      for (let i = 0; i < this._ids.length; i++) {
-        const id = this._ids[i];
-        const ent = sim.world.getEntity(id);
-        if (
-          ent &&
-          (ent.kind === 'mine' ||
-            ((ent.kind === 'unit' || ent.kind === 'building') && ent.hp > 0))
-        ) {
-          this._ids[writeIdx++] = id;
+      for (let i = 0; i < this.selectedEntities.length; i++) {
+        const ent = this.selectedEntities[i];
+        if (this.isValidSelectionEntity(ent)) {
+          this.selectedEntities[writeIdx++] = ent;
         }
       }
-      this._ids.length = writeIdx;
+      this.selectedEntities.length = writeIdx;
+      this._cachedIds = this.selectedEntities.map((e) => e.id);
       this.notifySelectionChange();
     }
   }
@@ -201,13 +205,12 @@ export class SelectionController {
     // Filter dead and enemy/neutral entities from group assignment
     const group = this.groups[groupNum];
     group.length = 0;
-    for (let i = 0; i < this._ids.length; i++) {
-      const ent = sim.world.getEntity(this._ids[i]);
+    for (let i = 0; i < this.selectedEntities.length; i++) {
+      const ent = this.selectedEntities[i];
       if (
-        ent &&
+        this.isValidSelectionEntity(ent) &&
         (ent.kind === 'unit' || ent.kind === 'building') &&
-        ent.player === 0 &&
-        ent.hp > 0
+        ent.player === 0
       ) {
         if (!group.includes(ent)) {
           group.push(ent);
@@ -300,7 +303,7 @@ export class SelectionController {
         // Double-click selects all own units of that type on screen
         const matchingIds = this.getOwnUnitsOfTypeOnScreen(picked.type);
         if (shiftKey) {
-          const union = new Set([...this._ids, ...matchingIds]);
+          const union = new Set([...this._cachedIds, ...matchingIds]);
           this.set(Array.from(union));
         } else {
           this.set(matchingIds);
@@ -308,10 +311,10 @@ export class SelectionController {
       } else {
         if (shiftKey) {
           // Shift toggle
-          if (this._ids.includes(pickedId)) {
-            this.set(this._ids.filter((id) => id !== pickedId));
+          if (this._cachedIds.includes(pickedId)) {
+            this.set(this._cachedIds.filter((id) => id !== pickedId));
           } else {
-            this.set([...this._ids, pickedId]);
+            this.set([...this._cachedIds, pickedId]);
           }
         } else {
           this.set([pickedId]);
@@ -368,13 +371,15 @@ export class SelectionController {
 
     if (shiftKey) {
       if (chosenIds.length > 0) {
-        const allPresent = chosenIds.every((id) => this._ids.includes(id));
+        const allPresent = chosenIds.every((id) =>
+          this._cachedIds.includes(id),
+        );
         if (allPresent) {
           // Remove them
-          this.set(this._ids.filter((id) => !chosenIds.includes(id)));
+          this.set(this._cachedIds.filter((id) => !chosenIds.includes(id)));
         } else {
           // Add them
-          const union = new Set([...this._ids, ...chosenIds]);
+          const union = new Set([...this._cachedIds, ...chosenIds]);
           this.set(Array.from(union));
         }
       }
@@ -437,46 +442,6 @@ export class SelectionController {
     return matched;
   }
 
-  private readonly onKeyDown = (e: KeyboardEvent): void => {
-    const target = e.target;
-    if (
-      target &&
-      target instanceof HTMLElement &&
-      (target.tagName === 'INPUT' ||
-        target.tagName === 'TEXTAREA' ||
-        target.tagName === 'SELECT' ||
-        target.isContentEditable ||
-        target.getAttribute('contenteditable') === 'true')
-    ) {
-      return;
-    }
-
-    if (e.key >= '0' && e.key <= '9') {
-      const groupNum = parseInt(e.key, 10);
-      if (e.ctrlKey || e.metaKey) {
-        this.assignGroup(groupNum);
-        e.preventDefault();
-      } else if (!e.altKey) {
-        this.selectGroup(groupNum);
-        e.preventDefault();
-      }
-    }
-  };
-
-  private attachEvents(): void {
-    const target = typeof window !== 'undefined' ? window : this.canvas;
-    if (typeof target.addEventListener === 'function') {
-      target.addEventListener('keydown', this.onKeyDown as EventListener);
-    }
-  }
-
-  private detachEvents(): void {
-    const target = typeof window !== 'undefined' ? window : this.canvas;
-    if (typeof target.removeEventListener === 'function') {
-      target.removeEventListener('keydown', this.onKeyDown as EventListener);
-    }
-  }
-
   public dispose(): void {
     if (this.isDisposed) return;
     this.isDisposed = true;
@@ -484,6 +449,7 @@ export class SelectionController {
       this.groups[i].length = 0;
     }
     this.selectionChangeListeners.length = 0;
-    this.detachEvents();
+    this.selectedEntities = [];
+    this._cachedIds = [];
   }
 }

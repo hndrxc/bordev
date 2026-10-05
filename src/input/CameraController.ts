@@ -4,18 +4,6 @@ import type { IsoCamera } from '../render/IsoCamera';
 const EDGE_SCROLL_MARGIN_PX = 8;
 const KEY_SCROLL_SPEED_PX = 960; // Pixels per second at 1x zoom
 
-function isEditableElement(el: EventTarget | null): boolean {
-  if (!el || !(el instanceof HTMLElement)) return false;
-  const tag = el.tagName.toLowerCase();
-  return (
-    tag === 'input' ||
-    tag === 'textarea' ||
-    tag === 'select' ||
-    el.isContentEditable ||
-    el.getAttribute('contenteditable') === 'true'
-  );
-}
-
 export class CameraController {
   private readonly canvas: HTMLCanvasElement;
   private readonly session: GameSession;
@@ -25,12 +13,15 @@ export class CameraController {
   private lastPointerY = 0;
   private activePointerId: number | null = null;
 
+  // Viewport insets (CSS px covered by HUD at top and bottom)
+  private _viewportInsets = { top: 0, bottom: 0 };
+
   // Edge scroll tracking
   private isPointerOverCanvas = false;
   private canvasPointerX = -1;
   private canvasPointerY = -1;
 
-  // Arrow key tracking
+  // Arrow key tracking (driven by setPanKey)
   private arrowUp = false;
   private arrowDown = false;
   private arrowLeft = false;
@@ -49,11 +40,47 @@ export class CameraController {
     return this.session.renderer?.camera ?? null;
   }
 
+  public setViewportInsets(top: number, bottom: number): void {
+    this._viewportInsets = { top, bottom };
+  }
+
+  get viewportInsets(): { readonly top: number; readonly bottom: number } {
+    return this._viewportInsets;
+  }
+
+  public setPanKey(
+    direction: 'up' | 'down' | 'left' | 'right',
+    pressed: boolean,
+  ): void {
+    switch (direction) {
+      case 'up':
+        this.arrowUp = pressed;
+        break;
+      case 'down':
+        this.arrowDown = pressed;
+        break;
+      case 'left':
+        this.arrowLeft = pressed;
+        break;
+      case 'right':
+        this.arrowRight = pressed;
+        break;
+    }
+  }
+
   public centerOn(x: number, z: number): void {
     const cam = this.camera;
-    if (cam) {
-      cam.centerOn(x, z);
-    }
+    if (!cam) return;
+
+    const canvasHeight = cam.view.height;
+    const cy =
+      this._viewportInsets.top +
+      (canvasHeight - this._viewportInsets.top - this._viewportInsets.bottom) *
+        0.5;
+    const dyScreen = cy - canvasHeight * 0.5;
+    const offset = dyScreen / (48 * cam.view.zoom);
+
+    cam.centerOn(x - offset, z - offset);
   }
 
   public centerOnTownCenter(): void {
@@ -64,15 +91,7 @@ export class CameraController {
     for (let i = 0; i < entities.length; i++) {
       const ent = entities[i];
       if (!ent) continue;
-      if (
-        ent.kind === 'building' &&
-        ent.player === 0 &&
-        (ent.isTownCenter ||
-          ent.type === 'crown_keep' ||
-          ent.type === 'keep' ||
-          ent.type.includes('town_center') ||
-          ent.type.includes('great_hall'))
-      ) {
+      if (ent.kind === 'building' && ent.player === 0 && ent.isTownCenter) {
         this.centerOn(ent.x + ent.width / 2, ent.z + ent.height / 2);
         return;
       }
@@ -87,7 +106,7 @@ export class CameraController {
     let dirX = 0;
     let dirY = 0;
 
-    // 1. Arrow keys
+    // 1. Pan keys
     if (this.arrowLeft) dirX -= 1;
     if (this.arrowRight) dirX += 1;
     if (this.arrowUp) dirY -= 1;
@@ -179,7 +198,7 @@ export class CameraController {
   };
 
   // --- Middle-Mouse Drag Pan ---
-  private readonly onPointerDown = (e: PointerEvent | MouseEvent): void => {
+  private readonly onPointerDown = (e: PointerEvent): void => {
     if (e.button === 1) {
       this.isDragging = true;
       this.lastPointerX = e.clientX;
@@ -201,7 +220,7 @@ export class CameraController {
     }
   };
 
-  private readonly onPointerMove = (e: PointerEvent | MouseEvent): void => {
+  private readonly onPointerMove = (e: PointerEvent): void => {
     // Track pointer position on canvas for edge scroll
     const rect =
       typeof this.canvas.getBoundingClientRect === 'function'
@@ -221,7 +240,7 @@ export class CameraController {
     if (!this.isDragging) return;
 
     if (typeof e.buttons === 'number' && (e.buttons & 4) === 0) {
-      this.isDragging = false;
+      this.stopDragging();
       return;
     }
 
@@ -243,20 +262,9 @@ export class CameraController {
     cam.pan(-worldDx, -worldDz);
   };
 
-  private readonly onPointerUp = (e: PointerEvent | MouseEvent): void => {
+  private readonly onPointerUp = (e: PointerEvent): void => {
     if (e.button === 1 || this.isDragging) {
-      this.isDragging = false;
-      if (
-        this.activePointerId !== null &&
-        typeof this.canvas.releasePointerCapture === 'function'
-      ) {
-        try {
-          this.canvas.releasePointerCapture(this.activePointerId);
-        } catch {
-          // Ignored
-        }
-        this.activePointerId = null;
-      }
+      this.stopDragging();
     }
   };
 
@@ -266,62 +274,16 @@ export class CameraController {
     }
   };
 
-  private readonly onPointerEnter = (): void => {
-    this.isPointerOverCanvas = true;
+  private readonly onPointerOut = (e: PointerEvent): void => {
+    if (!e.relatedTarget) {
+      this.clearEdgeScroll();
+    }
   };
 
-  private readonly onPointerLeave = (): void => {
+  private readonly clearEdgeScroll = (): void => {
     this.isPointerOverCanvas = false;
     this.canvasPointerX = -1;
     this.canvasPointerY = -1;
-  };
-
-  // --- Keyboard (Arrows and H) ---
-  private readonly onKeyDown = (e: KeyboardEvent): void => {
-    if (isEditableElement(e.target)) return;
-
-    switch (e.key) {
-      case 'ArrowUp':
-        this.arrowUp = true;
-        e.preventDefault();
-        break;
-      case 'ArrowDown':
-        this.arrowDown = true;
-        e.preventDefault();
-        break;
-      case 'ArrowLeft':
-        this.arrowLeft = true;
-        e.preventDefault();
-        break;
-      case 'ArrowRight':
-        this.arrowRight = true;
-        e.preventDefault();
-        break;
-      case 'h':
-      case 'H':
-        if (!e.ctrlKey && !e.altKey && !e.metaKey) {
-          this.centerOnTownCenter();
-          e.preventDefault();
-        }
-        break;
-    }
-  };
-
-  private readonly onKeyUp = (e: KeyboardEvent): void => {
-    switch (e.key) {
-      case 'ArrowUp':
-        this.arrowUp = false;
-        break;
-      case 'ArrowDown':
-        this.arrowDown = false;
-        break;
-      case 'ArrowLeft':
-        this.arrowLeft = false;
-        break;
-      case 'ArrowRight':
-        this.arrowRight = false;
-        break;
-    }
   };
 
   private readonly onBlur = (): void => {
@@ -329,7 +291,25 @@ export class CameraController {
     this.arrowDown = false;
     this.arrowLeft = false;
     this.arrowRight = false;
+    this.clearEdgeScroll();
+    this.stopDragging();
   };
+
+  private stopDragging(): void {
+    if (!this.isDragging && this.activePointerId === null) return;
+    this.isDragging = false;
+    if (
+      this.activePointerId !== null &&
+      typeof this.canvas.releasePointerCapture === 'function'
+    ) {
+      try {
+        this.canvas.releasePointerCapture(this.activePointerId);
+      } catch {
+        // Ignored
+      }
+      this.activePointerId = null;
+    }
+  }
 
   private attachEvents(): void {
     if (typeof this.canvas.addEventListener === 'function') {
@@ -338,13 +318,7 @@ export class CameraController {
         'pointerdown',
         this.onPointerDown as EventListener,
       );
-      this.canvas.addEventListener(
-        'mousedown',
-        this.onPointerDown as EventListener,
-      );
       this.canvas.addEventListener('auxclick', this.onAuxClick);
-      this.canvas.addEventListener('pointerenter', this.onPointerEnter);
-      this.canvas.addEventListener('pointerleave', this.onPointerLeave);
     }
 
     const globalTarget = typeof window !== 'undefined' ? window : this.canvas;
@@ -354,20 +328,34 @@ export class CameraController {
         this.onPointerMove as EventListener,
       );
       globalTarget.addEventListener(
-        'mousemove',
-        this.onPointerMove as EventListener,
-      );
-      globalTarget.addEventListener(
         'pointerup',
         this.onPointerUp as EventListener,
       );
       globalTarget.addEventListener(
-        'mouseup',
-        this.onPointerUp as EventListener,
+        'pointerout',
+        this.onPointerOut as EventListener,
       );
-      globalTarget.addEventListener('keydown', this.onKeyDown as EventListener);
-      globalTarget.addEventListener('keyup', this.onKeyUp as EventListener);
+      globalTarget.addEventListener(
+        'pointerleave',
+        this.clearEdgeScroll as EventListener,
+      );
       globalTarget.addEventListener('blur', this.onBlur);
+    }
+
+    const docTarget = typeof document !== 'undefined' ? document : null;
+    if (
+      docTarget &&
+      docTarget !== (globalTarget as unknown as Document) &&
+      typeof docTarget.addEventListener === 'function'
+    ) {
+      docTarget.addEventListener(
+        'pointerout',
+        this.onPointerOut as EventListener,
+      );
+      docTarget.addEventListener(
+        'pointerleave',
+        this.clearEdgeScroll as EventListener,
+      );
     }
   }
 
@@ -378,13 +366,7 @@ export class CameraController {
         'pointerdown',
         this.onPointerDown as EventListener,
       );
-      this.canvas.removeEventListener(
-        'mousedown',
-        this.onPointerDown as EventListener,
-      );
       this.canvas.removeEventListener('auxclick', this.onAuxClick);
-      this.canvas.removeEventListener('pointerenter', this.onPointerEnter);
-      this.canvas.removeEventListener('pointerleave', this.onPointerLeave);
     }
 
     const globalTarget = typeof window !== 'undefined' ? window : this.canvas;
@@ -394,23 +376,34 @@ export class CameraController {
         this.onPointerMove as EventListener,
       );
       globalTarget.removeEventListener(
-        'mousemove',
-        this.onPointerMove as EventListener,
-      );
-      globalTarget.removeEventListener(
         'pointerup',
         this.onPointerUp as EventListener,
       );
       globalTarget.removeEventListener(
-        'mouseup',
-        this.onPointerUp as EventListener,
+        'pointerout',
+        this.onPointerOut as EventListener,
       );
       globalTarget.removeEventListener(
-        'keydown',
-        this.onKeyDown as EventListener,
+        'pointerleave',
+        this.clearEdgeScroll as EventListener,
       );
-      globalTarget.removeEventListener('keyup', this.onKeyUp as EventListener);
       globalTarget.removeEventListener('blur', this.onBlur);
+    }
+
+    const docTarget = typeof document !== 'undefined' ? document : null;
+    if (
+      docTarget &&
+      docTarget !== (globalTarget as unknown as Document) &&
+      typeof docTarget.removeEventListener === 'function'
+    ) {
+      docTarget.removeEventListener(
+        'pointerout',
+        this.onPointerOut as EventListener,
+      );
+      docTarget.removeEventListener(
+        'pointerleave',
+        this.clearEdgeScroll as EventListener,
+      );
     }
   }
 }

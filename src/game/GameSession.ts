@@ -7,7 +7,7 @@ import type { GameMap } from '../sim/map';
 import type { Command } from '../sim/commands';
 import type { Entity } from '../sim/entity';
 import { InputController } from '../input/InputController';
-import { publishHud, resetHud } from '../ui/hud';
+import { publishHud, resetHud, setHudStatus } from '../ui/hud';
 
 export { SIM_DT };
 export const DEFAULT_MAP_URL = '/maps/alpha_test.json';
@@ -171,6 +171,7 @@ function findNearbyPassablePoints(
 }
 
 export class GameSession {
+  readonly debugEnabled: boolean;
   readonly renderer: Renderer;
   readonly input: InputController;
   private readonly _cheats: GameCheats;
@@ -208,6 +209,10 @@ export class GameSession {
   constructor(canvas: HTMLCanvasElement, options?: GameSessionOptions) {
     this._maxAccumulator = options?.maxAccumulator ?? DEFAULT_MAX_ACCUMULATOR;
     this._debugSceneEnabled = options?.debugScene ?? true;
+    this.debugEnabled =
+      Boolean(import.meta.env.DEV) ||
+      (typeof window !== 'undefined' &&
+        new URLSearchParams(window.location.search).get('debug') === '1');
 
     // Reset HUD on session initialization
     resetHud();
@@ -304,6 +309,9 @@ export class GameSession {
   get cheats(): GameCheats {
     return this._cheats;
   }
+  showStatus(message: string): void {
+    setHudStatus(message);
+  }
 
   issue(cmd: Command): void {
     if (this._disposed) return;
@@ -393,7 +401,7 @@ export class GameSession {
     }
 
     // Update input controller BEFORE render (updates camera, pruning, setInteraction)
-    this.input.update(delta, now);
+    this.input.update(dt, now);
 
     // Explicitly render canvas frame with snapshot and render time
     this.renderer.render(this._sim ? this._snapshot : undefined, now / 1000);
@@ -525,11 +533,7 @@ export class GameSession {
   private registerDebugHook(): void {
     if (typeof window === 'undefined') return;
 
-    const isDebug =
-      Boolean(import.meta.env.DEV) ||
-      new URLSearchParams(window.location.search).get('debug') === '1';
-
-    if (isDebug) {
+    if (this.debugEnabled) {
       window.__bordev = {
         session: this,
         renderer: this.renderer,

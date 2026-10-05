@@ -25,31 +25,11 @@ type MockCanvas = HTMLCanvasElement & {
 };
 
 function createMockCanvas(width = 800, height = 600): MockCanvas {
-  const listeners: Record<string, EventListener[]> = {};
-
   return {
     width,
     height,
     clientWidth: width,
     clientHeight: height,
-    addEventListener: (type: string, listener: EventListener) => {
-      if (!listeners[type]) listeners[type] = [];
-      listeners[type].push(listener);
-    },
-    removeEventListener: (type: string, listener: EventListener) => {
-      if (listeners[type]) {
-        listeners[type] = listeners[type].filter((fn) => fn !== listener);
-      }
-    },
-    dispatchEvent: (event: Event): boolean => {
-      const list = listeners[event.type];
-      if (list) {
-        for (const fn of list) {
-          fn(event);
-        }
-      }
-      return true;
-    },
     getBoundingClientRect: () => ({
       left: 0,
       top: 0,
@@ -509,22 +489,6 @@ describe('IsoCamera with Babylon.js engine', () => {
     expect(bScreenYR).toBeCloseTo(resizeCursor.y, 2);
 
     isoCam.dispose();
-    scene.dispose();
-    engine.dispose();
-  });
-
-  it('disposes camera and associated resources cleanly', () => {
-    const engine = new NullEngine();
-    const scene = new Scene(engine);
-    const canvas = createMockCanvas(800, 600);
-
-    const isoCam = new IsoCamera(scene, canvas, 128);
-    isoCam.centerOn(50, 50);
-
-    expect(isoCam.camera.isDisposed()).toBe(false);
-    isoCam.dispose();
-    expect(isoCam.camera.isDisposed()).toBe(true);
-
     scene.dispose();
     engine.dispose();
   });

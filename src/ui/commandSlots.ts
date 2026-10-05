@@ -1,7 +1,19 @@
+import { isTownCenterType, isWorkerType } from '../data/roles';
+
+export type CardAction =
+  | 'move'
+  | 'stop'
+  | 'hold'
+  | 'attackMove'
+  | 'economic'
+  | 'military'
+  | 'delete'
+  | 'back';
+
 export interface CommandSlot {
   key: string;
   label: string;
-  action: string | null;
+  action: CardAction | null;
   disabled: boolean;
   reason?: string;
   id?: string;
@@ -45,20 +57,13 @@ export function getCommandSlots(
     return slots;
   }
 
-  const hasPeasant = own.some(
-    (e) => e.type === 'peasant' || e.type === 'crown_peasant',
-  );
-  const hasMilitary = own.some(
-    (e) =>
-      e.type === 'spearman' ||
-      e.type === 'crown_spearman' ||
-      e.type === 'ox_cart',
-  );
+  const hasWorker = own.some((e) => e.kind === 'unit' && isWorkerType(e.type));
+  const hasUnit = own.some((e) => e.kind === 'unit');
   const hasBuilding = own.some((e) => e.kind === 'building');
-  const hasKeep = own.some((e) => e.type === 'keep' || e.type === 'crown_keep');
+  const hasTownCenter = own.some((e) => isTownCenterType(e.type));
 
-  // 1. Economic Submenu (only available if own peasant selected)
-  if (hasPeasant && submenu === 'economic') {
+  // 1. Economic Submenu (only available if own worker selected)
+  if (hasWorker && submenu === 'economic') {
     slots[0] = {
       key: 'Q',
       id: 'cottage',
@@ -118,8 +123,8 @@ export function getCommandSlots(
     return slots;
   }
 
-  // 2. Military Submenu (only available if own peasant selected)
-  if (hasPeasant && submenu === 'military') {
+  // 2. Military Submenu (only available if own worker selected)
+  if (hasWorker && submenu === 'military') {
     slots[0] = {
       key: 'Q',
       id: 'barracks',
@@ -202,7 +207,7 @@ export function getCommandSlots(
   }
 
   // 3. Unit Commands
-  if (hasPeasant || hasMilitary) {
+  if (hasUnit) {
     slots[0] = {
       key: 'Q',
       id: 'move',
@@ -236,7 +241,7 @@ export function getCommandSlots(
       tooltip: 'Attack-Move [R]',
     };
 
-    if (hasPeasant) {
+    if (hasWorker) {
       slots[5] = {
         key: 'A',
         id: 'economic',
@@ -268,7 +273,7 @@ export function getCommandSlots(
 
   // 4. Building Commands
   if (hasBuilding) {
-    if (hasKeep) {
+    if (hasTownCenter) {
       slots[0] = {
         key: 'Q',
         id: 'train-peasant',

@@ -7,9 +7,14 @@ import type { GameMap } from '../sim/map';
 import type { SessionSnapshot } from '../game/GameSession';
 import { AtlasCache, type LoadedAtlas } from './AtlasCache';
 import type { DebugSceneProbes } from './DebugScene';
-import type { IsoView } from './iso';
+import { type IsoView, worldToScreenInto } from './iso';
 import { IsoCamera } from './IsoCamera';
-import { Overlays, type OrderMarker, type SelectionBox } from './Overlays';
+import {
+  Overlays,
+  type OrderMarker,
+  type SelectionBox,
+  type OverlayFrameInput,
+} from './Overlays';
 import { SpriteBatch, type RenderSprite } from './SpriteBatch';
 import { Terrain } from './Terrain';
 import { UnitShadows } from './UnitShadows';
@@ -50,8 +55,6 @@ export interface PortraitMetadata {
   y: number;
   w: number;
   h: number;
-  pageWidth: number;
-  pageHeight: number;
 }
 
 export const REQUIRED_ATLASES = [
@@ -76,23 +79,35 @@ const TINT_PLAYER_0: readonly [number, number, number] = [0.2, 0.5, 0.9];
 const TINT_PLAYER_1: readonly [number, number, number] = [0.9, 0.2, 0.2];
 const TINT_NEUTRAL: readonly [number, number, number] = [1.0, 1.0, 1.0];
 
-const UNIT_ASSET_BY_TYPE: Record<string, string> = {
+const TYPE_TO_ASSET: Record<string, string> = {
   spearman: 'crown_spearman',
   ox_cart: 'crown_ox_cart',
   peasant: 'crown_peasant',
-};
-
-const BUILDING_ASSET_BY_TYPE: Record<string, string> = {
+  keep: 'crown_keep',
   cottage: 'crown_cottage',
   farm: 'crown_farm',
-  keep: 'crown_keep',
+  gold_mine: 'gold_mine',
 };
+
+function getAssetForEntity(entity: { kind?: string; type?: string }): string {
+  if (entity.type && TYPE_TO_ASSET[entity.type]) {
+    return TYPE_TO_ASSET[entity.type];
+  }
+  if (entity.kind === 'unit') {
+    return 'crown_peasant';
+  }
+  if (entity.kind === 'building') {
+    return 'crown_keep';
+  }
+  if (entity.kind === 'mine') {
+    return 'gold_mine';
+  }
+  return entity.type ?? 'tree_1';
+}
 
 interface StaticEntityDescriptor {
   batch: SpriteBatch;
   frame: AtlasFrame;
-  anchorOffsetX: number;
-  anchorOffsetZ: number;
 }
 
 interface UnitFrameEntry {
@@ -104,8 +119,11 @@ export interface CachedEntityRect extends EntityScreenRect {
   id: number;
   kind: string;
   frameAy: number;
+  spriteTopPx?: number;
   stamp: number;
 }
+
+const scratchAnchor = { x: 0, y: 0 };
 
 export function writeSpriteScreenRect(
   out: CachedEntityRect,
@@ -117,18 +135,15 @@ export function writeSpriteScreenRect(
   view: IsoView,
   stamp: number,
 ): void {
+  worldToScreenInto(scratchAnchor, anchorX, anchorZ, view);
   const zoom = view.zoom;
-  const dx = anchorX - view.targetX;
-  const dz = anchorZ - view.targetZ;
-  const anchorScreenX = view.width * 0.5 + (dx - dz) * 48 * zoom;
-  const anchorScreenY = view.height * 0.5 + (dx + dz) * 24 * zoom;
 
   out.id = id;
   out.kind = kind;
-  out.left = anchorScreenX - frame.ax * zoom;
-  out.top = anchorScreenY - frame.ay * zoom;
-  out.right = anchorScreenX + (frame.w - frame.ax) * zoom;
-  out.bottom = anchorScreenY + (frame.h - frame.ay) * zoom;
+  out.left = scratchAnchor.x - frame.ax * zoom;
+  out.top = scratchAnchor.y - frame.ay * zoom;
+  out.right = scratchAnchor.x + (frame.w - frame.ax) * zoom;
+  out.bottom = scratchAnchor.y + (frame.h - frame.ay) * zoom;
   out.depth = anchorX + anchorZ;
   out.frameAy = frame.ay;
   out.stamp = stamp;
@@ -145,7 +160,7 @@ export function pickFrontmost(
 
   for (let i = 0; i < count; i++) {
     const rect = rects[i];
-    if (rect.kind === 'doodad' || rect.kind === 'projectile') {
+    if (rect.kind === 'doodad') {
       continue;
     }
     if (
@@ -201,6 +216,9 @@ export class Renderer {
   private interactionSelectedIds: readonly number[] = [];
   private interactionMarkers: readonly OrderMarker[] = [];
   private interactionBox: SelectionBox | null = null;
+  private readonly assetSpriteTopPx = new Map<string, number>();
+  private readonly overlayInput: OverlayFrameInput;
+  private currentSnapshot: SessionSnapshot | undefined = undefined;
 
   // Cached screen rectangles for entity picking, allocation-free after capacity grows
   private readonly entityRectPool: CachedEntityRect[] = [];
@@ -208,10 +226,17 @@ export class Renderer {
   private readonly entityRectMap = new Map<number, CachedEntityRect>();
   private rectStamp = 0;
 
-  private readonly getFrameAy = (id: number): number | undefined => {
+  private readonly getSpriteTopPx = (id: number): number | undefined => {
     const cached = this.entityRectMap.get(id);
     if (cached && cached.stamp === this.rectStamp) {
-      return cached.frameAy;
+      return cached.spriteTopPx;
+    }
+    if (this.currentSnapshot) {
+      const ent = this.currentSnapshot.entities.find((e) => e.id === id);
+      if (ent) {
+        const asset = getAssetForEntity(ent);
+        return this.assetSpriteTopPx.get(asset);
+      }
     }
     return undefined;
   };
@@ -252,6 +277,15 @@ export class Renderer {
     this.camera = new IsoCamera(this.scene, this.canvas, 128);
     this.camera.centerOn(22, 22);
 
+    this.overlayInput = {
+      snapshot: undefined,
+      view: this.camera.view,
+      selectedIds: [],
+      markers: [],
+      box: null,
+      timeSeconds: 0,
+      getSpriteTopPx: this.getSpriteTopPx,
+    };
     if (typeof window !== 'undefined') {
       window.addEventListener('resize', this.onResize);
     }
@@ -271,6 +305,10 @@ export class Renderer {
     this.interactionBox = box;
   }
 
+  toggleDebugGrid(): boolean {
+    return this.overlays ? this.overlays.toggleGrid() : false;
+  }
+
   getEntityScreenRect(id: number): EntityScreenRect | undefined {
     const cached = this.entityRectMap.get(id);
     if (cached && cached.stamp === this.rectStamp) {
@@ -287,15 +325,7 @@ export class Renderer {
     kind?: string;
     type?: string;
   }): PortraitMetadata | undefined {
-    const asset =
-      entity.kind === 'unit'
-        ? (UNIT_ASSET_BY_TYPE[entity.type ?? ''] ?? 'crown_peasant')
-        : entity.kind === 'building'
-          ? (BUILDING_ASSET_BY_TYPE[entity.type ?? ''] ?? 'crown_keep')
-          : entity.kind === 'mine'
-            ? 'gold_mine'
-            : (entity.type ?? 'tree_1');
-
+    const asset = getAssetForEntity(entity);
     const loaded = this.loadedAtlases.get(asset);
     if (!loaded) return undefined;
 
@@ -305,7 +335,8 @@ export class Renderer {
     if (!frame) return undefined;
 
     const page = loaded.pages[frame.page];
-    const url = page?.body?.url ?? `/atlases/${asset}.body.png`;
+    const url = page?.body?.url;
+    if (!url) return undefined;
 
     return {
       url,
@@ -313,8 +344,6 @@ export class Renderer {
       y: frame.y,
       w: frame.w,
       h: frame.h,
-      pageWidth: page?.width ?? 2048,
-      pageHeight: page?.height ?? 2048,
     };
   }
 
@@ -375,23 +404,49 @@ export class Renderer {
     }
 
     // 7. Precompute fast descriptor and frame lookup tables to eliminate per-frame allocations
+    this.assetSpriteTopPx.clear();
+    for (const [assetId, loaded] of this.loadedAtlases.entries()) {
+      let maxAy = 0;
+      const isBuilding =
+        assetId === 'crown_keep' ||
+        assetId === 'crown_cottage' ||
+        assetId === 'crown_farm' ||
+        assetId === 'gold_mine';
+      for (const [key, frame] of Object.entries(loaded.atlas.frames)) {
+        if (isBuilding && !key.startsWith('idle/')) {
+          continue;
+        }
+        if (frame.ay > maxAy) {
+          maxAy = frame.ay;
+        }
+      }
+      if (maxAy === 0) {
+        for (const frame of Object.values(loaded.atlas.frames)) {
+          if (frame.ay > maxAy) {
+            maxAy = frame.ay;
+          }
+        }
+      }
+      this.assetSpriteTopPx.set(assetId, maxAy);
+    }
+
     this.staticDescriptors.clear();
-    const staticConfigs: [string, number, number][] = [
-      ['crown_keep', 2, 2],
-      ['crown_cottage', 1, 1],
-      ['crown_farm', 1, 1],
-      ['gold_mine', 1, 1],
-      ['tree_1', 0.5, 0.5],
-      ['tree_2', 0.5, 0.5],
-      ['tree_3', 0.5, 0.5],
-      ['tree_4', 0.5, 0.5],
-      ['rock_1', 0.5, 0.5],
-      ['rock_2', 0.5, 0.5],
-      ['calib_tile', 0.5, 0.5],
+    const staticAssets = [
+      'crown_keep',
+      'crown_cottage',
+      'crown_farm',
+      'gold_mine',
+      'tree_1',
+      'tree_2',
+      'tree_3',
+      'tree_4',
+      'rock_1',
+      'rock_2',
+      'calib_tile',
     ];
 
-    for (let c = 0; c < staticConfigs.length; c++) {
-      const [asset, ox, oz] = staticConfigs[c];
+    for (let c = 0; c < staticAssets.length; c++) {
+      const asset = staticAssets[c];
       const loaded = this.loadedAtlases.get(asset);
       if (!loaded) continue;
       const frame = loaded.atlas.frames['idle/0/0'];
@@ -401,8 +456,6 @@ export class Renderer {
       this.staticDescriptors.set(asset, {
         batch,
         frame,
-        anchorOffsetX: ox,
-        anchorOffsetZ: oz,
       });
     }
 
@@ -452,6 +505,7 @@ export class Renderer {
     anchorX: number,
     anchorZ: number,
     frame: AtlasFrame,
+    spriteTopPx: number,
   ): void {
     if (!this.camera) return;
     const view = this.camera.view;
@@ -467,6 +521,7 @@ export class Renderer {
         bottom: 0,
         depth: 0,
         frameAy: 0,
+        spriteTopPx: 0,
         stamp: 0,
       };
       this.entityRectMap.set(id, cached);
@@ -482,6 +537,7 @@ export class Renderer {
       view,
       this.rectStamp,
     );
+    cached.spriteTopPx = spriteTopPx;
 
     if (this.entityRectCount >= this.entityRectPool.length) {
       this.entityRectPool.push(cached);
@@ -541,13 +597,7 @@ export class Renderer {
           this.unitShadows?.add(anchorX, anchorZ, radius);
           shadowCount++;
 
-          const asset =
-            ent.type === 'spearman'
-              ? 'crown_spearman'
-              : ent.type === 'ox_cart'
-                ? 'crown_ox_cart'
-                : 'crown_peasant';
-
+          const asset = getAssetForEntity(ent);
           const table = this.unitWalkTables.get(asset);
           if (table) {
             const dir = (((ent.facing ?? 0) % 8) + 8) % 8;
@@ -580,22 +630,17 @@ export class Renderer {
                   anchorX,
                   anchorZ,
                   entry.frame,
+                  this.assetSpriteTopPx.get(asset) ?? entry.frame.ay,
                 );
               }
             }
           }
         } else if (kind === 'building') {
-          const asset =
-            ent.type === 'cottage'
-              ? 'crown_cottage'
-              : ent.type === 'farm'
-                ? 'crown_farm'
-                : 'crown_keep';
-
+          const asset = getAssetForEntity(ent);
           const desc = this.staticDescriptors.get(asset);
           if (desc) {
-            const posX = ent.x + desc.anchorOffsetX;
-            const posZ = ent.z + desc.anchorOffsetZ;
+            const posX = ent.x + (ent.width ?? 1) * 0.5;
+            const posZ = ent.z + (ent.height ?? 1) * 0.5;
 
             this.scratchSprite.asset = asset;
             this.scratchSprite.animation = 'idle';
@@ -620,35 +665,17 @@ export class Renderer {
               posX,
               posZ,
               desc.frame,
+              this.assetSpriteTopPx.get(asset) ?? desc.frame.ay,
             );
           }
         } else if (kind === 'mine') {
-          const desc = this.staticDescriptors.get('gold_mine');
+          const asset = getAssetForEntity(ent);
+          const desc = this.staticDescriptors.get(asset);
           if (desc) {
-            const posX = ent.x + desc.anchorOffsetX;
-            const posZ = ent.z + desc.anchorOffsetZ;
+            const posX = ent.x + (ent.width ?? 2) * 0.5;
+            const posZ = ent.z + (ent.height ?? 2) * 0.5;
 
-            this.scratchSprite.asset = 'gold_mine';
-            this.scratchSprite.animation = 'idle';
-            this.scratchSprite.facing = 0;
-            this.scratchSprite.x = posX;
-            this.scratchSprite.z = posZ;
-            this.scratchSprite.tint = TINT_NEUTRAL;
-            this.scratchSprite.alpha = 1.0;
-
-            desc.batch.add(desc.frame, this.scratchSprite);
-            spriteCount++;
-            shadowCount++;
-
-            this.recordEntityScreenRect(ent.id, 'mine', posX, posZ, desc.frame);
-          }
-        } else if (kind === 'doodad') {
-          const desc = this.staticDescriptors.get(ent.type ?? 'tree_1');
-          if (desc) {
-            const posX = ent.x + desc.anchorOffsetX;
-            const posZ = ent.z + desc.anchorOffsetZ;
-
-            this.scratchSprite.asset = ent.type ?? 'tree_1';
+            this.scratchSprite.asset = asset;
             this.scratchSprite.animation = 'idle';
             this.scratchSprite.facing = 0;
             this.scratchSprite.x = posX;
@@ -662,11 +689,31 @@ export class Renderer {
 
             this.recordEntityScreenRect(
               ent.id,
-              'doodad',
+              'mine',
               posX,
               posZ,
               desc.frame,
+              this.assetSpriteTopPx.get(asset) ?? desc.frame.ay,
             );
+          }
+        } else if (kind === 'doodad') {
+          const asset = getAssetForEntity(ent);
+          const desc = this.staticDescriptors.get(asset);
+          if (desc) {
+            const posX = ent.x + 0.5;
+            const posZ = ent.z + 0.5;
+
+            this.scratchSprite.asset = asset;
+            this.scratchSprite.animation = 'idle';
+            this.scratchSprite.facing = 0;
+            this.scratchSprite.x = posX;
+            this.scratchSprite.z = posZ;
+            this.scratchSprite.tint = TINT_NEUTRAL;
+            this.scratchSprite.alpha = 1.0;
+
+            desc.batch.add(desc.frame, this.scratchSprite);
+            spriteCount++;
+            shadowCount++;
           }
         }
       }
@@ -682,15 +729,13 @@ export class Renderer {
 
     // Update overlays with interaction state before rendering the scene
     if (this.overlays && this.camera) {
-      this.overlays.update(
-        snapshot,
-        this.camera.view,
-        this.interactionSelectedIds,
-        this.interactionMarkers,
-        this.interactionBox,
-        t,
-        this.getFrameAy,
-      );
+      this.overlayInput.snapshot = snapshot;
+      this.overlayInput.view = this.camera.view;
+      this.overlayInput.selectedIds = this.interactionSelectedIds;
+      this.overlayInput.markers = this.interactionMarkers;
+      this.overlayInput.box = this.interactionBox;
+      this.overlayInput.timeSeconds = t;
+      this.overlays.update(this.overlayInput);
     }
 
     // Scene render wrapped in beginFrame / endFrame
@@ -747,6 +792,7 @@ export class Renderer {
     this.staticDescriptors.clear();
     this.unitWalkTables.clear();
     this.unitFps.clear();
+    this.assetSpriteTopPx.clear();
 
     this.unitShadows?.dispose();
     this.unitShadows = null;

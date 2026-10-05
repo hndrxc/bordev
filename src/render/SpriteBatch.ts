@@ -4,10 +4,15 @@ import { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
-import '@babylonjs/core/Meshes/thinInstanceMesh';
 import type { Scene } from '@babylonjs/core/scene';
 import type { AtlasFrame } from '../assets/atlas';
 import type { LoadedAtlasPage } from './AtlasCache';
+import { ISO_RIGHT_BASIS, ISO_UP_BASIS, PPU } from './iso';
+import {
+  ThinInstancePool,
+  initIdentityMatrices,
+  type ThinInstanceAttributeSpec,
+} from './ThinInstancePool';
 
 export interface RenderSprite {
   asset: string;
@@ -23,9 +28,12 @@ export interface RenderSprite {
 const BODY_SHADER_KEY = 'bordevSpriteBody';
 const SHADOW_SHADER_KEY = 'bordevSpriteShadow';
 
-const PPU = 96 / Math.SQRT2;
-const RIGHT_BASIS = new Vector3(1 / Math.SQRT2, 0, -1 / Math.SQRT2);
-const UP_BASIS = new Vector3(-0.5 / Math.SQRT2, Math.sqrt(3) / 2, -0.5 / Math.SQRT2);
+const RIGHT_BASIS = new Vector3(
+  ISO_RIGHT_BASIS.x,
+  ISO_RIGHT_BASIS.y,
+  ISO_RIGHT_BASIS.z,
+);
+const UP_BASIS = new Vector3(ISO_UP_BASIS.x, ISO_UP_BASIS.y, ISO_UP_BASIS.z);
 
 function ensureSpriteShaders(): void {
   if (!Effect.ShadersStore[`${BODY_SHADER_KEY}VertexShader`]) {
@@ -127,21 +135,11 @@ export class SpriteBatch {
   private readonly shadowMesh?: Mesh;
   private readonly bodyMaterial: ShaderMaterial;
   private readonly shadowMaterial?: ShaderMaterial;
-
-  private count = 0;
-  private capacity = 64;
-
-  private matrixBuffer = new Float32Array(64 * 16);
-  private iPosBuffer = new Float32Array(64 * 3);
-  private iUVBuffer = new Float32Array(64 * 4);
-  private iSizeBuffer = new Float32Array(64 * 4);
-  private iTintBuffer = new Float32Array(64 * 4);
+  private readonly pool: ThinInstancePool;
 
   constructor(scene: Scene, page: LoadedAtlasPage) {
     this.page = page;
     ensureSpriteShaders();
-
-    this.initIdentityMatrices(this.matrixBuffer, 0, this.capacity);
 
     // Setup body material and mesh (rendering group 2: sprites with depth test & write)
     this.bodyMaterial = new ShaderMaterial(
@@ -186,14 +184,8 @@ export class SpriteBatch {
     this.bodyMesh.doNotSyncBoundingInfo = true;
     this.bodyMesh.isVisible = false;
     createUnitQuad(this.bodyMesh);
-    this.registerThinAttributes(this.bodyMesh);
     this.bodyMesh.material = this.bodyMaterial;
-    this.bodyMesh.thinInstanceSetBuffer('matrix', this.matrixBuffer, 16, false);
-    this.bodyMesh.thinInstanceSetBuffer('iPos', this.iPosBuffer, 3, false);
-    this.bodyMesh.thinInstanceSetBuffer('iUV', this.iUVBuffer, 4, false);
-    this.bodyMesh.thinInstanceSetBuffer('iSize', this.iSizeBuffer, 4, false);
-    this.bodyMesh.thinInstanceSetBuffer('iTint', this.iTintBuffer, 4, false);
-    this.bodyMesh.thinInstanceCount = 0;
+
     // Setup shadow material and mesh if shadow texture is available
     // (rendering group 1: shadows with alpha blend, depth test, NO depth write)
     if (page.shadow) {
@@ -238,84 +230,70 @@ export class SpriteBatch {
       this.shadowMesh.doNotSyncBoundingInfo = true;
       this.shadowMesh.isVisible = false;
       createUnitQuad(this.shadowMesh);
-      this.registerThinAttributes(this.shadowMesh);
       this.shadowMesh.material = this.shadowMaterial;
-      this.shadowMesh.thinInstanceSetBuffer('matrix', this.matrixBuffer, 16, false);
-      this.shadowMesh.thinInstanceSetBuffer('iPos', this.iPosBuffer, 3, false);
-      this.shadowMesh.thinInstanceSetBuffer('iUV', this.iUVBuffer, 4, false);
-      this.shadowMesh.thinInstanceSetBuffer('iSize', this.iSizeBuffer, 4, false);
-      this.shadowMesh.thinInstanceSetBuffer('iTint', this.iTintBuffer, 4, false);
-      this.shadowMesh.thinInstanceCount = 0;
     }
+
+    const meshes = this.shadowMesh
+      ? [this.bodyMesh, this.shadowMesh]
+      : [this.bodyMesh];
+
+    const attributes: ThinInstanceAttributeSpec[] = [
+      { name: 'matrix', stride: 16, static: true, init: initIdentityMatrices },
+      { name: 'iPos', stride: 3 },
+      { name: 'iUV', stride: 4 },
+      { name: 'iSize', stride: 4 },
+      { name: 'iTint', stride: 4 },
+    ];
+
+    this.pool = new ThinInstancePool({
+      meshes,
+      attributes,
+      initialCapacity: 64,
+    });
   }
 
   beginFrame(): void {
-    this.count = 0;
+    this.pool.beginFrame();
   }
 
   add(frame: AtlasFrame, sprite: RenderSprite): void {
-    if (this.count >= this.capacity) {
-      this.grow();
-    }
+    const index = this.pool.alloc();
 
-    const index = this.count;
+    const pos = this.pool.getBuffer('iPos');
+    const uv = this.pool.getBuffer('iUV');
+    const size = this.pool.getBuffer('iSize');
+    const tint = this.pool.getBuffer('iTint');
 
     // iPos: world anchor coordinates
     const offsetPos = index * 3;
-    this.iPosBuffer[offsetPos + 0] = sprite.x;
-    this.iPosBuffer[offsetPos + 1] = 0.0;
-    this.iPosBuffer[offsetPos + 2] = sprite.z;
+    pos[offsetPos + 0] = sprite.x;
+    pos[offsetPos + 1] = 0.0;
+    pos[offsetPos + 2] = sprite.z;
 
-    // iUV: normalized by actual loaded page dimensions (no 2048 assumption)
+    // iUV: normalized by actual loaded page dimensions
     const offsetUV = index * 4;
-    this.iUVBuffer[offsetUV + 0] = frame.x / this.page.width;
-    this.iUVBuffer[offsetUV + 1] = frame.y / this.page.height;
-    this.iUVBuffer[offsetUV + 2] = frame.w / this.page.width;
-    this.iUVBuffer[offsetUV + 3] = frame.h / this.page.height;
+    uv[offsetUV + 0] = frame.x / this.page.width;
+    uv[offsetUV + 1] = frame.y / this.page.height;
+    uv[offsetUV + 2] = frame.w / this.page.width;
+    uv[offsetUV + 3] = frame.h / this.page.height;
 
-    // iSize: pixel dimensions and anchor offsets (can lie outside frame)
+    // iSize: pixel dimensions and anchor offsets
     const offsetSize = index * 4;
-    this.iSizeBuffer[offsetSize + 0] = frame.w;
-    this.iSizeBuffer[offsetSize + 1] = frame.h;
-    this.iSizeBuffer[offsetSize + 2] = frame.ax;
-    this.iSizeBuffer[offsetSize + 3] = frame.ay;
+    size[offsetSize + 0] = frame.w;
+    size[offsetSize + 1] = frame.h;
+    size[offsetSize + 2] = frame.ax;
+    size[offsetSize + 3] = frame.ay;
 
     // iTint: team color RGB and alpha
     const offsetTint = index * 4;
-    this.iTintBuffer[offsetTint + 0] = sprite.tint[0];
-    this.iTintBuffer[offsetTint + 1] = sprite.tint[1];
-    this.iTintBuffer[offsetTint + 2] = sprite.tint[2];
-    this.iTintBuffer[offsetTint + 3] = sprite.alpha;
-
-    this.count++;
+    tint[offsetTint + 0] = sprite.tint[0];
+    tint[offsetTint + 1] = sprite.tint[1];
+    tint[offsetTint + 2] = sprite.tint[2];
+    tint[offsetTint + 3] = sprite.alpha;
   }
 
   endFrame(): void {
-    if (this.count === 0) {
-      this.bodyMesh.thinInstanceCount = 0;
-      this.bodyMesh.isVisible = false;
-      if (this.shadowMesh) {
-        this.shadowMesh.thinInstanceCount = 0;
-        this.shadowMesh.isVisible = false;
-      }
-      return;
-    }
-
-    this.bodyMesh.isVisible = true;
-    this.bodyMesh.thinInstancePartialBufferUpdate('iPos', this.count, 0);
-    this.bodyMesh.thinInstancePartialBufferUpdate('iUV', this.count, 0);
-    this.bodyMesh.thinInstancePartialBufferUpdate('iSize', this.count, 0);
-    this.bodyMesh.thinInstancePartialBufferUpdate('iTint', this.count, 0);
-    this.bodyMesh.thinInstanceCount = this.count;
-
-    if (this.shadowMesh) {
-      this.shadowMesh.isVisible = true;
-      this.shadowMesh.thinInstancePartialBufferUpdate('iPos', this.count, 0);
-      this.shadowMesh.thinInstancePartialBufferUpdate('iUV', this.count, 0);
-      this.shadowMesh.thinInstancePartialBufferUpdate('iSize', this.count, 0);
-      this.shadowMesh.thinInstancePartialBufferUpdate('iTint', this.count, 0);
-      this.shadowMesh.thinInstanceCount = this.count;
-    }
+    this.pool.endFrame();
   }
 
   dispose(): void {
@@ -324,64 +302,6 @@ export class SpriteBatch {
     this.shadowMesh?.dispose();
     this.shadowMaterial?.dispose();
   }
-
-  private registerThinAttributes(mesh: Mesh): void {
-    mesh.thinInstanceRegisterAttribute('iPos', 3);
-    mesh.thinInstanceRegisterAttribute('iUV', 4);
-    mesh.thinInstanceRegisterAttribute('iSize', 4);
-    mesh.thinInstanceRegisterAttribute('iTint', 4);
-  }
-
-  private initIdentityMatrices(buffer: Float32Array, start: number, count: number): void {
-    for (let i = start; i < start + count; i++) {
-      const offset = i * 16;
-      buffer[offset + 0] = 1;
-      buffer[offset + 5] = 1;
-      buffer[offset + 10] = 1;
-      buffer[offset + 15] = 1;
-    }
-  }
-
-  private grow(): void {
-    const newCapacity = this.capacity * 2;
-
-    const newMatrix = new Float32Array(newCapacity * 16);
-    newMatrix.set(this.matrixBuffer);
-    this.initIdentityMatrices(newMatrix, this.capacity, newCapacity - this.capacity);
-
-    const newPos = new Float32Array(newCapacity * 3);
-    newPos.set(this.iPosBuffer);
-
-    const newUV = new Float32Array(newCapacity * 4);
-    newUV.set(this.iUVBuffer);
-
-    const newSize = new Float32Array(newCapacity * 4);
-    newSize.set(this.iSizeBuffer);
-
-    const newTint = new Float32Array(newCapacity * 4);
-    newTint.set(this.iTintBuffer);
-
-    this.capacity = newCapacity;
-    this.matrixBuffer = newMatrix;
-    this.iPosBuffer = newPos;
-    this.iUVBuffer = newUV;
-    this.iSizeBuffer = newSize;
-    this.iTintBuffer = newTint;
-
-    this.bodyMesh.thinInstanceSetBuffer('matrix', this.matrixBuffer, 16, false);
-    this.bodyMesh.thinInstanceSetBuffer('iPos', this.iPosBuffer, 3, false);
-    this.bodyMesh.thinInstanceSetBuffer('iUV', this.iUVBuffer, 4, false);
-    this.bodyMesh.thinInstanceSetBuffer('iSize', this.iSizeBuffer, 4, false);
-    this.bodyMesh.thinInstanceSetBuffer('iTint', this.iTintBuffer, 4, false);
-
-    if (this.shadowMesh) {
-      this.shadowMesh.thinInstanceSetBuffer('matrix', this.matrixBuffer, 16, false);
-      this.shadowMesh.thinInstanceSetBuffer('iPos', this.iPosBuffer, 3, false);
-      this.shadowMesh.thinInstanceSetBuffer('iUV', this.iUVBuffer, 4, false);
-      this.shadowMesh.thinInstanceSetBuffer('iSize', this.iSizeBuffer, 4, false);
-      this.shadowMesh.thinInstanceSetBuffer('iTint', this.iTintBuffer, 4, false);
-    }
-}
 }
 
 export { UnitShadows } from './UnitShadows';

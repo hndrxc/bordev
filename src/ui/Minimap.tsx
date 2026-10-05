@@ -20,7 +20,7 @@ const TERRAIN_RGB: Record<number, readonly [number, number, number]> = {
 
 const VOID_RGB: readonly [number, number, number] = [18, 20, 24];
 
-function minimapToWorld(
+export function minimapToWorld(
   mx: number,
   my: number,
   mapSize: number,
@@ -37,20 +37,137 @@ function minimapToWorld(
   };
 }
 
+export function worldToMinimap(
+  wx: number,
+  wz: number,
+  mapSize: number,
+  width: number,
+  height: number,
+): { mx: number; my: number } {
+  const nu = (wx - wz) / mapSize;
+  const nv = (wx + wz) / mapSize;
+  return {
+    mx: (nu + 1) * 0.5 * width,
+    my: nv * 0.5 * height,
+  };
+}
+
 export function Minimap({ session, width = 180, height = 180 }: MinimapProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const terrainCacheRef = useRef<ImageData | null>(null);
+  const terrainCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const cachedTilesRef = useRef<Uint8Array | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [dpr, setDpr] = useState(() =>
+    typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1,
+  );
 
   const minimapData = useHudStore((state) => state.minimap);
   const mapSize = minimapData.mapSize || 128;
   const tiles = minimapData.tiles;
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const updateDpr = () => {
+      setDpr(window.devicePixelRatio || 1);
+    };
+    const mq = window.matchMedia?.(
+      `(resolution: ${window.devicePixelRatio || 1}dpr)`,
+    );
+    mq?.addEventListener?.('change', updateDpr);
+    window.addEventListener('resize', updateDpr);
+    return () => {
+      mq?.removeEventListener?.('change', updateDpr);
+      window.removeEventListener('resize', updateDpr);
+    };
+  }, [dpr]);
+
+  // Render terrain, units, and camera viewport
+  const renderMinimap = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.save();
+    ctx.scale(dpr, dpr);
+
+    if (terrainCanvasRef.current) {
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(terrainCanvasRef.current, 0, 0, width, height);
+    } else {
+      ctx.fillStyle = '#121418';
+      ctx.fillRect(0, 0, width, height);
+    }
+
+    // Draw diamond border
+    ctx.strokeStyle = '#3a3f4b';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(width * 0.5, 0);
+    ctx.lineTo(width, height * 0.5);
+    ctx.lineTo(width * 0.5, height);
+    ctx.lineTo(0, height * 0.5);
+    ctx.closePath();
+    ctx.stroke();
+
+    // Draw units & buildings
+    const units = minimapData.units;
+    for (const u of units) {
+      const { mx, my } = worldToMinimap(u.x, u.z, mapSize, width, height);
+
+      if (u.player === 0) {
+        ctx.fillStyle = '#3b82f6'; // Blue (player 0)
+      } else if (u.player === 1) {
+        ctx.fillStyle = '#ef4444'; // Red (player 1)
+      } else {
+        ctx.fillStyle = '#f59e0b'; // Amber (neutral/mine)
+      }
+
+      if (u.kind === 'building') {
+        ctx.fillRect(mx - 2, my - 2, 4, 4);
+      } else if (u.kind === 'mine') {
+        ctx.fillRect(mx - 1.5, my - 1.5, 3, 3);
+      } else {
+        ctx.beginPath();
+        ctx.arc(mx, my, 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // Draw camera viewport ground polygon
+    const corners = minimapData.viewportCorners;
+    if (corners && corners.length >= 4) {
+      ctx.beginPath();
+      for (let i = 0; i < 4; i++) {
+        const c = corners[i];
+        const { mx: cx, my: cy } = worldToMinimap(
+          c.x,
+          c.z,
+          mapSize,
+          width,
+          height,
+        );
+        if (i === 0) ctx.moveTo(cx, cy);
+        else ctx.lineTo(cx, cy);
+      }
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+      ctx.fill();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }, [minimapData, mapSize, width, height, dpr]);
+
   // Generate or reuse cached ImageData for terrain
   useEffect(() => {
     if (!tiles || tiles === cachedTilesRef.current) return;
     cachedTilesRef.current = tiles;
+
+    if (typeof document === 'undefined') return;
 
     const imgData = new ImageData(width, height);
     const data = imgData.data;
@@ -81,123 +198,31 @@ export function Minimap({ session, width = 180, height = 180 }: MinimapProps) {
       }
     }
 
-    terrainCacheRef.current = imgData;
-  }, [tiles, mapSize, width, height]);
-
-  // Render terrain, units, and camera viewport
-  const renderMinimap = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    if (terrainCacheRef.current) {
-      ctx.putImageData(terrainCacheRef.current, 0, 0);
-    } else {
-      ctx.fillStyle = '#121418';
-      ctx.fillRect(0, 0, width, height);
+    const offscreen = document.createElement('canvas');
+    offscreen.width = width;
+    offscreen.height = height;
+    const offCtx = offscreen.getContext('2d');
+    if (offCtx) {
+      offCtx.putImageData(imgData, 0, 0);
+      terrainCanvasRef.current = offscreen;
+      renderMinimap();
     }
-
-    // Draw diamond border
-    ctx.strokeStyle = '#3a3f4b';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(width * 0.5, 0);
-    ctx.lineTo(width, height * 0.5);
-    ctx.lineTo(width * 0.5, height);
-    ctx.lineTo(0, height * 0.5);
-    ctx.closePath();
-    ctx.stroke();
-
-    // Draw units & buildings
-    const units = minimapData.units;
-    for (const u of units) {
-      const nu = (u.x - u.z) / mapSize;
-      const nv = (u.x + u.z) / mapSize;
-      const mx = (nu + 1) * 0.5 * width;
-      const my = nv * 0.5 * height;
-
-      if (u.player === 0) {
-        ctx.fillStyle = '#3b82f6'; // Blue (player 0)
-      } else if (u.player === 1) {
-        ctx.fillStyle = '#ef4444'; // Red (player 1)
-      } else {
-        ctx.fillStyle = '#f59e0b'; // Amber (neutral/mine)
-      }
-
-      if (u.kind === 'building') {
-        ctx.fillRect(mx - 2, my - 2, 4, 4);
-      } else if (u.kind === 'mine') {
-        ctx.fillRect(mx - 1.5, my - 1.5, 3, 3);
-      } else {
-        ctx.beginPath();
-        ctx.arc(mx, my, 2, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-
-    // Draw camera viewport ground polygon
-    const corners = minimapData.viewportCorners;
-    if (corners && corners.length >= 4) {
-      ctx.beginPath();
-      for (let i = 0; i < 4; i++) {
-        const c = corners[i];
-        const nu = (c.x - c.z) / mapSize;
-        const nv = (c.x + c.z) / mapSize;
-        const cx = (nu + 1) * 0.5 * width;
-        const cy = nv * 0.5 * height;
-        if (i === 0) ctx.moveTo(cx, cy);
-        else ctx.lineTo(cx, cy);
-      }
-      ctx.closePath();
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
-      ctx.fill();
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-    }
-  }, [minimapData, mapSize, width, height]);
+  }, [tiles, mapSize, width, height, renderMinimap]);
 
   useEffect(() => {
     renderMinimap();
   }, [renderMinimap]);
 
   const centerCameraAt = (mx: number, my: number) => {
+    if (!session) return;
     const worldPos = minimapToWorld(mx, my, mapSize, width, height);
-    const sessionObj: unknown = session;
-    if (sessionObj && typeof sessionObj === 'object' && 'input' in sessionObj) {
-      const input = sessionObj.input;
-      if (input && typeof input === 'object' && 'camera' in input) {
-        const cam = input.camera;
-        if (
-          cam &&
-          typeof cam === 'object' &&
-          'centerOn' in cam &&
-          typeof cam.centerOn === 'function'
-        ) {
-          cam.centerOn(worldPos.x, worldPos.z);
-        }
-      }
-    }
+    session.input.camera.centerOn(worldPos.x, worldPos.z);
   };
 
   const issueContextOrderAt = (mx: number, my: number, queued: boolean) => {
+    if (!session) return;
     const worldPos = minimapToWorld(mx, my, mapSize, width, height);
-    const sessionObj: unknown = session;
-    if (sessionObj && typeof sessionObj === 'object' && 'input' in sessionObj) {
-      const input = sessionObj.input;
-      if (input && typeof input === 'object' && 'orders' in input) {
-        const orders = input.orders;
-        if (
-          orders &&
-          typeof orders === 'object' &&
-          'contextOrder' in orders &&
-          typeof orders.contextOrder === 'function'
-        ) {
-          orders.contextOrder(worldPos.x, worldPos.z, queued);
-        }
-      }
-    }
+    session.input.orders.contextOrder(worldPos.x, worldPos.z, queued);
   };
 
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -209,12 +234,10 @@ export function Minimap({ session, width = 180, height = 180 }: MinimapProps) {
     const my = e.clientY - rect.top;
 
     if (e.button === 0) {
-      // Left click jump
       setIsDragging(true);
       canvas.setPointerCapture?.(e.pointerId);
       centerCameraAt(mx, my);
     } else if (e.button === 2) {
-      // Right click move/context order
       e.preventDefault();
       issueContextOrderAt(mx, my, e.shiftKey);
     }
@@ -238,7 +261,7 @@ export function Minimap({ session, width = 180, height = 180 }: MinimapProps) {
       try {
         canvasRef.current?.releasePointerCapture?.(e.pointerId);
       } catch {
-        // Ignore if pointer capture wasn't active
+        // Ignore if pointer capture was not active
       }
     }
   };
@@ -258,8 +281,9 @@ export function Minimap({ session, width = 180, height = 180 }: MinimapProps) {
         ref={canvasRef}
         data-testid="minimap"
         aria-label="Minimap"
-        width={width}
-        height={height}
+        width={Math.round(width * dpr)}
+        height={Math.round(height * dpr)}
+        style={{ width: `${width}px`, height: `${height}px` }}
         className="minimap-canvas"
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}

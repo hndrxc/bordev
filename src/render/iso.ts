@@ -56,22 +56,43 @@ export interface IsoView {
 }
 
 /**
+ * Projects a ground coordinate (x, z) to screen pixel coordinates (CSS/canvas) into a mutable target object.
+ * Origin is screen top-left.
+ */
+export function worldToScreenInto(
+  out: { x: number; y: number },
+  x: number,
+  z: number,
+  view: IsoView,
+): void {
+  const dx = x - view.targetX;
+  const dz = z - view.targetZ;
+  out.x = view.width * 0.5 + (dx - dz) * 48 * view.zoom;
+  out.y = view.height * 0.5 + (dx + dz) * 24 * view.zoom;
+}
+
+/**
  * Projects a ground coordinate (x, z) to screen pixel coordinates (CSS/canvas).
  * Origin is screen top-left.
  */
-export function worldToScreen(x: number, z: number, view: IsoView): { x: number; y: number } {
-  const dx = x - view.targetX;
-  const dz = z - view.targetZ;
-  return {
-    x: view.width * 0.5 + (dx - dz) * 48 * view.zoom,
-    y: view.height * 0.5 + (dx + dz) * 24 * view.zoom,
-  };
+export function worldToScreen(
+  x: number,
+  z: number,
+  view: IsoView,
+): { x: number; y: number } {
+  const out = { x: 0, y: 0 };
+  worldToScreenInto(out, x, z, view);
+  return out;
 }
 
 /**
  * Inverse projection: maps a screen pixel coordinate (x, y) to ground world coordinate (x, z).
  */
-export function screenToGround(x: number, y: number, view: IsoView): { x: number; z: number } {
+export function screenToGround(
+  x: number,
+  y: number,
+  view: IsoView,
+): { x: number; z: number } {
   const sx = (x - view.width * 0.5) / view.zoom;
   const sy = (y - view.height * 0.5) / view.zoom;
   const dx = sx / 96 + sy / 48;

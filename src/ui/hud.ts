@@ -1,9 +1,9 @@
 import { create } from 'zustand';
 import type { GameSession } from '../game/GameSession';
-import { screenToGround, type IsoView } from '../render/iso';
+import { screenToGround } from '../render/iso';
 import type { EntityKind } from '../sim/entity';
-import { CROWN_UNITS } from '../data/units';
-import { CROWN_BUILDINGS } from '../data/buildings';
+import { getUnitData } from '../data/units';
+import { getBuildingData } from '../data/buildings';
 
 export interface HudResources {
   food: number;
@@ -24,8 +24,6 @@ export interface SelectedEntityData {
   player?: number;
   hp: number;
   maxHp: number;
-  x: number;
-  z: number;
   pop?: number;
   faith?: number;
   attack?: number;
@@ -39,19 +37,16 @@ export interface SelectedEntityData {
 }
 
 export interface MinimapUnit {
-  id: number;
   x: number;
   z: number;
   player: number;
   kind: EntityKind;
-  type: string;
 }
 
 export interface MinimapData {
   mapSize: number;
   tiles: Uint8Array | null;
   units: readonly MinimapUnit[];
-  cameraView: IsoView | null;
   viewportCorners:
     | readonly [
         { x: number; z: number },
@@ -72,10 +67,8 @@ export interface HudState {
   selection: readonly SelectedEntityData[];
   orders: HudOrders;
   status: string;
+  statusTimestamp: number;
   minimap: MinimapData;
-  setStatus: (message: string) => void;
-  setOrdersMode: (mode: 'move' | 'attackMove' | null) => void;
-  setOrdersSubmenu: (submenu: 'economic' | 'military' | null) => void;
   reset: () => void;
 }
 
@@ -83,19 +76,20 @@ export function getEntityDisplayName(entity: {
   kind: EntityKind;
   type?: string;
 }): string {
+  if (entity.kind === 'mine' || entity.type === 'gold_mine') {
+    return 'Gold Mine';
+  }
   const t = entity.type ?? '';
-  if (t === 'peasant') return CROWN_UNITS.peasant.name;
-  if (t === 'spearman') return CROWN_UNITS.spearman.name;
-  if (t === 'ox_cart') return CROWN_UNITS.ox_cart.name;
-  if (t === 'keep') return CROWN_BUILDINGS.keep.name;
-  if (t === 'cottage') return CROWN_BUILDINGS.cottage.name;
-  if (t === 'farm') return CROWN_BUILDINGS.farm.name;
-  if (t === 'gold_mine' || entity.kind === 'mine') return 'Gold Mine';
-  if (t.startsWith('tree')) return 'Tree';
-  if (t.startsWith('rock')) return 'Rock';
-  return t
-    ? t.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
-    : 'Unknown';
+  if (t) {
+    const unit = getUnitData(t);
+    if (unit) return unit.name;
+    const building = getBuildingData(t);
+    if (building) return building.name;
+    if (t.startsWith('tree')) return 'Tree';
+    if (t.startsWith('rock')) return 'Rock';
+    return t.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+  return 'Unknown';
 }
 
 const INITIAL_RESOURCES: HudResources = {
@@ -118,7 +112,6 @@ const INITIAL_MINIMAP: MinimapData = {
   mapSize: 128,
   tiles: null,
   units: [],
-  cameraView: null,
   viewportCorners: null,
 };
 
@@ -127,27 +120,122 @@ export const useHudStore = create<HudState>((set) => ({
   selection: [],
   orders: INITIAL_ORDERS,
   status: '',
+  statusTimestamp: 0,
   minimap: INITIAL_MINIMAP,
-  setStatus: (message: string) => set({ status: message }),
-  setOrdersMode: (mode) => set((s) => ({ orders: { ...s.orders, mode } })),
-  setOrdersSubmenu: (submenu) =>
-    set((s) => ({ orders: { ...s.orders, submenu } })),
   reset: () =>
     set({
       resources: INITIAL_RESOURCES,
       selection: [],
       orders: INITIAL_ORDERS,
       status: '',
+      statusTimestamp: 0,
       minimap: INITIAL_MINIMAP,
     }),
 }));
 
+export type HudClock = () => number;
+
+let customClock: HudClock | null = null;
+
+export function setHudClock(clock: HudClock | null): void {
+  customClock = clock;
+}
+
+function getHudNow(): number {
+  if (customClock) return customClock();
+  return typeof performance !== 'undefined' ? performance.now() : Date.now();
+}
+
 export function setHudStatus(message: string): void {
-  useHudStore.setState({ status: message });
+  useHudStore.setState({
+    status: message,
+    statusTimestamp: message ? getHudNow() : 0,
+  });
 }
 
 export function resetHud(): void {
   useHudStore.getState().reset();
+}
+
+function areResourcesEqual(a: HudResources, b: HudResources): boolean {
+  return (
+    a.food === b.food &&
+    a.gold === b.gold &&
+    a.faithUsed === b.faithUsed &&
+    a.faithProduced === b.faithProduced &&
+    a.pop === b.pop &&
+    a.popCap === b.popCap &&
+    a.age === b.age &&
+    a.faction === b.faction
+  );
+}
+
+function areSelectionsEqual(
+  a: readonly SelectedEntityData[],
+  b: readonly SelectedEntityData[],
+): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const eA = a[i];
+    const eB = b[i];
+    if (
+      eA.id !== eB.id ||
+      eA.kind !== eB.kind ||
+      eA.type !== eB.type ||
+      eA.name !== eB.name ||
+      eA.player !== eB.player ||
+      eA.hp !== eB.hp ||
+      eA.maxHp !== eB.maxHp ||
+      eA.pop !== eB.pop ||
+      eA.faith !== eB.faith ||
+      eA.attack !== eB.attack ||
+      eA.range !== eB.range ||
+      eA.meleeArmor !== eB.meleeArmor ||
+      eA.pierceArmor !== eB.pierceArmor ||
+      eA.speed !== eB.speed ||
+      eA.goldRemaining !== eB.goldRemaining ||
+      eA.built !== eB.built ||
+      eA.buildProgress !== eB.buildProgress
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function areMinimapUnitsEqual(
+  a: readonly MinimapUnit[],
+  b: readonly MinimapUnit[],
+): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const uA = a[i];
+    const uB = b[i];
+    if (
+      uA.x !== uB.x ||
+      uA.z !== uB.z ||
+      uA.player !== uB.player ||
+      uA.kind !== uB.kind
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function areViewportCornersEqual(
+  a: MinimapData['viewportCorners'],
+  b: MinimapData['viewportCorners'],
+): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < 4; i++) {
+    if (a[i].x !== b[i].x || a[i].z !== b[i].z) return false;
+  }
+  return true;
 }
 
 export function publishHud(session: GameSession): void {
@@ -157,7 +245,7 @@ export function publishHud(session: GameSession): void {
   const world = sim?.world;
   const p0 = world?.players?.[0];
 
-  const resources: HudResources = p0
+  const nextResources: HudResources = p0
     ? {
         food: p0.food,
         gold: p0.gold,
@@ -170,53 +258,10 @@ export function publishHud(session: GameSession): void {
       }
     : INITIAL_RESOURCES;
 
-  // Read input safely using property guards
-  const sessionObj: unknown = session;
-  let selectedIds: readonly number[] = [];
-  let ordersMode: 'move' | 'attackMove' | null = null;
-  let ordersSubmenu: 'economic' | 'military' | null = null;
+  const selectedIds = session.input?.selection?.ids ?? [];
+  const ordersMode = session.input?.orders?.mode ?? null;
+  const ordersSubmenu = session.input?.orders?.submenu ?? null;
 
-  if (sessionObj && typeof sessionObj === 'object' && 'input' in sessionObj) {
-    const input = sessionObj.input;
-    if (input && typeof input === 'object') {
-      if (
-        'selection' in input &&
-        input.selection &&
-        typeof input.selection === 'object' &&
-        'ids' in input.selection
-      ) {
-        const ids = input.selection.ids;
-        if (Array.isArray(ids)) {
-          selectedIds = ids;
-        }
-      }
-      if (
-        'orders' in input &&
-        input.orders &&
-        typeof input.orders === 'object'
-      ) {
-        const ord = input.orders;
-        if (
-          'mode' in ord &&
-          (ord.mode === 'move' ||
-            ord.mode === 'attackMove' ||
-            ord.mode === null)
-        ) {
-          ordersMode = ord.mode;
-        }
-        if (
-          'submenu' in ord &&
-          (ord.submenu === 'economic' ||
-            ord.submenu === 'military' ||
-            ord.submenu === null)
-        ) {
-          ordersSubmenu = ord.submenu;
-        }
-      }
-    }
-  }
-
-  // Snapshot selection immutably (deep enough copy so it doesn't mutate)
   const selectedList: SelectedEntityData[] = [];
   for (const id of selectedIds) {
     const raw = world?.getEntity?.(id);
@@ -230,8 +275,6 @@ export function publishHud(session: GameSession): void {
       player: 'player' in raw ? raw.player : undefined,
       hp: 'hp' in raw ? raw.hp : 0,
       maxHp: 'maxHp' in raw ? raw.maxHp : 0,
-      x: raw.x,
-      z: raw.z,
       pop: 'pop' in raw ? raw.pop : undefined,
       faith: 'faith' in raw ? raw.faith : undefined,
       attack: 'attack' in raw ? raw.attack : undefined,
@@ -246,13 +289,11 @@ export function publishHud(session: GameSession): void {
     selectedList.push(entData);
   }
 
-  // Orders state snapshot
-  const orders: HudOrders = {
+  const nextOrders: HudOrders = {
     mode: ordersMode,
     submenu: ordersSubmenu,
   };
 
-  // Minimap snapshot
   const map = session.map;
   const mapSize = map?.size ?? 128;
   const tiles = map?.tiles ?? null;
@@ -262,47 +303,103 @@ export function publishHud(session: GameSession): void {
 
   for (const ent of snapshotEntities) {
     if (ent.kind === 'projectile' || ent.kind === 'doodad') continue;
+    const isFootprint = ent.kind === 'building' || ent.kind === 'mine';
+    const cx =
+      isFootprint && ent.width != null ? ent.x + ent.width * 0.5 : ent.x;
+    const cz =
+      isFootprint && ent.height != null ? ent.z + ent.height * 0.5 : ent.z;
     minimapUnits.push({
-      id: ent.id,
-      x: ent.x,
-      z: ent.z,
+      x: cx,
+      z: cz,
       player: ent.player ?? -1,
       kind: ent.kind,
-      type: ent.type ?? '',
     });
   }
 
   const camera = session.renderer?.camera;
-  const view = camera?.view ? { ...camera.view } : null;
+  const view = camera?.view ?? null;
 
-  let viewportCorners:
-    | readonly [
-        { x: number; z: number },
-        { x: number; z: number },
-        { x: number; z: number },
-        { x: number; z: number },
-      ]
-    | null = null;
+  let nextViewportCorners: MinimapData['viewportCorners'] = null;
 
   if (view) {
-    const c0 = screenToGround(0, 0, view);
-    const c1 = screenToGround(view.width, 0, view);
-    const c2 = screenToGround(view.width, view.height, view);
-    const c3 = screenToGround(0, view.height, view);
-    viewportCorners = [c0, c1, c2, c3];
+    const insets = session.input?.camera?.viewportInsets ?? {
+      top: 0,
+      bottom: 0,
+    };
+    const top = insets.top;
+    const bottom = insets.bottom;
+    const c0 = screenToGround(0, top, view);
+    const c1 = screenToGround(view.width, top, view);
+    const c2 = screenToGround(view.width, view.height - bottom, view);
+    const c3 = screenToGround(0, view.height - bottom, view);
+    nextViewportCorners = [c0, c1, c2, c3];
   }
 
-  useHudStore.setState((prev) => ({
-    resources,
-    selection: selectedList,
-    orders,
-    status: prev.status, // preserve status between publications!
-    minimap: {
-      mapSize,
-      tiles,
-      units: minimapUnits,
-      cameraView: view,
-      viewportCorners,
-    },
-  }));
+  const now = getHudNow();
+
+  useHudStore.setState((prev) => {
+    let nextStatus = prev.status;
+    let nextStatusTimestamp = prev.statusTimestamp;
+    if (nextStatus && now - nextStatusTimestamp >= 4000) {
+      nextStatus = '';
+      nextStatusTimestamp = 0;
+    }
+
+    const finalResources = areResourcesEqual(prev.resources, nextResources)
+      ? prev.resources
+      : nextResources;
+
+    const finalSelection = areSelectionsEqual(prev.selection, selectedList)
+      ? prev.selection
+      : selectedList;
+
+    const finalOrders =
+      prev.orders.mode === nextOrders.mode &&
+      prev.orders.submenu === nextOrders.submenu
+        ? prev.orders
+        : nextOrders;
+
+    const finalUnits = areMinimapUnitsEqual(prev.minimap.units, minimapUnits)
+      ? prev.minimap.units
+      : minimapUnits;
+
+    const finalCorners = areViewportCornersEqual(
+      prev.minimap.viewportCorners,
+      nextViewportCorners,
+    )
+      ? prev.minimap.viewportCorners
+      : nextViewportCorners;
+
+    const finalMinimap =
+      finalUnits === prev.minimap.units &&
+      finalCorners === prev.minimap.viewportCorners &&
+      mapSize === prev.minimap.mapSize &&
+      tiles === prev.minimap.tiles
+        ? prev.minimap
+        : {
+            mapSize,
+            tiles,
+            units: finalUnits,
+            viewportCorners: finalCorners,
+          };
+    if (
+      finalResources === prev.resources &&
+      finalSelection === prev.selection &&
+      finalOrders === prev.orders &&
+      finalMinimap === prev.minimap &&
+      nextStatus === prev.status &&
+      nextStatusTimestamp === prev.statusTimestamp
+    ) {
+      return prev;
+    }
+
+    return {
+      resources: finalResources,
+      selection: finalSelection,
+      orders: finalOrders,
+      status: nextStatus,
+      statusTimestamp: nextStatusTimestamp,
+      minimap: finalMinimap,
+    };
+  });
 }

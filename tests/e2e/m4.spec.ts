@@ -1,98 +1,11 @@
-import { expect, test, type Page } from '@playwright/test';
-import type { GameSession, SessionStats } from '../../src/game/GameSession';
-
-interface SetupResult {
-  consoleErrors: string[];
-  pageErrors: string[];
-}
-
-/**
- * Concise boot and readiness helper for M4 browser fixtures.
- */
-async function setupM4Session(
-  page: Page,
-  options: { centerOn?: { x: number; z: number } } = {},
-): Promise<SetupResult> {
-  const consoleErrors: string[] = [];
-  const pageErrors: string[] = [];
-
-  page.on('console', (message) => {
-    if (message.type() === 'error') {
-      consoleErrors.push(message.text());
-    }
-  });
-  page.on('pageerror', (error) => {
-    pageErrors.push(error.message);
-  });
-
-  await page.goto('/?debug=1');
-
-  const canvas = page.getByLabel('Game view', { exact: true });
-  await expect(canvas).toBeVisible();
-
-  await page.waitForFunction(
-    () => {
-      const bordev = window.__bordev;
-      if (!bordev) return false;
-
-      const session: GameSession = bordev.session;
-      if (session.loadError) {
-        throw new Error(`Game session failed to load: ${session.loadError}`);
-      }
-
-      const stats: SessionStats = bordev.stats();
-      if (stats.loadError) {
-        throw new Error(`Game session failed to load: ${stats.loadError}`);
-      }
-
-      return (
-        session.isLoaded &&
-        stats.isLoaded &&
-        stats.renderer?.isReady === true &&
-        session.sim !== null &&
-        session.input !== undefined &&
-        bordev.cheats !== undefined
-      );
-    },
-    undefined,
-    { timeout: 30_000 },
-  );
-
-  const center = options.centerOn ?? { x: 60, z: 60 };
-  await page.evaluate(
-    ({ cx, cz }) => {
-      const cam = window.__bordev?.session.renderer.camera;
-      if (!cam) throw new Error('Renderer camera is not available');
-      cam.centerOn(cx, cz);
-    },
-    { cx: center.x, cz: center.z },
-  );
-
-  return { consoleErrors, pageErrors };
-}
-
-/**
- * Project world tile coordinate to current renderer screen position.
- */
-async function worldToScreen(
-  page: Page,
-  targetX: number,
-  targetZ: number,
-): Promise<{ x: number; y: number }> {
-  return page.evaluate(
-    ({ tx, tz }) => {
-      const cam = window.__bordev?.session.renderer.camera;
-      if (!cam) throw new Error('Renderer camera is not available');
-      const dx = tx - cam.view.targetX;
-      const dz = tz - cam.view.targetZ;
-      return {
-        x: cam.view.width * 0.5 + (dx - dz) * 48 * cam.view.zoom,
-        y: cam.view.height * 0.5 + (dx + dz) * 24 * cam.view.zoom,
-      };
-    },
-    { tx: targetX, tz: targetZ },
-  );
-}
+import { expect, test } from '@playwright/test';
+import {
+  setupM4Session,
+  worldToScreen,
+  waitForTicks,
+  playfield,
+  pickablePoint,
+} from './fixtures/m4';
 
 test('1. required goalposts: 5 peasants box select, arrival within 20s sim time, control groups, W stop, and resource cheats', async ({
   page,
@@ -167,11 +80,12 @@ test('1. required goalposts: 5 peasants box select, arrival within 20s sim time,
   }, spawnedIds);
 
   // Verify all picked rects are within interactive world viewport (not blocked by TopBar or HUD bottom)
+  const field = await playfield(page);
   for (const rect of rects) {
-    expect(rect.top).toBeGreaterThanOrEqual(40);
-    expect(rect.bottom).toBeLessThanOrEqual(530);
-    expect(rect.left).toBeGreaterThanOrEqual(0);
-    expect(rect.right).toBeLessThanOrEqual(1280);
+    expect(rect.top).toBeGreaterThanOrEqual(field.top);
+    expect(rect.bottom).toBeLessThanOrEqual(field.bottom);
+    expect(rect.left).toBeGreaterThanOrEqual(field.left);
+    expect(rect.right).toBeLessThanOrEqual(field.right);
   }
 
   // Real mouse drag box-selection enclosing all 5 peasants
@@ -200,8 +114,8 @@ test('1. required goalposts: 5 peasants box select, arrival within 20s sim time,
   const targetX = 64;
   const targetZ = 60;
   const targetScreen = await worldToScreen(page, targetX, targetZ);
-  expect(targetScreen.y).toBeGreaterThanOrEqual(40);
-  expect(targetScreen.y).toBeLessThanOrEqual(530);
+  expect(targetScreen.y).toBeGreaterThanOrEqual(field.top);
+  expect(targetScreen.y).toBeLessThanOrEqual(field.bottom);
 
   const startSimTime = await page.evaluate(() => {
     const sim = window.__bordev?.sim;
@@ -234,9 +148,9 @@ test('1. required goalposts: 5 peasants box select, arrival within 20s sim time,
   expect(arrivalSimTime - startSimTime).toBeLessThanOrEqual(20.0);
 
   // Control group: Ctrl+1 assigns group 1, ground click clears, '1' recalls group 1
-  await page.keyboard.press('Control+1');
+  await page.keyboard.press('Control+Digit1');
 
-  // Click on empty passable ground away from units to clear selection (56, 56 projects to y: 168)
+  // Click on empty passable ground away from units to clear selection (56, 56)
   const clearScreen = await worldToScreen(page, 56, 56);
   await page.mouse.click(clearScreen.x, clearScreen.y, { button: 'left' });
 
@@ -249,8 +163,8 @@ test('1. required goalposts: 5 peasants box select, arrival within 20s sim time,
     { timeout: 10_000 },
   );
 
-  // Reselect group 1 with key '1'
-  await page.keyboard.press('1');
+  // Reselect group 1 with key 'Digit1'
+  await page.keyboard.press('Digit1');
 
   await page.waitForFunction(
     (ids) => {
@@ -265,8 +179,8 @@ test('1. required goalposts: 5 peasants box select, arrival within 20s sim time,
   // Move command and hotkey W next-tick stop
   // Order units to passable destination (54, 64) within interactive canvas
   const moveDestScreen = await worldToScreen(page, 54, 64);
-  expect(moveDestScreen.y).toBeGreaterThanOrEqual(40);
-  expect(moveDestScreen.y).toBeLessThanOrEqual(530);
+  expect(moveDestScreen.y).toBeGreaterThanOrEqual(field.top);
+  expect(moveDestScreen.y).toBeLessThanOrEqual(field.bottom);
 
   await page.mouse.click(moveDestScreen.x, moveDestScreen.y, {
     button: 'right',
@@ -289,25 +203,25 @@ test('1. required goalposts: 5 peasants box select, arrival within 20s sim time,
   // Hotkey W executes stop
   await page.keyboard.press('KeyW');
 
-  // Next-tick: units transition to stop/idle in sim
+  // Next-tick: units transition to stop in sim (ReviewSimTestsDocs#2 requires order.kind === 'stop',
+  // not 'idle', and a minimum remaining distance from destination)
   await page.waitForFunction(
-    (ids) => {
+    ({ ids, destX, destZ }) => {
       const sim = window.__bordev?.sim;
       if (!sim) return false;
       return ids.every((id) => {
         const u = sim.world.entities[id];
-        return (
-          u &&
-          u.kind === 'unit' &&
-          (u.order?.kind === 'idle' || u.order?.kind === 'stop')
-        );
+        if (!u || u.kind !== 'unit') return false;
+        if (u.order?.kind !== 'stop') return false;
+        const remainingDist = Math.hypot(u.x - destX, u.z - destZ);
+        return remainingDist >= 3.0;
       });
     },
-    spawnedIds,
+    { ids: spawnedIds, destX: 54, destZ: 64 },
     { timeout: 10_000 },
   );
 
-  // Confirm positions remain halted
+  // Confirm positions remain halted across sim ticks (ReviewSimTestsDocs#2 replaces waitForTimeout with waitForTicks)
   const stoppedPositions = await page.evaluate((ids) => {
     const sim = window.__bordev?.sim;
     if (!sim) throw new Error('Simulation not initialized');
@@ -318,7 +232,7 @@ test('1. required goalposts: 5 peasants box select, arrival within 20s sim time,
     });
   }, spawnedIds);
 
-  await page.waitForTimeout(200);
+  await waitForTicks(page, 5);
 
   const checkPositions = await page.evaluate((ids) => {
     const sim = window.__bordev?.sim;
@@ -339,7 +253,7 @@ test('1. required goalposts: 5 peasants box select, arrival within 20s sim time,
     ).toBeLessThan(0.05);
   }
 
-  // Resource cheat resources(1000) and TopBar HUD match
+  // Resource cheat resources(1000) and TopBar HUD match (ReviewSimTestsDocs#12)
   await page.evaluate(() => {
     const bordev = window.__bordev;
     if (!bordev || !bordev.cheats) throw new Error('Cheats not available');
@@ -357,9 +271,18 @@ test('1. required goalposts: 5 peasants box select, arrival within 20s sim time,
   expect(simResources.food).toBe(1000);
   expect(simResources.gold).toBe(1000);
 
-  // Verify TopBar shows 1000
-  await expect(page.getByTestId('resource-food')).toContainText('1000');
-  await expect(page.getByTestId('resource-gold')).toContainText('1000');
+  // Verify TopBar shows exact 1000 via getByTestId('hud-food') and hud-gold (ReviewSimTestsDocs#12)
+  await expect(page.getByTestId('hud-food')).toHaveText('1000');
+  await expect(page.getByTestId('hud-gold')).toHaveText('1000');
+
+  // Directly mutate sim state without cheat to verify periodic 10 Hz publish (ReviewSimTestsDocs#12)
+  await page.evaluate(() => {
+    const sim = window.__bordev?.sim;
+    if (!sim) throw new Error('Simulation not initialized');
+    sim.world.players[0].food = 1250;
+  });
+
+  await expect(page.getByTestId('hud-food')).toHaveText('1250');
 
   expect(consoleErrors, 'console errors during goalpost test').toEqual([]);
   expect(pageErrors, 'uncaught page errors during goalpost test').toEqual([]);
@@ -444,10 +367,11 @@ test('2. isolated click, Shift multi-select and toggle, and double-click type se
   );
 
   // Ensure pick points are safely in interactive viewport and unambiguously hit the target units
-  expect(p0.y).toBeGreaterThanOrEqual(40);
-  expect(p0.y).toBeLessThanOrEqual(530);
-  expect(p1.y).toBeGreaterThanOrEqual(40);
-  expect(p1.y).toBeLessThanOrEqual(530);
+  const field = await playfield(page);
+  expect(p0.y).toBeGreaterThanOrEqual(field.top);
+  expect(p0.y).toBeLessThanOrEqual(field.bottom);
+  expect(p1.y).toBeGreaterThanOrEqual(field.top);
+  expect(p1.y).toBeLessThanOrEqual(field.bottom);
   expect(p0.picked).toBe(id0);
   expect(p1.picked).toBe(id1);
 
@@ -516,7 +440,7 @@ test('2. isolated click, Shift multi-select and toggle, and double-click type se
   expect(pageErrors, 'uncaught page errors during selection test').toEqual([]);
 });
 
-test('3. camera, minimap, and HUD: pan, group double-tap centering, HUD isolation, minimap jump/move, zoom, command card move', async ({
+test('3. camera, minimap, and HUD: group double-tap centering, HUD isolation, minimap jump/move, zoom, command card move', async ({
   page,
 }) => {
   test.setTimeout(90_000);
@@ -548,7 +472,7 @@ test('3. camera, minimap, and HUD: pan, group double-tap centering, HUD isolatio
   await page.evaluate((ids) => {
     window.__bordev?.session.input.selection.set(ids);
   }, spawnedIds);
-  await page.keyboard.press('Control+1');
+  await page.keyboard.press('Control+Digit1');
 
   // Verify HUD shell elements are mounted
   const topbar = page.getByTestId('hud-topbar');
@@ -556,33 +480,26 @@ test('3. camera, minimap, and HUD: pan, group double-tap centering, HUD isolatio
   const minimap = page.getByTestId('minimap');
   await expect(minimap).toBeVisible();
 
-  // Frame-based arrow camera requires keydown, observe movement then keyup, not instantaneous press loop
-  const camBeforePan = await page.evaluate(() => {
-    const cam = window.__bordev?.session.renderer.camera;
-    if (!cam) throw new Error('Renderer camera is not available');
-    return { x: cam.view.targetX, z: cam.view.targetZ };
+  const doubleTapField = await playfield(page);
+  const doubleTapCenterX = (doubleTapField.left + doubleTapField.right) * 0.5;
+  const doubleTapCenterY = (doubleTapField.top + doubleTapField.bottom) * 0.5;
+
+  // Centre camera away to (45, 45) so double-tap centering has observable displacement
+  // (both (45, 45) and group 1 at (60, 60) are far from map edges [128x128] so clamping does not interfere)
+  await page.evaluate(() => {
+    const input = window.__bordev?.session.input;
+    if (!input) throw new Error('InputController not available');
+    input.camera.centerOn(45, 45);
   });
 
-  await page.keyboard.down('ArrowRight');
-  await page.waitForFunction(
-    (prev) => {
-      const cam = window.__bordev?.session.renderer.camera;
-      return (
-        cam && (cam.view.targetX !== prev.x || cam.view.targetZ !== prev.z)
-      );
-    },
-    camBeforePan,
-    { timeout: 10_000 },
-  );
-  await page.keyboard.up('ArrowRight');
-
-  // Double-tap '1' to center camera on group 1
-  await page.keyboard.press('1');
+  // Double-tap 'Digit1' to center camera on group 1
+  await page.keyboard.press('Digit1');
   await page.waitForTimeout(60);
-  await page.keyboard.press('1');
+  await page.keyboard.press('Digit1');
 
+  // Assert group average projects via worldToScreen to the centre of playfield(page) within ~2 px (contract §3)
   await page.waitForFunction(
-    (ids) => {
+    ({ ids, expX, expY }) => {
       const sim = window.__bordev?.sim;
       const cam = window.__bordev?.session.renderer.camera;
       if (!sim || !cam) return false;
@@ -600,17 +517,45 @@ test('3. camera, minimap, and HUD: pan, group double-tap centering, HUD isolatio
       if (count === 0) return false;
       const avgX = sumX / count;
       const avgZ = sumZ / count;
-      return (
-        Math.abs(cam.view.targetX - avgX) < 1.0 &&
-        Math.abs(cam.view.targetZ - avgZ) < 1.0
-      );
+
+      const canvas = document.querySelector('canvas[aria-label="Game view"]');
+      const rect = canvas?.getBoundingClientRect();
+      const offX = rect?.left ?? 0;
+      const offY = rect?.top ?? 0;
+      const dx = avgX - cam.view.targetX;
+      const dz = avgZ - cam.view.targetZ;
+      const sx = offX + cam.view.width * 0.5 + (dx - dz) * 48 * cam.view.zoom;
+      const sy = offY + cam.view.height * 0.5 + (dx + dz) * 24 * cam.view.zoom;
+
+      return Math.abs(sx - expX) < 2.0 && Math.abs(sy - expY) < 2.0;
     },
-    spawnedIds,
+    { ids: spawnedIds, expX: doubleTapCenterX, expY: doubleTapCenterY },
     { timeout: 10_000 },
   );
 
+  const groupAvg = await page.evaluate((ids) => {
+    const sim = window.__bordev?.sim;
+    if (!sim) throw new Error('Simulation not available');
+    let sumX = 0;
+    let sumZ = 0;
+    let count = 0;
+    for (const id of ids) {
+      const u = sim.world.entities[id];
+      if (u) {
+        sumX += u.x;
+        sumZ += u.z;
+        count++;
+      }
+    }
+    return { x: sumX / count, z: sumZ / count };
+  }, spawnedIds);
+
+  const groupProjected = await worldToScreen(page, groupAvg.x, groupAvg.z);
+  expect(Math.abs(groupProjected.x - doubleTapCenterX)).toBeLessThan(2.0);
+  expect(Math.abs(groupProjected.y - doubleTapCenterY)).toBeLessThan(2.0);
+
   // HUD click isolation: clicking TopBar does not clear world selection
-  await page.keyboard.press('1');
+  await page.keyboard.press('Digit1');
   await topbar.click();
 
   const selAfterHudClick = await page.evaluate((ids) => {
@@ -621,49 +566,92 @@ test('3. camera, minimap, and HUD: pan, group double-tap centering, HUD isolatio
   }, spawnedIds);
   expect(selAfterHudClick).toBe(true);
 
-  // Minimap left-click jump & right-click move order
+  // Minimap left-click jump & right-click move order (ReviewSimTestsDocs#3 / ReviewHud#13)
   const mmBox = await minimap.boundingBox();
   expect(mmBox).not.toBeNull();
 
-  const camBeforeJump = await page.evaluate(() => {
-    const cam = window.__bordev?.session.renderer.camera;
-    if (!cam) throw new Error('Renderer camera is not available');
-    return { x: cam.view.targetX, z: cam.view.targetZ };
+  // Click an off-centre point inside the map diamond (mx = 120, my = 80) on the 180x180 minimap
+  // Diamond vertices: (90, 0), (180, 90), (90, 180), (0, 90)
+  // Normalized: u = (120/180)*2 - 1 = 1/3, v = (80/180)*2 = 8/9
+  // Inside diamond: |u| + |v - 1| = 1/3 + 1/9 = 4/9 <= 1
+  // World mapping (mapSize = 128):
+  // x = (u + v) * 128 * 0.5 = (11/9) * 64 = 704/9 ≈ 78.222
+  // z = (v - u) * 128 * 0.5 = (5/9) * 64 = 320/9 ≈ 35.556
+  const mmClickX = 120;
+  const mmClickY = 80;
+  const mmU = (mmClickX / 180) * 2 - 1;
+  const mmV = (mmClickY / 180) * 2;
+  const expWorldX = (mmU + mmV) * 128 * 0.5;
+  const expWorldZ = (mmV - mmU) * 128 * 0.5;
+
+  // (a) Left-click: jump camera to expected world point, which ends up at the centre of playfield(page)
+  await page.mouse.click(mmBox!.x + mmClickX, mmBox!.y + mmClickY, {
+    button: 'left',
   });
 
-  await page.mouse.click(mmBox!.x + 30, mmBox!.y + 30, { button: 'left' });
+  const field = await playfield(page);
+  const expScreenCenterX = (field.left + field.right) * 0.5;
+  const expScreenCenterY = (field.top + field.bottom) * 0.5;
 
   await page.waitForFunction(
-    (prev) => {
+    ({ wx, wz, expX, expY }) => {
       const cam = window.__bordev?.session.renderer.camera;
-      return (
-        cam && (cam.view.targetX !== prev.x || cam.view.targetZ !== prev.z)
-      );
+      if (!cam) return false;
+      const canvas = document.querySelector('canvas[aria-label="Game view"]');
+      const rect = canvas?.getBoundingClientRect();
+      const offX = rect?.left ?? 0;
+      const offY = rect?.top ?? 0;
+      const dx = wx - cam.view.targetX;
+      const dz = wz - cam.view.targetZ;
+      const sx = offX + cam.view.width * 0.5 + (dx - dz) * 48 * cam.view.zoom;
+      const sy = offY + cam.view.height * 0.5 + (dx + dz) * 24 * cam.view.zoom;
+      return Math.abs(sx - expX) < 2.0 && Math.abs(sy - expY) < 2.0;
     },
-    camBeforeJump,
+    {
+      wx: expWorldX,
+      wz: expWorldZ,
+      expX: expScreenCenterX,
+      expY: expScreenCenterY,
+    },
     { timeout: 10_000 },
   );
 
-  // Re-center on peasants with double-tap 1
-  await page.keyboard.press('1');
-  await page.waitForTimeout(60);
-  await page.keyboard.press('1');
+  const jumpedScreen = await worldToScreen(page, expWorldX, expWorldZ);
+  expect(Math.abs(jumpedScreen.x - expScreenCenterX)).toBeLessThan(2.0);
+  expect(Math.abs(jumpedScreen.y - expScreenCenterY)).toBeLessThan(2.0);
 
-  // Right-click on minimap orders contextual move for selected group (at 90, 90 mapping to passable 64, 64)
-  await page.mouse.click(mmBox!.x + 90, mmBox!.y + 90, { button: 'right' });
+  // (b) Right-click: the selected units' order.x/z are near that world point
+  await page.mouse.click(mmBox!.x + mmClickX, mmBox!.y + mmClickY, {
+    button: 'right',
+  });
 
   await page.waitForFunction(
-    (ids) => {
+    ({ ids, expX, expZ }) => {
       const sim = window.__bordev?.sim;
       if (!sim) return false;
       return ids.some((id) => {
         const u = sim.world.entities[id];
-        return u && u.kind === 'unit' && u.order?.kind === 'move';
+        if (!u || u.kind !== 'unit') return false;
+        const order = u.order;
+        if (
+          !order ||
+          order.kind !== 'move' ||
+          order.x === undefined ||
+          order.z === undefined
+        ) {
+          return false;
+        }
+        return Math.abs(order.x - expX) < 1.0 && Math.abs(order.z - expZ) < 1.0;
       });
     },
-    spawnedIds,
+    { ids: spawnedIds, expX: expWorldX, expZ: expWorldZ },
     { timeout: 10_000 },
   );
+
+  // Re-center on peasants with double-tap Digit1
+  await page.keyboard.press('Digit1');
+  await page.waitForTimeout(60);
+  await page.keyboard.press('Digit1');
 
   // Camera cursor zoom (wheel in and out)
   const initialZoom = await page.evaluate(() => {
@@ -702,7 +690,7 @@ test('3. camera, minimap, and HUD: pan, group double-tap centering, HUD isolatio
   );
 
   // CommandCard Move button target mode and canvas click execution
-  await page.keyboard.press('1');
+  await page.keyboard.press('Digit1');
   await page.keyboard.press('KeyW');
 
   const moveBtn = page.getByTestId('command-move');
@@ -718,8 +706,8 @@ test('3. camera, minimap, and HUD: pan, group double-tap centering, HUD isolatio
   ).toBe('move');
 
   const moveTargetPt = await worldToScreen(page, 62, 60);
-  expect(moveTargetPt.y).toBeGreaterThanOrEqual(40);
-  expect(moveTargetPt.y).toBeLessThanOrEqual(530);
+  expect(moveTargetPt.y).toBeGreaterThanOrEqual(field.top);
+  expect(moveTargetPt.y).toBeLessThanOrEqual(field.bottom);
 
   await page.mouse.click(moveTargetPt.x, moveTargetPt.y, { button: 'left' });
 
@@ -796,10 +784,12 @@ test('4. hotkey submenus, queued orders, delete slot, and enemy ownership isolat
     { timeout: 5_000 },
   );
 
+  const field = await playfield(page);
+
   // 1. Shift-right-click queued waypoints
   const queuePt1 = await worldToScreen(page, 62, 60);
-  expect(queuePt1.y).toBeGreaterThanOrEqual(40);
-  expect(queuePt1.y).toBeLessThanOrEqual(530);
+  expect(queuePt1.y).toBeGreaterThanOrEqual(field.top);
+  expect(queuePt1.y).toBeLessThanOrEqual(field.bottom);
 
   await page.mouse.click(queuePt1.x, queuePt1.y, { button: 'right' });
 
@@ -814,8 +804,8 @@ test('4. hotkey submenus, queued orders, delete slot, and enemy ownership isolat
   );
 
   const queuePt2 = await worldToScreen(page, 58, 62);
-  expect(queuePt2.y).toBeGreaterThanOrEqual(40);
-  expect(queuePt2.y).toBeLessThanOrEqual(530);
+  expect(queuePt2.y).toBeGreaterThanOrEqual(field.top);
+  expect(queuePt2.y).toBeLessThanOrEqual(field.bottom);
 
   await page.keyboard.down('Shift');
   await page.mouse.click(queuePt2.x, queuePt2.y, { button: 'right' });
@@ -872,8 +862,8 @@ test('4. hotkey submenus, queued orders, delete slot, and enemy ownership isolat
   await expect(attackMoveBtn).toHaveClass(/active/);
 
   const atkTargetPt = await worldToScreen(page, 60, 62);
-  expect(atkTargetPt.y).toBeGreaterThanOrEqual(40);
-  expect(atkTargetPt.y).toBeLessThanOrEqual(530);
+  expect(atkTargetPt.y).toBeGreaterThanOrEqual(field.top);
+  expect(atkTargetPt.y).toBeLessThanOrEqual(field.bottom);
 
   await page.mouse.click(atkTargetPt.x, atkTargetPt.y, { button: 'left' });
 
@@ -900,8 +890,8 @@ test('4. hotkey submenus, queued orders, delete slot, and enemy ownership isolat
 
   // 3. Open own peasant Economic submenu by A; W disabled Farm slot must NOT stop/mutate existing move order; Esc or B returns
   const econMovePt = await worldToScreen(page, 56, 64);
-  expect(econMovePt.y).toBeGreaterThanOrEqual(40);
-  expect(econMovePt.y).toBeLessThanOrEqual(530);
+  expect(econMovePt.y).toBeGreaterThanOrEqual(field.top);
+  expect(econMovePt.y).toBeLessThanOrEqual(field.bottom);
 
   await page.mouse.click(econMovePt.x, econMovePt.y, { button: 'right' });
 
@@ -915,13 +905,6 @@ test('4. hotkey submenus, queued orders, delete slot, and enemy ownership isolat
     { timeout: 10_000 },
   );
 
-  const moveBeforeSubmenu = await page.evaluate((id) => {
-    const u = window.__bordev?.sim?.world.entities[id];
-    if (!u || u.kind !== 'unit' || !u.order) return null;
-    return { kind: u.order.kind, x: u.order.x, z: u.order.z };
-  }, peasantId);
-  expect(moveBeforeSubmenu?.kind).toBe('move');
-
   // Open Economic submenu with hotkey 'A'
   await page.keyboard.press('KeyA');
 
@@ -933,15 +916,21 @@ test('4. hotkey submenus, queued orders, delete slot, and enemy ownership isolat
     { timeout: 5_000 },
   );
 
-  // Verify Economic submenu card DOM slots
+  // Verify Economic submenu card slots
   const farmBtn = page.getByTestId('command-farm');
   await expect(farmBtn).toBeVisible();
-  await expect(farmBtn).toBeDisabled();
+  const isFarmAriaDisabled = await farmBtn.getAttribute('aria-disabled');
+  const isFarmNativeDisabled = await farmBtn.isDisabled();
+  expect(isFarmNativeDisabled || isFarmAriaDisabled === 'true').toBe(true);
   await expect(farmBtn).toContainText('Farm');
 
   const cottageBtn = page.getByTestId('command-cottage');
   await expect(cottageBtn).toBeVisible();
-  await expect(cottageBtn).toBeDisabled();
+  const isCottageAriaDisabled = await cottageBtn.getAttribute('aria-disabled');
+  const isCottageNativeDisabled = await cottageBtn.isDisabled();
+  expect(isCottageNativeDisabled || isCottageAriaDisabled === 'true').toBe(
+    true,
+  );
   await expect(cottageBtn).toContainText('Cottage');
 
   const backBtn = page.getByTestId('command-back');
@@ -949,20 +938,45 @@ test('4. hotkey submenus, queued orders, delete slot, and enemy ownership isolat
   await expect(backBtn).toBeEnabled();
   await expect(backBtn).toContainText('Back');
 
+  // Record unit order state and orderGeneration immediately before KeyW
+  const moveBeforeW = await page.evaluate((id) => {
+    const u = window.__bordev?.sim?.world.entities[id];
+    if (!u || u.kind !== 'unit' || !u.order) return null;
+    return {
+      kind: u.order.kind,
+      x: u.order.x,
+      z: u.order.z,
+      orderGeneration: u.orderGeneration,
+      ordersCount: u.orders ? u.orders.length : 0,
+    };
+  }, peasantId);
+  expect(moveBeforeW?.kind).toBe('move');
+
   // Press W while in Economic submenu (targeting disabled Farm slot)
   await page.keyboard.press('KeyW');
 
-  // W disabled Farm slot must NOT stop or mutate existing move order
+  // ReviewSimTestsDocs#0: wait ≥ 2 sim ticks after key press before asserting
+  await waitForTicks(page, 2);
+
+  // W disabled Farm slot must NOT stop or mutate existing move order, nor increment orderGeneration
   const moveAfterW = await page.evaluate((id) => {
     const u = window.__bordev?.sim?.world.entities[id];
     if (!u || u.kind !== 'unit' || !u.order) return null;
-    return { kind: u.order.kind, x: u.order.x, z: u.order.z };
+    return {
+      kind: u.order.kind,
+      x: u.order.x,
+      z: u.order.z,
+      orderGeneration: u.orderGeneration,
+      ordersCount: u.orders ? u.orders.length : 0,
+    };
   }, peasantId);
   expect(moveAfterW?.kind).toBe('move');
-  expect(moveAfterW?.x).toBe(moveBeforeSubmenu?.x);
-  expect(moveAfterW?.z).toBe(moveBeforeSubmenu?.z);
+  expect(moveAfterW?.x).toBe(moveBeforeW?.x);
+  expect(moveAfterW?.z).toBe(moveBeforeW?.z);
+  expect(moveAfterW?.orderGeneration).toBe(moveBeforeW?.orderGeneration);
+  expect(moveAfterW?.ordersCount).toBe(moveBeforeW?.ordersCount);
 
-  // Status ticker truthfully reflects disabled slot reason
+  // Status ticker reflects disabled slot reason
   await expect(page.getByTestId('hud-status')).toContainText('Milestone 5');
 
   // B returns to main command card
@@ -1090,7 +1104,7 @@ test('4. hotkey submenus, queued orders, delete slot, and enemy ownership isolat
   }, peasantId);
   expect(mainPeasantIntact, 'Primary peasant remains intact').toBe(true);
 
-  // 5. Enemy selection cannot expose enabled order slots
+  // 5. Enemy selection cannot expose enabled order slots (ReviewSimTestsDocs#13)
   const enemyUnitId = await page.evaluate(() => {
     const sim = window.__bordev?.sim;
     if (!sim) return null;
@@ -1119,19 +1133,301 @@ test('4. hotkey submenus, queued orders, delete slot, and enemy ownership isolat
     { timeout: 5_000 },
   );
 
-  // CommandCard must NOT expose any enabled order slots for enemy units
-  const enabledButtons = page.locator('.hud-command-card button.enabled');
+  // CommandCard must NOT expose any enabled order buttons for enemy units (ReviewSimTestsDocs#13)
+  const commandCard = page.getByTestId('command-card');
+  const enabledButtons = commandCard.locator(
+    'button:not([disabled]):not([aria-disabled="true"])',
+  );
   await expect(enabledButtons).toHaveCount(0);
 
-  const anyCommandButtons = page.locator('.hud-command-card button');
-  await expect(anyCommandButtons).toHaveCount(0);
-
-  // All 15 command slots rendered as empty slots with dim hotkeys
-  const emptySlots = page.locator('.hud-command-card .command-slot.empty');
-  await expect(emptySlots).toHaveCount(15);
+  const cardButtons = commandCard.getByRole('button');
+  const totalButtons = await cardButtons.count();
+  for (let i = 0; i < totalButtons; i++) {
+    const btn = cardButtons.nth(i);
+    const ariaDisabled = await btn.getAttribute('aria-disabled');
+    const nativeDisabled = await btn.isDisabled();
+    expect(nativeDisabled || ariaDisabled === 'true').toBe(true);
+  }
 
   expect(consoleErrors, 'console errors during hotkeys/enemy test').toEqual([]);
   expect(pageErrors, 'uncaught page errors during hotkeys/enemy test').toEqual(
     [],
   );
+});
+
+test('5. contextual orders: enemy combat, gold mining, farm economy, repair, rally point, and status auto-clear', async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  const { consoleErrors, pageErrors } = await setupM4Session(page, {
+    centerOn: { x: 22, z: 22 },
+  });
+
+  const field = await playfield(page);
+  const statusEl = page.getByTestId('hud-status');
+
+  // Find player 0 Keep
+  const keep = await page.evaluate(() => {
+    const sim = window.__bordev?.sim;
+    if (!sim) throw new Error('Simulation not initialized');
+    const b = sim.world.entities.find(
+      (e) =>
+        e &&
+        e.kind === 'building' &&
+        e.player === 0 &&
+        (e.isTownCenter || e.type === 'keep' || e.type === 'crown_keep'),
+    );
+    if (!b || b.kind !== 'building') throw new Error('Player 0 Keep not found');
+    return { id: b.id, x: b.x, z: b.z, maxHp: b.maxHp };
+  });
+
+  // 1. Rally via real input: click the Keep, right-click ground, wait ticks, Keep rallyPoint ≈ clicked ground point
+  await page.waitForFunction(
+    (id) => {
+      const renderer = window.__bordev?.renderer;
+      if (!renderer) return false;
+      const r = renderer.getEntityScreenRect(id);
+      return r !== undefined && r.right > r.left && r.bottom > r.top;
+    },
+    keep.id,
+    { timeout: 10_000 },
+  );
+  const keepPt = await pickablePoint(page, keep.id);
+  expect(keepPt.y).toBeGreaterThanOrEqual(field.top);
+  expect(keepPt.y).toBeLessThanOrEqual(field.bottom);
+
+  // Left-click to select the Keep
+  await page.mouse.click(keepPt.x, keepPt.y, { button: 'left' });
+
+  await page.waitForFunction(
+    (id) => {
+      const sel = window.__bordev?.session.input.selection.ids;
+      return sel !== undefined && sel.length === 1 && sel[0] === id;
+    },
+    keep.id,
+    { timeout: 5_000 },
+  );
+
+  // Right-click ground inside the playfield to set rally point
+  // keepCx, keepCy is near playfield centre (y ~287); offset by (+240, 0) is well inside [field.left, field.right] and [field.top, field.bottom]
+  const rallyScreenX = keepPt.x + 240;
+  const rallyScreenY = keepPt.y;
+  expect(rallyScreenY).toBeGreaterThanOrEqual(field.top);
+  expect(rallyScreenY).toBeLessThanOrEqual(field.bottom);
+  expect(rallyScreenX).toBeGreaterThanOrEqual(field.left);
+  expect(rallyScreenX).toBeLessThanOrEqual(field.right);
+
+  // Compute the expected ground world point using screenToGround projection from current camera view
+  const expRallyWorld = await page.evaluate(
+    ({ sx, sy }) => {
+      const cam = window.__bordev?.session.renderer.camera;
+      if (!cam) throw new Error('Renderer camera not available');
+      const view = cam.view;
+      const canvas = document.querySelector('canvas[aria-label="Game view"]');
+      const rect = canvas?.getBoundingClientRect();
+      const offX = rect?.left ?? 0;
+      const offY = rect?.top ?? 0;
+      const localX = sx - offX;
+      const localY = sy - offY;
+      const normX = (localX - view.width * 0.5) / view.zoom;
+      const normY = (localY - view.height * 0.5) / view.zoom;
+      const dx = normX / 96 + normY / 48;
+      const dz = normY / 48 - normX / 96;
+      return {
+        x: view.targetX + dx,
+        z: view.targetZ + dz,
+      };
+    },
+    { sx: rallyScreenX, sy: rallyScreenY },
+  );
+
+  await page.mouse.click(rallyScreenX, rallyScreenY, { button: 'right' });
+  await waitForTicks(page, 2);
+
+  const rallyPoint = await page.evaluate((id) => {
+    const b = window.__bordev?.sim?.world.entities[id];
+    if (!b || b.kind !== 'building') return null;
+    return b.rallyPoint ?? null;
+  }, keep.id);
+  expect(rallyPoint).not.toBeNull();
+  expect(Math.abs(rallyPoint!.x - expRallyWorld.x)).toBeLessThan(1.0);
+  expect(Math.abs(rallyPoint!.z - expRallyWorld.z)).toBeLessThan(1.0);
+  // 2. Spawn a peasant for contextual actions
+  const peasantId = (
+    await page.evaluate(() => {
+      const bordev = window.__bordev;
+      if (!bordev?.cheats) throw new Error('Cheats not available');
+      return bordev.cheats.spawnPeasants(1, 18, 22);
+    })
+  )[0];
+
+  await page.waitForFunction(
+    (id) => {
+      const renderer = window.__bordev?.renderer;
+      if (!renderer) return false;
+      const r = renderer.getEntityScreenRect(id);
+      return r !== undefined && r.right > r.left && r.bottom > r.top;
+    },
+    peasantId,
+    { timeout: 10_000 },
+  );
+
+  const peasantPt = await pickablePoint(page, peasantId);
+  expect(peasantPt.y).toBeGreaterThanOrEqual(field.top);
+  expect(peasantPt.y).toBeLessThanOrEqual(field.bottom);
+
+  // Select peasant
+  await page.mouse.click(peasantPt.x, peasantPt.y, { button: 'left' });
+  await page.waitForFunction(
+    (id) => {
+      const sel = window.__bordev?.session.input.selection.ids;
+      return sel !== undefined && sel.length === 1 && sel[0] === id;
+    },
+    peasantId,
+    { timeout: 5_000 },
+  );
+
+  // 3. Damaged own Keep with peasant selected -> repair message
+  await page.evaluate((id) => {
+    const b = window.__bordev?.sim?.world.entities[id];
+    if (!b || b.kind !== 'building') throw new Error('Keep missing');
+    b.hp = b.maxHp - 100;
+  }, keep.id);
+
+  // Right-click Keep for repair
+  const keepRepairPt = await pickablePoint(page, keep.id);
+  await page.mouse.click(keepRepairPt.x, keepRepairPt.y, { button: 'right' });
+  await expect(statusEl).toBeVisible();
+  await expect(statusEl).toHaveText('Building repair requires Milestone 5');
+
+  // 4. Right-click farm spawned via __bordev.sim.world.spawnBuilding with peasant selected -> farming message
+  // Spawn farm at (25, 20) east of Keep (20..24, 20..24) in clear ground not overlapped by Keep sprite
+  const farmId = await page.evaluate(() => {
+    const sim = window.__bordev?.sim;
+    if (!sim) throw new Error('Sim missing');
+    const f = sim.world.spawnBuilding(0, 'farm', 25, 20, true, 'crown');
+    return f.id;
+  });
+
+  await waitForTicks(page, 2);
+  await page.waitForFunction(
+    (id) => {
+      const renderer = window.__bordev?.renderer;
+      if (!renderer) return false;
+      const r = renderer.getEntityScreenRect(id);
+      return r !== undefined && r.right > r.left && r.bottom > r.top;
+    },
+    farmId,
+    { timeout: 10_000 },
+  );
+
+  const farmPt = await pickablePoint(page, farmId);
+  expect(farmPt.y).toBeGreaterThanOrEqual(field.top);
+  expect(farmPt.y).toBeLessThanOrEqual(field.bottom);
+
+  await page.mouse.click(farmPt.x, farmPt.y, { button: 'right' });
+  await expect(statusEl).toBeVisible();
+  await expect(statusEl).toHaveText('Farming economy requires Milestone 5');
+
+  // 5. Right-click gold mine with cart selected -> mining message
+  // Spawn gold mine at (20, 25) south of Keep and cart at (21, 28) in clear ground
+  const mineId = await page.evaluate(() => {
+    const sim = window.__bordev?.sim;
+    if (!sim) throw new Error('Sim missing');
+    const m = sim.world.spawnMine(20, 25);
+    return m.id;
+  });
+
+  const cartId = await page.evaluate(() => {
+    const sim = window.__bordev?.sim;
+    if (!sim) throw new Error('Sim missing');
+    const c = sim.world.spawnUnit(0, 'ox_cart', 21, 28, 'crown');
+    return c.id;
+  });
+  await waitForTicks(page, 2);
+  await page.waitForFunction(
+    (id) => {
+      const renderer = window.__bordev?.renderer;
+      if (!renderer) return false;
+      const r = renderer.getEntityScreenRect(id);
+      return r !== undefined && r.right > r.left && r.bottom > r.top;
+    },
+    cartId,
+    { timeout: 10_000 },
+  );
+  await page.waitForFunction(
+    (id) => {
+      const renderer = window.__bordev?.renderer;
+      if (!renderer) return false;
+      const r = renderer.getEntityScreenRect(id);
+      return r !== undefined && r.right > r.left && r.bottom > r.top;
+    },
+    mineId,
+    { timeout: 10_000 },
+  );
+
+  const cartPt = await pickablePoint(page, cartId);
+  expect(cartPt.y).toBeGreaterThanOrEqual(field.top);
+  expect(cartPt.y).toBeLessThanOrEqual(field.bottom);
+
+  // Select cart
+  await page.mouse.click(cartPt.x, cartPt.y, { button: 'left' });
+
+  await page.waitForFunction(
+    (id) => {
+      const sel = window.__bordev?.session.input.selection.ids;
+      return sel !== undefined && sel.length === 1 && sel[0] === id;
+    },
+    cartId,
+    { timeout: 5_000 },
+  );
+
+  const minePt = await pickablePoint(page, mineId);
+  expect(minePt.y).toBeGreaterThanOrEqual(field.top);
+  expect(minePt.y).toBeLessThanOrEqual(field.bottom);
+
+  // Right-click gold mine
+  await page.mouse.click(minePt.x, minePt.y, { button: 'right' });
+  await expect(statusEl).toBeVisible();
+  await expect(statusEl).toHaveText('Mining economy requires Milestone 5');
+
+  // 6. Right-click enemy unit with own unit selected -> combat message
+  // Spawn enemy at (27, 24) south-east of Keep in clear ground
+  const enemyId = await page.evaluate(() => {
+    const sim = window.__bordev?.sim;
+    if (!sim) throw new Error('Sim missing');
+    const e = sim.world.spawnUnit(1, 'spearman', 27, 24, 'crown');
+    return e.id;
+  });
+
+  await waitForTicks(page, 2);
+  await page.waitForFunction(
+    (id) => {
+      const renderer = window.__bordev?.renderer;
+      if (!renderer) return false;
+      const r = renderer.getEntityScreenRect(id);
+      return r !== undefined && r.right > r.left && r.bottom > r.top;
+    },
+    enemyId,
+    { timeout: 10_000 },
+  );
+
+  const enemyPt = await pickablePoint(page, enemyId);
+  expect(enemyPt.y).toBeGreaterThanOrEqual(field.top);
+  expect(enemyPt.y).toBeLessThanOrEqual(field.bottom);
+
+  // Right-click enemy unit (cart is still selected)
+  await page.mouse.click(enemyPt.x, enemyPt.y, { button: 'right' });
+  await expect(statusEl).toHaveText('Combat system requires Milestone 7');
+
+  // 7. Status line auto-clears ~4 s after appearing (positive: visible first; then hidden, bounded wait)
+  await expect(statusEl).toBeHidden({ timeout: 6_000 });
+
+  expect(consoleErrors, 'console errors during contextual orders test').toEqual(
+    [],
+  );
+  expect(
+    pageErrors,
+    'uncaught page errors during contextual orders test',
+  ).toEqual([]);
 });

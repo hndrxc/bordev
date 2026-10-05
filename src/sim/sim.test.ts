@@ -252,6 +252,39 @@ describe('Sim Core Consumer Regressions', () => {
     sim.step();
     expect(keep.rallyPoint).toEqual({ x: 25, z: 30 });
 
+    // Command targeting an enemy's Keep is ignored
+    const enemyKeep = sim.world.spawnBuilding(1, 'keep', 20, 20, true);
+    sim.issue({
+      kind: 'setRally',
+      player: 0,
+      buildingId: enemyKeep.id,
+      x: 18,
+      z: 18,
+    });
+    sim.step();
+    expect(enemyKeep.rallyPoint).toBeUndefined();
+
+    // Command targeting non-production own buildings (e.g. cottage, farm) is ignored
+    const cottage = sim.world.spawnBuilding(0, 'cottage', 2, 2, true);
+    const farm = sim.world.spawnBuilding(0, 'farm', 6, 6, true);
+    sim.issue({
+      kind: 'setRally',
+      player: 0,
+      buildingId: cottage.id,
+      x: 15,
+      z: 15,
+    });
+    sim.issue({
+      kind: 'setRally',
+      player: 0,
+      buildingId: farm.id,
+      x: 15,
+      z: 15,
+    });
+    sim.step();
+    expect(cottage.rallyPoint).toBeUndefined();
+    expect(farm.rallyPoint).toBeUndefined();
+
     // Command targeting non-building entity (e.g. peasant) is safely ignored
     const peasant = sim.world.spawnUnit(0, 'peasant', 12, 12);
     sim.issue({
@@ -263,5 +296,79 @@ describe('Sim Core Consumer Regressions', () => {
     });
     sim.step();
     expect('rallyPoint' in peasant).toBe(false);
+
+    // Non-finite coordinates (NaN / Infinity) are ignored
+    sim.issue({
+      kind: 'setRally',
+      player: 0,
+      buildingId: keep.id,
+      x: Number.NaN,
+      z: 20,
+    });
+    sim.issue({
+      kind: 'setRally',
+      player: 0,
+      buildingId: keep.id,
+      x: 20,
+      z: Number.POSITIVE_INFINITY,
+    });
+    sim.issue({
+      kind: 'setRally',
+      player: 0,
+      buildingId: keep.id,
+      x: Number.NEGATIVE_INFINITY,
+      z: Number.NaN,
+    });
+    sim.step();
+    expect(keep.rallyPoint).toEqual({ x: 25, z: 30 });
+
+    // Off-map coordinates clamp to the map edges [0, map.size]
+    sim.issue({
+      kind: 'setRally',
+      player: 0,
+      buildingId: keep.id,
+      x: -10,
+      z: -20,
+    });
+    sim.step();
+    expect(keep.rallyPoint).toEqual({ x: 0, z: 0 });
+
+    sim.issue({
+      kind: 'setRally',
+      player: 0,
+      buildingId: keep.id,
+      x: 100,
+      z: 200,
+    });
+    sim.step();
+    expect(keep.rallyPoint).toEqual({ x: 32, z: 32 });
+
+    // A valid Keep rally still applies on the next tick
+    sim.issue({
+      kind: 'setRally',
+      player: 0,
+      buildingId: keep.id,
+      x: 12,
+      z: 14,
+    });
+    expect(keep.rallyPoint).toEqual({ x: 32, z: 32 });
+    sim.step();
+    expect(keep.rallyPoint).toEqual({ x: 12, z: 14 });
+  });
+
+  it('rejects unsupported command kinds with not-implemented error', () => {
+    const map = makeTestMap(32);
+    const sim = new Sim(map, 1);
+
+    expect(() => {
+      sim.issue({
+        kind: 'build',
+        player: 0,
+        ids: [1],
+        buildingType: 'farm',
+        x: 10,
+        z: 10,
+      });
+    }).toThrow(/not implemented yet/);
   });
 });

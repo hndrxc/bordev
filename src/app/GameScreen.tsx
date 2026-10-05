@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { GameSession } from '../game/GameSession';
-import { Hud } from '../ui/HUD';
+import { Hud } from '../ui/HudRoot';
 
 export function GameScreen() {
   const canvasRef = useRef<HTMLCanvasElement>(null);

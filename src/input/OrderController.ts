@@ -2,7 +2,13 @@ import type { GameSession } from '../game/GameSession';
 import type { SelectionController } from './SelectionController';
 import type { BuildingEntity, UnitEntity } from '../sim/entity';
 import { screenToGround } from '../render/iso';
-import { setHudStatus } from '../ui/hud';
+import type { CardAction } from '../ui/commandSlots';
+import {
+  isCartType,
+  isFarmType,
+  isProductionType,
+  isWorkerType,
+} from '../data/roles';
 import type { OrderMarker } from '../render/Overlays';
 
 export type { OrderMarker };
@@ -52,7 +58,7 @@ export class OrderController {
     this.submenu = null;
   }
 
-  public execute(action: string): void {
+  public execute(action: CardAction): void {
     if (this.isDisposed) return;
     const sim = this.session.sim;
     const ids = this.selection.ids;
@@ -72,18 +78,11 @@ export class OrderController {
         }
       }
     }
-    const ownUnitIds = ownEntities
-      .filter((e) => e.kind === 'unit')
-      .map((e) => e.id);
-    const hasOwnPeasant = ownEntities.some(
-      (e) =>
-        e.kind === 'unit' &&
-        (e.type === 'peasant' ||
-          e.type === 'crown_peasant' ||
-          e.type.includes('peasant') ||
-          e.type.includes('thrall')),
+    const ownUnits = ownEntities.filter(
+      (e): e is UnitEntity => e.kind === 'unit',
     );
-
+    const ownUnitIds = ownUnits.map((e) => e.id);
+    const hasOwnWorker = ownUnits.some((e) => isWorkerType(e.type));
     switch (action) {
       case 'move':
         this.mode = 'move';
@@ -131,47 +130,28 @@ export class OrderController {
         break;
 
       case 'economic':
-        if (hasOwnPeasant) {
+        if (hasOwnWorker) {
           this.submenu = 'economic';
         } else {
-          setHudStatus('Economic buildings require an owned peasant');
+          this.session.showStatus(
+            'Economic buildings require an owned peasant',
+          );
         }
         break;
 
       case 'military':
-        if (hasOwnPeasant) {
+        if (hasOwnWorker) {
           this.submenu = 'military';
         } else {
-          setHudStatus('Military buildings require an owned peasant');
+          this.session.showStatus(
+            'Military buildings require an owned peasant',
+          );
         }
         break;
 
-      case 'setRally':
-        setHudStatus('Right-click ground to set rally');
-        break;
       case 'back':
         this.submenu = null;
         this.mode = null;
-        break;
-
-      // Truthful reporting for future systems
-      case 'build':
-      case 'farm':
-      case 'pinMine':
-      case 'repair':
-        setHudStatus('Economy and construction require Milestone 5');
-        break;
-
-      case 'train':
-      case 'cancelTrain':
-      case 'research':
-      case 'cancelResearch':
-        setHudStatus('Production and research require Milestone 6');
-        break;
-
-      default:
-        // Unknown action or future action
-        setHudStatus(`Action '${action}' is unavailable`);
         break;
     }
   }
@@ -257,24 +237,31 @@ export class OrderController {
     }
     if (ownEntities.length === 0) return;
 
-    // 1. Rally Precedence: if single own building is selected
-    if (ownEntities.length === 1 && ownEntities[0].kind === 'building') {
-      const bldg = ownEntities[0];
-      this.session.issue({
-        kind: 'setRally',
-        player: 0,
-        buildingId: bldg.id,
-        x: targetX,
-        z: targetZ,
-      });
+    const ownUnits = ownEntities.filter(
+      (e): e is UnitEntity => e.kind === 'unit',
+    );
+    const ownBuildings = ownEntities.filter(
+      (e): e is BuildingEntity => e.kind === 'building',
+    );
+
+    // 1. Rally Precedence: if ONLY own buildings are selected
+    if (ownUnits.length === 0 && ownBuildings.length > 0) {
+      const prodBuildings = ownBuildings.filter((b) =>
+        isProductionType(b.type),
+      );
+      for (let i = 0; i < prodBuildings.length; i++) {
+        this.session.issue({
+          kind: 'setRally',
+          player: 0,
+          buildingId: prodBuildings[i].id,
+          x: targetX,
+          z: targetZ,
+        });
+      }
       return;
     }
 
-    const ownUnitIds = ownEntities
-      .filter((e) => e.kind === 'unit')
-      .map((e) => e.id);
-    if (ownUnitIds.length === 0) return;
-
+    const ownUnitIds = ownUnits.map((e) => e.id);
     // Look up target entity if provided
     const targetEntity =
       targetId !== undefined ? sim.world.getEntity(targetId) : undefined;
@@ -285,62 +272,46 @@ export class OrderController {
       (targetEntity.kind === 'unit' || targetEntity.kind === 'building') &&
       targetEntity.player !== 0
     ) {
-      setHudStatus('Combat system requires Milestone 7');
+      this.session.showStatus('Combat system requires Milestone 7');
       return;
     }
 
     // 3. Gold mine with cart precedence -> pin mine (Economy M5)
-    if (
-      targetEntity &&
-      (targetEntity.kind === 'mine' ||
-        (targetEntity.kind !== 'projectile' &&
-          targetEntity.type === 'gold_mine'))
-    ) {
-      const hasCart = ownEntities.some(
-        (e) =>
-          e.kind === 'unit' &&
-          (e.type.includes('cart') || e.type.includes('wagon')),
-      );
+    if (targetEntity && targetEntity.kind === 'mine') {
+      const hasCart = ownUnits.some((e) => isCartType(e.type));
       if (hasCart) {
-        setHudStatus('Mining economy requires Milestone 5');
+        this.session.showStatus('Mining economy requires Milestone 5');
         return;
       }
     }
 
-    // 4. Unworked farm with peasant precedence -> farm (Economy M5)
+    const hasWorker = ownUnits.some((e) => isWorkerType(e.type));
+
+    // 4. Unworked farm with worker precedence -> farm (Economy M5)
     if (
       targetEntity &&
       targetEntity.kind === 'building' &&
-      targetEntity.type.includes('farm')
+      isFarmType(targetEntity.type) &&
+      targetEntity.built
     ) {
-      const hasPeasant = ownEntities.some(
-        (e) =>
-          e.kind === 'unit' &&
-          (e.type.includes('peasant') || e.type.includes('thrall')),
-      );
-      if (hasPeasant) {
-        setHudStatus('Farming economy requires Milestone 5');
+      if (hasWorker) {
+        this.session.showStatus('Farming economy requires Milestone 5');
         return;
       }
     }
 
-    // 5. Own unfinished/damaged building with peasant precedence -> build/repair (M5)
+    // 5. Own unfinished/damaged building with worker precedence -> build/repair (M5)
     if (
       targetEntity &&
       targetEntity.kind === 'building' &&
       targetEntity.player === 0 &&
       (!targetEntity.built || targetEntity.hp < targetEntity.maxHp)
     ) {
-      const hasPeasant = ownEntities.some(
-        (e) =>
-          e.kind === 'unit' &&
-          (e.type.includes('peasant') || e.type.includes('thrall')),
-      );
-      if (hasPeasant) {
+      if (hasWorker) {
         if (!targetEntity.built) {
-          setHudStatus('Building construction requires Milestone 5');
+          this.session.showStatus('Building construction requires Milestone 5');
         } else {
-          setHudStatus('Building repair requires Milestone 5');
+          this.session.showStatus('Building repair requires Milestone 5');
         }
         return;
       }

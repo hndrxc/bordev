@@ -1,4 +1,5 @@
 import type { Faction } from '../data/types.js';
+import { isProductionType } from '../data/roles.js';
 import type { GameMap } from './map.js';
 import { World } from './world.js';
 import type { PathQueue } from './path/pathQueue.js';
@@ -32,9 +33,7 @@ export class Sim {
 
   issue(cmd: Command): void {
     if (!isSupportedCommandKind(cmd.kind)) {
-      throw new Error(
-        `Command kind '${cmd.kind}' is not supported in Milestone 4 (requires future milestone)`,
-      );
+      throw new Error(`Command kind '${cmd.kind}' is not implemented yet`);
     }
     this.pendingCommands.push(cloneCommand(cmd));
   }
@@ -83,9 +82,21 @@ export class Sim {
   private applySetRallyCommand(
     cmd: Extract<Command, { kind: 'setRally' }>,
   ): void {
+    if (!Number.isFinite(cmd.x) || !Number.isFinite(cmd.z)) {
+      return;
+    }
     const ent = this.world.entities[cmd.buildingId];
-    if (ent && ent.kind === 'building' && ent.player === cmd.player) {
-      ent.rallyPoint = { x: cmd.x, z: cmd.z };
+    if (
+      ent &&
+      ent.kind === 'building' &&
+      ent.player === cmd.player &&
+      isProductionType(ent.type)
+    ) {
+      const size = this.world.map.size;
+      ent.rallyPoint = {
+        x: Math.max(0, Math.min(size, cmd.x)),
+        z: Math.max(0, Math.min(size, cmd.z)),
+      };
     }
   }
 

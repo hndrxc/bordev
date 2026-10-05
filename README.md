@@ -12,10 +12,11 @@ A single-player 2.5D medieval RTS for the browser. It combines Command & Conquer
 | M1 Sprite pipeline v1 (15 Blender assets, atlases, terrain textures) | ✅ done |
 | M2 World rendering (iso camera, terrain, sprite batches, shadows, overlays) | ✅ done |
 | M3 Simulation core (20 Hz fixed step, grid, A*, movement, determinism) | ✅ done |
-| M4 Selection, orders and HUD shell | ⏭ next |
-| M5–M9 Economy, production, combat, fog, skirmish flow and AI | not started |
+| M4 Selection, orders and HUD shell | ✅ done |
+| M5 Economy and construction | ⏭ next |
+| M6–M9 Production, combat, fog, skirmish flow and AI | not started |
 
-`npm run dev` currently loads `public/maps/alpha_test.json`, runs the sim at 20 Hz and renders the terrain along with a debug scene: the map's start units plus 40 seeded Crown units for player 0, in all eight facings. There is no selection, HUD or AI yet, so you interact through the [debug hook](#debug-hooks). The sim accepts the `move`, `attackMove` (movement only), `stop`, `hold` and `delete` commands. Other command kinds throw until their systems are built.
+`npm run dev` loads `public/maps/alpha_test.json`, runs the sim at 20 Hz, and renders terrain, unit sprites, and overlays along with a debug scene (start units plus seeded Crown units for player 0). Selection (click, drag-box, Shift multi-select, double-click type selection, control groups 0–9), orders (contextual right-click, Shift queueing, rally points, stop, hold, delete), the React HUD (top bar resources, selection panel with portraits and stats, 3×5 command card), interactive minimap, and camera controls (pan keys, middle-drag, cursor wheel zoom, edge scrolling, Town Center jump) are fully implemented. The sim accepts `move`, `attackMove` (movement only), `stop`, `hold`, `delete`, and `setRally` commands. Other command kinds throw until their milestone systems are built. There is no AI yet (scheduled for M9).
 
 ## Prerequisites
 
@@ -36,7 +37,7 @@ npm ci
 npm run dev        # Vite on :5173, bound to all interfaces (server.host: true)
 ```
 
-On a headless machine, open `http://<host>:5173/` from another machine. The `G` key toggles the tile grid and Keep footprints, middle-drag pans, and the wheel zooms around the cursor (0.5–1.5).
+On a headless machine, open `http://<host>:5173/` from another machine. When debug is enabled and the command slot is empty, `G` toggles the debug grid and Keep footprints. Middle-drag pans, and the wheel zooms around the cursor (0.5–1.5).
 
 Do not use `npm install --force` or `--legacy-peer-deps`. See [TypeScript and lint toolchain](#typescript-and-lint-toolchain) for the reason.
 
@@ -76,21 +77,26 @@ When the job fails, CI uploads `playwright-report/` and `test-results/` as artif
 src/
   main.tsx          React root → app/GameScreen
   app/              screens (GameScreen today; menus/setup/results arrive in M9)
-  game/             GameSession: owns Sim + Renderer, fixed-step loop, debug hook
+  game/             GameSession: owns Sim, Renderer, InputController; fixed-step
+                    loop, 10 Hz HUD publication, debug hook
   render/           Babylon: Renderer, IsoCamera, Terrain, SpriteBatch, AtlasCache,
-                    UnitShadows, Overlays, DebugScene, iso math
+                    UnitShadows, Overlays, ThinInstancePool, DebugScene, iso math;
+                    overlays/ (geometryBuilder, DebugGrid, overlayShaders)
   sim/              PURE TypeScript simulation: sim, world, entity, commands, rng,
                     map, grid, spatialHash, path/ (A*, components, queue), systems/
-  data/             typed design tables: units, buildings, upgrades, ages, factions,
-                    combat, economy, terrain
+  data/             typed design tables: roles (role predicates), units, buildings,
+                    upgrades, ages, factions, combat, economy, terrain
   assets/           art manifest + atlas JSON types/parsers (shared with tools)
-  input/ ui/        empty placeholders until M4
+  input/            Hotkeys (single keyboard dispatcher), InputController,
+                    SelectionController, OrderController, CameraController
+  ui/               HudRoot (Hud), TopBar, SelectionPanel, CommandCard, Portrait,
+                    Minimap, commandSlots, hud (Zustand store)
 art/
   manifest.json     every renderable asset (id, kind, script, frame size, dirs, anims)
   blender/          render_asset.py, render_terrain.py, lib/ (rig, look, materials, …),
                     assets/<id>.py (one script per asset)
 tools/              art-build, pack-atlas, mapgen, bench-sim (+ tests); eslint/ workspace
-tests/e2e/          Playwright specs
+tests/e2e/          Playwright specs (boot, m4, m4-boundaries); fixtures/m4.ts
 public/             GENERATED and COMMITTED: atlases/, terrain/, maps/
 build/              GENERATED and IGNORED: raw renders, logs, caches
 docs/plans/         overview + stage plans (alpha, beta, pre-release, release)
@@ -102,21 +108,40 @@ docs/plans/         overview + stage plans (alpha, beta, pre-release, release)
 
 ```mermaid
 flowchart LR
-  Input["input/ + ui/ (M4+)"] -- Command --> Issue["sim.issue()"]
+  Input["input/ (Hotkeys, Orders, Selection)"] -- Command --> Issue["sim.issue()"]
   AI["sim/ai (M9)"] -- Command --> Issue
   Issue --> Step["Sim.step() @ 20 Hz"]
   Step -- "interpolated snapshot" --> Render["render/ (Babylon)"]
-  Step -- "drainEvents()" --> HUD["ui/ HUD"]
+  Session["GameSession loop"] -- "publishHud() @ 10 Hz" --> HUD["ui/ (Zustand store)"]
+  Session -- "step()" --> Step
 ```
 
+- **GameSession ownership and loop.** `GameSession` owns the simulation (`Sim`), renderer (`Renderer`), and input dispatcher (`InputController`). It steps the sim at `SIM_DT = 0.05` s (20 Hz) using an accumulator, routes clamped frame delta to input, renders with `alpha = acc / SIM_DT` snapshot interpolation, and publishes game state to the Zustand HUD store at 10 Hz (every 2 sim ticks). Rendering and HUD publication never mutate sim state.
 - **The sim/data seam.** `src/sim` and `src/data` may not import Babylon, React, the DOM, or `src/{render,ui,input,game,app}`. ESLint enforces this for static imports, `import()` and `import type`. `tsconfig.sim.json` also compiles these directories with ES2023 libs only, so no DOM or Node types are available. This keeps the sim runnable in Node for tests, benchmarks and the planned headless AI matches.
 - **Determinism.** All randomness goes through `Rng` (mulberry32, seeded per match). The same seed and the same command log produce the same outcome, and a test checks this. Never call `Math.random()` in `src/sim`. Debug-only spawning uses its own `Rng`.
 - **Commands.** Input and AI mutate state only through `sim.issue(cmd)`. The command is copied and applied at the start of the next tick. `Command` is a discriminated union on `kind`, and every command carries `player`. Unit commands carry `ids` and an optional `queued`.
-- **Loop.** `GameSession` steps the sim at `SIM_DT = 0.05` s using an accumulator, then renders with `alpha = acc / SIM_DT` interpolation. Rendering never mutates sim state.
 - **Entities.** A dense array indexed by numeric id, with a free list. Entities are plain objects tagged by `kind` (`unit | building | mine | projectile | doodad`). There is no class hierarchy.
 - **Coordinates.** World +X projects to screen (+48, +24) px per tile and +Z to (−48, +24) at zoom 1. Tile (0,0) is the top corner of the map. Map JSON stores top-left tiles for footprints, but sprites anchor at the footprint centre.
 
 The rendering, pathfinding, fog and sprite contracts are in the overview's [Technical architecture](docs/plans/00-overview.md#technical-architecture) section. Read it before changing those systems.
+
+## Developer conventions
+
+Future development across sim, render, input, and UI must follow these conventions:
+
+- **Centralised keyboard input.** All keyboard listeners go exclusively through `src/input/Hotkeys.ts` (one window `keydown` and `keyup` listener). No other module registers keyboard events.
+  - Match by physical `e.code` (e.g. `KeyW`, `KeyQ`), never layout-dependent `e.key`, to support international layouts (AZERTY/QWERTZ) seamlessly.
+  - One-shot actions and hotkeys must ignore `e.repeat`. Continuous controls (such as held arrow panning) handle repeat and keyup explicitly.
+  - Always guard against editable targets via `isEditableElement` (`<input>`, `<textarea>`, `contenteditable`).
+  - Command card actions claim the physical 3×5 grid (`KeyQ`–`KeyT`, `KeyA`–`KeyG`, `KeyZ`–`KeyB`). Any new global hotkeys must live outside this grid (e.g. `H`, `.`, digits, arrows, `Escape`, `Delete`) or be coordinated with card slots.
+  - Debug-only hotkeys must be gated by `session.debugEnabled` (`DEV` or `?debug=1`) and must never activate in release builds.
+- **HUD status line.** Input and UI code must only display status messages via `session.showStatus(message)`. Never mutate UI stores directly. Status messages auto-clear after 4 seconds (4000 ms wall clock); subsequent calls restart the timer.
+- **Inset-aware camera centering.** `camera.centerOn(x, z)` centres world coordinates in the unobscured playfield band between HUD bars, not the raw canvas centre. `HudRoot.tsx` observes HUD dimensions with a `ResizeObserver` and reports top/bottom insets via `camera.setViewportInsets(top, bottom)`. Minimap clicks, `H` (Town Center jump), and control-group double-taps use this inset-aware positioning.
+- **Entity role checks.** Never inspect entity types using string matching (e.g. `type === 'peasant'`). Use role predicates from `src/data/roles.ts`: `isWorkerType`, `isCartType`, `isFarmType`, `isTownCenterType`, and `isProductionType`.
+- **Instance pools and zero buffer churn.** Overlay ellipses/bars, sprite batches, and unit shadows manage WebGL instance data using `ThinInstancePool` with pre-sized capacities (ellipses/bars ≥ 256, line segments ≥ 2048). Mesh vertex data reallocates on growth without destroying meshes. Continuous unit movement and camera panning must produce zero `createBuffer` and zero `deleteBuffer` WebGL calls after initial warmup.
+- **Renderer asset mappings and footprint anchors.** `Renderer` maintains a single `TYPE_TO_ASSET` table mapping simulation data IDs to atlas assets for both sprites and portraits. Sprites and minimap markers for multi-tile entities (buildings, mines) anchor at their footprint centre (`x + width / 2`, `z + height / 2`) derived from each entity's own width and height, not hard-coded offsets.
+- **Cross-platform filename casing.** Windows and macOS filesystems are case-insensitive by default. No two source files in `src/` may differ only by case (for example, `commandSlots.ts` vs `CommandCard.tsx`, or `HudRoot.tsx` vs `hud.ts`).
+- **End-to-end test conventions.** Browser tests must import `tests/e2e/fixtures/m4.ts` (`setupM4Session`, `worldToScreen`, `waitForTicks`, `playfield`, `pickablePoint`). Because debug-scene walkers move continuously, tests must click entities using `pickablePoint(page, id)` (which samples the screen rect to find a point resolving to that entity) rather than a fixed rect centre. Tests must wait on sim ticks (`waitForTicks`) or observable UI conditions rather than arbitrary wall-clock sleeps, must include positive controls for negative assertions, and should prefer real pointer/keyboard input and the documented `window.__bordev` API over direct controller manipulation.
 
 ## Testing
 
@@ -152,17 +177,32 @@ The benchmark reports tick percentiles and path-expansion counters. With 300 or 
 The hook is available in dev builds, or in any build when the URL includes `?debug=1`.
 
 ```js
-window.__bordev = { session, renderer, sim /* null while loading */, issue(cmd), stats() }
+window.__bordev = {
+  session,
+  renderer,
+  sim, // null while loading
+  issue(cmd),
+  stats(),
+  cheats: {
+    resources(n),
+    spawnPeasants(count, x, z),
+  },
+}
 ```
 
-`stats()` reports load and error state, the tick, FPS, the accumulator, and renderer stats (draw calls, visible sprites, frame timings, camera, depth probes). The ids of the debug-scene units, all owned by player 0, are on the renderer:
+- `stats()` reports load and error state, the tick, FPS, the accumulator, and renderer stats (draw calls, visible sprites, frame timings, camera, depth probes).
+- `cheats.resources(n)` sets food and gold to `n` for all players and triggers an immediate HUD publication.
+- `cheats.spawnPeasants(count, x, z)` searches nearby passable, uncrowded tiles around `(x, z)` and spawns peasants for player 0. It returns the array of entity IDs actually spawned, which may be fewer than `count` if nearby space is blocked, crowded, or off-map.
+- `issue(cmd)` routes commands through `sim.issue()`.
+
+The ids of the debug-scene units, all owned by player 0, are on the renderer:
 
 ```js
 const ids = __bordev.renderer.debugProbes.allDebugUnitIds.slice(0, 5);
 __bordev.issue({ kind: 'move', player: 0, ids, x: 40, z: 40 });
 ```
 
-Economy, fog and construction cheats (`cheats.*` in the overview) will appear once those systems exist.
+Additional cheats (fog, construction, combat) will appear as their milestones are completed.
 
 ## Art pipeline
 
