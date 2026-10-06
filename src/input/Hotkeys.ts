@@ -1,6 +1,6 @@
 import type { GameSession } from '../game/GameSession';
 import type { InputController } from './InputController';
-import { getCommandSlots } from '../ui/commandSlots';
+import { getCommandSlots, getCommandSlotContext } from '../ui/commandSlots';
 
 export interface KeyboardEventLike {
   readonly code: string;
@@ -111,6 +111,19 @@ export class Hotkeys {
     if (e.ctrlKey || e.altKey || e.metaKey || e.repeat) {
       return;
     }
+    // Placement consumes these keys only after the normal one-shot filter.
+    if (this.input.placement?.active) {
+      if (code === 'Escape') {
+        this.input.placement.cancel();
+        e.preventDefault?.();
+        return;
+      }
+      if (code === 'KeyR') {
+        this.input.placement.rotate();
+        e.preventDefault?.();
+        return;
+      }
+    }
 
     // 3. KeyH -> camera.centerOnTownCenter()
     if (code === 'KeyH') {
@@ -144,19 +157,16 @@ export class Hotkeys {
     const cardKey = CARD_CODE_TO_KEY[code];
     if (cardKey) {
       const selectionMeta = this.getLiveSelectedEntities();
-      const slots = getCommandSlots(selectionMeta, this.input.orders.submenu);
+      const slots = getCommandSlots(
+        selectionMeta,
+        this.input.orders.submenu,
+        getCommandSlotContext(this.session.sim?.world),
+      );
       const slot = slots.find((s) => s.key === cardKey);
-      if (slot) {
-        if (!slot.disabled && slot.action) {
-          this.input.orders.execute(slot.action);
-          e.preventDefault?.();
-          return;
-        }
-        if (slot.disabled && slot.reason) {
-          this.session.showStatus(slot.reason);
-          e.preventDefault?.();
-          return;
-        }
+      if (slot && (slot.action || (slot.disabled && slot.reason))) {
+        this.input.orders.executeSlot(slot);
+        e.preventDefault?.();
+        return;
       }
       if (cardKey === 'G' && this.session.debugEnabled) {
         this.session.renderer?.toggleDebugGrid();

@@ -6,6 +6,9 @@ import * as commandSlotsModule from '../ui/commandSlots';
 function createHarness(options?: {
   debugEnabled?: boolean;
   selectedUnits?: readonly { kind: string; type: string; player?: number }[];
+  placementActive?: boolean;
+  age?: 1 | 2 | 3;
+  faction?: 'crown' | 'clans';
 }) {
   const panKeys: { direction: string; pressed: boolean }[] = [];
   let centeredTownCenter = false;
@@ -49,31 +52,27 @@ function createHarness(options?: {
     cancelDrag: vi.fn(),
   };
 
+  const executedSlots: commandSlotsModule.CommandSlot[] = [];
   const executedOrders: string[] = [];
-  const orders = {
-    execute: vi.fn((action: string) => {
-      executedOrders.push(action);
-    }),
-    submenu: null as 'economic' | 'military' | null,
-  };
-
-  let toggledDebugGrid = false;
-  const renderer = {
-    toggleDebugGrid: vi.fn(() => {
-      toggledDebugGrid = true;
-      return true;
-    }),
-  };
-
   const statusMessages: string[] = [];
+
   const session = {
     debugEnabled: options?.debugEnabled ?? false,
     showStatus: vi.fn((msg: string) => {
       statusMessages.push(msg);
     }),
-    renderer,
+    renderer: {
+      toggleDebugGrid: vi.fn(() => {
+        toggledDebugGrid = true;
+        return true;
+      }),
+    },
     sim: {
       world: {
+        players: [
+          { age: options?.age ?? 1, faction: options?.faction ?? 'crown' },
+        ],
+        entities: [{ kind: 'building', type: 'keep', player: 0, hp: 2400 }],
         getEntity: vi.fn((id: number) => {
           if (options?.selectedUnits && options.selectedUnits.length > 0) {
             const u = options.selectedUnits[0];
@@ -97,12 +96,41 @@ function createHarness(options?: {
     },
   };
 
+  const orders = {
+    execute: vi.fn((action: string) => {
+      executedOrders.push(action);
+    }),
+    executeSlot: vi.fn((slot: commandSlotsModule.CommandSlot) => {
+      executedSlots.push(slot);
+      if (slot.disabled) {
+        if (slot.reason) {
+          session.showStatus(slot.reason);
+        }
+        return;
+      }
+      if (slot.action) {
+        executedOrders.push(slot.action);
+      }
+    }),
+    submenu: null as 'economic' | 'military' | null,
+  };
+
+  let toggledDebugGrid = false;
+  const renderer = session.renderer;
+
+  const placement = {
+    active: options?.placementActive ?? false,
+    cancel: vi.fn(),
+    rotate: vi.fn(),
+  };
+
   let cycledWorker = false;
   const input = {
     camera,
     selection,
     orders,
     session,
+    placement,
     cycleIdleWorker: vi.fn(() => {
       cycledWorker = true;
     }),
@@ -118,6 +146,7 @@ function createHarness(options?: {
     camera,
     selection,
     orders,
+    placement,
     session,
     renderer,
     panKeys,
@@ -130,6 +159,7 @@ function createHarness(options?: {
     assignedGroups,
     selectedGroups,
     executedOrders,
+    executedSlots,
     statusMessages,
     get toggledDebugGrid() {
       return toggledDebugGrid;
@@ -345,5 +375,137 @@ describe('Hotkeys', () => {
       repeat: false,
     });
     expect(harness.executedOrders).toHaveLength(prevOrdersLen);
+  });
+
+  it('active placement prioritises Escape to cancel and KeyR to rotate over card slots', () => {
+    const harness = createHarness({ placementActive: true });
+    const defaultPrevented: string[] = [];
+
+    // 1. Escape cancels placement without triggering back order or selection drag cancel
+    harness.hotkeys.handleKeyDown({
+      code: 'Escape',
+      repeat: false,
+      preventDefault: () => {
+        defaultPrevented.push('Escape');
+      },
+    });
+    expect(harness.placement.cancel).toHaveBeenCalled();
+    expect(harness.executedOrders).not.toContain('back');
+    expect(harness.selection.cancelDrag).not.toHaveBeenCalled();
+    expect(defaultPrevented).toContain('Escape');
+
+    // 2. KeyR rotates placement without triggering slot R (attackMove)
+    harness.hotkeys.handleKeyDown({
+      code: 'KeyR',
+      repeat: false,
+      preventDefault: () => {
+        defaultPrevented.push('KeyR');
+      },
+    });
+    expect(harness.placement.rotate).toHaveBeenCalled();
+    expect(harness.executedOrders).not.toContain('attackMove');
+    expect(defaultPrevented).toContain('KeyR');
+  });
+
+  it('placement keys retain editable, modifier and repeat filtering', () => {
+    const harness = createHarness({ placementActive: true });
+    for (const code of ['Escape', 'KeyR']) {
+      harness.hotkeys.handleKeyDown({ code, repeat: true });
+      harness.hotkeys.handleKeyDown({ code, ctrlKey: true });
+      harness.hotkeys.handleKeyDown({ code, metaKey: true });
+      harness.hotkeys.handleKeyDown({ code, altKey: true });
+      harness.hotkeys.handleKeyDown({
+        code,
+        target: { tagName: 'INPUT' } as unknown as EventTarget,
+      });
+    }
+    expect(harness.placement.cancel).not.toHaveBeenCalled();
+    expect(harness.placement.rotate).not.toHaveBeenCalled();
+    harness.hotkeys.handleKeyDown({ code: 'KeyR', shiftKey: true });
+    expect(harness.placement.rotate).toHaveBeenCalledOnce();
+  });
+
+  it('dispatches Age I archery, gates extra Keep, and exposes walls at actual Age II', () => {
+    const harness = createHarness();
+    harness.orders.submenu = 'military';
+    harness.hotkeys.handleKeyDown({ code: 'KeyW' });
+    expect(harness.executedSlots[0]).toMatchObject({
+      action: 'build',
+      buildingType: 'archery_range',
+      disabled: false,
+    });
+    harness.orders.submenu = 'economic';
+    harness.hotkeys.handleKeyDown({ code: 'KeyT' });
+    expect(harness.executedSlots[1]).toMatchObject({
+      buildingType: 'keep',
+      disabled: true,
+    });
+    harness.session.sim.world.players[0].age = 2;
+    harness.hotkeys.handleKeyDown({ code: 'KeyT' });
+    expect(harness.executedSlots[2]).toMatchObject({
+      buildingType: 'keep',
+      disabled: false,
+    });
+    harness.orders.submenu = 'military';
+    harness.hotkeys.handleKeyDown({ code: 'KeyA' });
+    expect(harness.executedSlots[3]).toMatchObject({
+      buildingType: 'stone_wall',
+      disabled: false,
+    });
+    const clans = createHarness({ faction: 'clans' });
+    clans.orders.submenu = 'military';
+    clans.hotkeys.handleKeyDown({ code: 'KeyA' });
+    expect(clans.executedSlots[0]).toMatchObject({
+      buildingType: 'palisade',
+      disabled: false,
+    });
+  });
+
+  it('typed slot dispatcher passes CommandSlot with typed metadata and handles disabled reason', () => {
+    const harness = createHarness();
+
+    // Spy getCommandSlots returning custom typed slots
+    const spy = vi
+      .spyOn(commandSlotsModule, 'getCommandSlots')
+      .mockReturnValueOnce([
+        {
+          key: 'Q',
+          id: 'build-farm',
+          label: 'Farm',
+          action: 'build',
+          buildingType: 'farm',
+          disabled: false,
+        },
+      ] satisfies commandSlotsModule.CommandSlot[]);
+
+    harness.hotkeys.handleKeyDown({ code: 'KeyQ', repeat: false });
+
+    // Dispatched typed slot with action 'build' and buildingType 'farm'
+    expect(harness.executedSlots).toHaveLength(1);
+    expect(harness.executedSlots[0].key).toBe('Q');
+    expect(harness.executedSlots[0].action).toBe('build');
+    expect(harness.executedSlots[0].buildingType).toBe('farm');
+    expect(harness.executedOrders).toEqual(['build']);
+    spy.mockRestore();
+
+    // Disabled slot with reason displays status message without executing
+    const reasonSpy = vi
+      .spyOn(commandSlotsModule, 'getCommandSlots')
+      .mockReturnValueOnce([
+        {
+          key: 'W',
+          id: 'train-cart',
+          label: 'Ox Cart',
+          action: 'train',
+          unitType: 'ox_cart',
+          disabled: true,
+          reason: 'Requires Storehouse',
+        },
+      ] satisfies commandSlotsModule.CommandSlot[]);
+
+    harness.hotkeys.handleKeyDown({ code: 'KeyW', repeat: false });
+    expect(harness.statusMessages).toContain('Requires Storehouse');
+    expect(harness.executedOrders).toEqual(['build']); // no new order executed
+    reasonSpy.mockRestore();
   });
 });

@@ -22,12 +22,17 @@ import {
   MARQUEE_SHADER_KEY,
 } from './overlays/overlayShaders';
 import {
+  PlacementGhost,
+  type PlacementGhostItem,
+} from './overlays/PlacementGhost';
+import {
   ThinInstancePool,
   initIdentityMatrices,
   type ThinInstanceAttributeSpec,
 } from './ThinInstancePool';
 
 export type { KeepFootprint } from './overlays/DebugGrid';
+export type { PlacementGhostItem } from './overlays/PlacementGhost';
 export type { OrderMarker } from './overlays/geometryBuilder';
 
 export interface SelectionBox {
@@ -46,6 +51,7 @@ export interface OverlayFrameInput {
   timeSeconds: number;
   /** Stable height of the entity's sprite top above its anchor, atlas px at zoom 1; undefined if unknown. */
   getSpriteTopPx: (id: number) => number | undefined;
+  placement?: readonly PlacementGhostItem[];
 }
 
 const RIGHT_BASIS = new Vector3(
@@ -96,6 +102,9 @@ export class Overlays {
   private dynamicLinesMesh: LinesMesh | null = null;
   private dynamicLinesMaterial: ShaderMaterial | null = null;
   private dynamicLinesCapacity = 2048;
+
+  // Placement ghost (group 3, on top, pooled via ThinInstancePool)
+  private readonly placementGhost: PlacementGhost;
 
   constructor(scene: Scene, mapSize = 128, initialKeeps: KeepFootprint[] = []) {
     this.scene = scene;
@@ -227,6 +236,9 @@ export class Overlays {
 
     // 5. Dynamic lines pooled mesh (rendering group 3: on top, pre-sized to 2048)
     this.createDynamicLinesMesh();
+
+    // 6. Placement ghost (rendering group 3: on top, pooled via ThinInstancePool)
+    this.placementGhost = new PlacementGhost(scene);
   }
 
   get isGridVisible(): boolean {
@@ -243,6 +255,10 @@ export class Overlays {
 
   setKeepFootprints(keeps: KeepFootprint[]): void {
     this.debugGrid.setKeepFootprints(keeps);
+  }
+
+  get ghost(): PlacementGhost {
+    return this.placementGhost;
   }
 
   update(input: OverlayFrameInput): void {
@@ -271,6 +287,7 @@ export class Overlays {
       snapshot: input.snapshot,
       selectedIds: input.selectedIds,
       markers: input.markers,
+      placement: input.placement,
       timeSeconds: input.timeSeconds,
       getSpriteTopPx: input.getSpriteTopPx,
     });
@@ -308,6 +325,9 @@ export class Overlays {
 
     // 5. Dynamic lines
     this.flushDynamicLines(geom.lineSegmentCount);
+
+    // 6. Placement ghost
+    this.placementGhost.update(input.placement);
   }
 
   private flushDynamicLines(count: number): void {
@@ -424,5 +444,6 @@ export class Overlays {
     this.healthBarsMaterial.dispose();
     this.marqueeMesh.dispose();
     this.marqueeMaterial.dispose();
+    this.placementGhost.dispose();
   }
 }

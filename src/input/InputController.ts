@@ -2,10 +2,10 @@ import type { GameSession } from '../game/GameSession';
 import { CameraController } from './CameraController';
 import { SelectionController } from './SelectionController';
 import { OrderController } from './OrderController';
+import { PlacementController } from './PlacementController';
 import { screenToGround } from '../render/iso';
 import { Hotkeys } from './Hotkeys';
 import { isWorkerType } from '../data/roles';
-
 export class InputController {
   public readonly canvas: HTMLCanvasElement;
   public readonly session: GameSession;
@@ -13,8 +13,8 @@ export class InputController {
   public readonly camera: CameraController;
   public readonly selection: SelectionController;
   public readonly orders: OrderController;
+  public readonly placement: PlacementController;
   public readonly hotkeys: Hotkeys;
-
   private idleWorkerIndex = -1;
   private isDisposed = false;
 
@@ -25,8 +25,9 @@ export class InputController {
     this.camera = new CameraController(canvas, session);
     this.selection = new SelectionController(session, this.camera);
     this.orders = new OrderController(session, this.selection);
+    this.placement = new PlacementController(session, this.selection);
+    this.orders.placement = this.placement;
     this.hotkeys = new Hotkeys(session, this);
-
     this.attachEvents();
   }
 
@@ -50,6 +51,7 @@ export class InputController {
         this.selection.ids,
         this.orders.markers,
         this.selection.currentBox,
+        this.placement.preview,
       );
     }
   }
@@ -60,11 +62,11 @@ export class InputController {
 
     this.detachEvents();
     this.hotkeys.dispose();
+    this.placement.dispose();
     this.camera.dispose();
     this.selection.dispose();
     this.orders.dispose();
   }
-
   // --- Canvas Pointer Events ---
   private readonly onPointerDown = (e: PointerEvent | MouseEvent): void => {
     // Prevent HUD bubbling: ensure event target is the canvas
@@ -87,7 +89,9 @@ export class InputController {
         }
       }
       // Left Click
-      if (this.orders.mode !== null) {
+      if (this.placement.active) {
+        this.placement.handlePointerDown(screenX, screenY, e.shiftKey);
+      } else if (this.orders.mode !== null) {
         // Mode order click consumes this left-click
         this.orders.handleOrderClick(screenX, screenY);
       } else {
@@ -95,8 +99,12 @@ export class InputController {
       }
       e.preventDefault();
     } else if (e.button === 2) {
-      // Right Click: Contextual order
-      this.handleRightClick(screenX, screenY, e.shiftKey);
+      // Right Click: Contextual order or cancel placement
+      if (this.placement.active) {
+        this.placement.cancel();
+      } else {
+        this.handleRightClick(screenX, screenY, e.shiftKey);
+      }
       e.preventDefault();
     }
   };
@@ -105,11 +113,17 @@ export class InputController {
     const rect = this.canvas.getBoundingClientRect();
     const screenX = e.clientX - rect.left;
     const screenY = e.clientY - rect.top;
-
-    this.selection.handlePointerMove(screenX, screenY);
+    this.placement.handlePointerMove(screenX, screenY, e.shiftKey);
+    if (!this.placement.active) {
+      this.selection.handlePointerMove(screenX, screenY);
+    }
   };
 
   private readonly onPointerUp = (e: PointerEvent | MouseEvent): void => {
+    const rect = this.canvas.getBoundingClientRect();
+    const screenX = e.clientX - rect.left;
+    const screenY = e.clientY - rect.top;
+
     if (e.button === 0) {
       if (
         'pointerId' in e &&
@@ -122,7 +136,11 @@ export class InputController {
           // Ignored
         }
       }
-      this.selection.handlePointerUp(e.shiftKey);
+      if (this.placement.active) {
+        this.placement.handlePointerUp(screenX, screenY, e.shiftKey);
+      } else {
+        this.selection.handlePointerUp(e.shiftKey);
+      }
     }
   };
 
@@ -135,6 +153,10 @@ export class InputController {
     screenY: number,
     shiftKey: boolean,
   ): void {
+    if (this.placement.active) {
+      this.placement.cancel();
+      return;
+    }
     const renderer = this.session.renderer;
     const cam = renderer?.camera;
     if (!cam) return;

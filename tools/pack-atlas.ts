@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -13,6 +14,14 @@ import {
   type AtlasFrame,
   type AtlasPage,
 } from '../src/assets/atlas';
+
+const resolveRequire = createRequire(import.meta.url);
+const { version: packerVersion } = resolveRequire(
+  'maxrects-packer/package.json',
+) as { version: string };
+if (typeof packerVersion !== 'string') {
+  throw new Error('Failed to resolve maxrects-packer version');
+}
 
 const PAGE_SIZE = 2048;
 const PADDING = 2;
@@ -50,7 +59,11 @@ function frameKeys(entry: ArtManifestEntry): string[] {
 function outputNames(atlas: Atlas): string[] {
   return [
     `${atlas.id}.json`,
-    ...atlas.pages.flatMap((page) => [page.image, page.mask, ...(page.shadow ? [page.shadow] : [])]),
+    ...atlas.pages.flatMap((page) => [
+      page.image,
+      page.mask,
+      ...(page.shadow ? [page.shadow] : []),
+    ]),
   ];
 }
 
@@ -87,13 +100,17 @@ async function cachedAtlas(
   } catch {
     return undefined;
   }
-  if (!cache || cache.hash !== hash || !Array.isArray(cache.outputs)) return undefined;
+  if (!cache || cache.hash !== hash || !Array.isArray(cache.outputs))
+    return undefined;
   const atlas = await readAtlas(join(outputDir, `${entry.id}.json`));
   if (!atlas || atlas.id !== entry.id) return undefined;
   const outputs = outputNames(atlas);
-  if (JSON.stringify(outputs) !== JSON.stringify(cache.outputs)) return undefined;
+  if (JSON.stringify(outputs) !== JSON.stringify(cache.outputs))
+    return undefined;
   try {
-    await Promise.all(outputs.map((filename) => access(join(outputDir, filename))));
+    await Promise.all(
+      outputs.map((filename) => access(join(outputDir, filename))),
+    );
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
     throw error;
@@ -116,8 +133,13 @@ async function loadSprite(
     const path = join(rendersDir, entry.id, pass, `${key}.png`);
     const image = sharp(await readFile(path));
     const metadata = await image.metadata();
-    if (metadata.width !== entry.frame * 2 || metadata.height !== entry.frame * 2) {
-      throw new Error(`${path}: expected ${entry.frame * 2}x${entry.frame * 2} raw render`);
+    if (
+      metadata.width !== entry.frame * 2 ||
+      metadata.height !== entry.frame * 2
+    ) {
+      throw new Error(
+        `${path}: expected ${entry.frame * 2}x${entry.frame * 2} raw render`,
+      );
     }
     const data = await image
       .resize(entry.frame, entry.frame, { kernel: sharp.kernel.lanczos3 })
@@ -146,7 +168,9 @@ async function loadSprite(
   const width = right - left + 1;
   const height = bottom - top + 1;
   if (width + 2 * PADDING > PAGE_SIZE || height + 2 * PADDING > PAGE_SIZE) {
-    throw new Error(`${entry.id}/${key}: trimmed sprite exceeds ${PAGE_SIZE}px atlas capacity`);
+    throw new Error(
+      `${entry.id}/${key}: trimmed sprite exceeds ${PAGE_SIZE}px atlas capacity`,
+    );
   }
   for (const pass of passes) {
     pixels[pass] = await sharp(pixels[pass]!, {
@@ -177,19 +201,38 @@ export async function packAsset(
   const rendersDir = options.rendersDir ?? 'build/renders';
   const outputDir = options.outputDir ?? 'public/atlases';
   const cacheDir = options.cacheDir ?? 'build/atlas-cache';
+  const markerPath = join(rendersDir, entry.id, '.hash');
+  try {
+    await access(markerPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
+      throw new Error(
+        `Missing render completion marker for ${entry.id}: ${markerPath}`,
+        { cause: error },
+      );
+    }
+    throw error;
+  }
   const cachePath = join(cacheDir, `${entry.id}.json`);
-  const passes: Pass[] = entry.kind === 'building' || entry.kind === 'doodad'
-    ? ['body', 'mask', 'shadow']
-    : ['body', 'mask'];
+  const passes: Pass[] =
+    entry.kind === 'building' || entry.kind === 'doodad'
+      ? ['body', 'mask', 'shadow']
+      : ['body', 'mask'];
   const keys = frameKeys(entry);
   const digest = createHash('sha256');
   digest.update(JSON.stringify(entry));
   digest.update(await readFile(fileURLToPath(import.meta.url)));
-  digest.update(await readFile(new URL('../src/assets/atlas.ts', import.meta.url)));
-  digest.update(JSON.stringify(sharp.versions));
+  digest.update(
+    await readFile(new URL('../src/assets/atlas.ts', import.meta.url)),
+  );
+  digest.update(
+    JSON.stringify({ ...sharp.versions, 'maxrects-packer': packerVersion }),
+  );
   for (const key of keys) {
     for (const pass of passes) {
-      const raw = await readFile(join(rendersDir, entry.id, pass, `${key}.png`));
+      const raw = await readFile(
+        join(rendersDir, entry.id, pass, `${key}.png`),
+      );
       digest.update(`${pass}/${key}:${raw.length}:`);
       digest.update(raw);
     }
@@ -199,7 +242,8 @@ export async function packAsset(
   if (cached) return { id: entry.id, status: 'skipped', atlas: cached };
 
   const sprites: Sprite[] = [];
-  for (const key of keys) sprites.push(await loadSprite(entry, rendersDir, key, passes));
+  for (const key of keys)
+    sprites.push(await loadSprite(entry, rendersDir, key, passes));
   const packer = new MaxRectsPacker<Sprite>(PAGE_SIZE, PAGE_SIZE, PADDING, {
     smart: true,
     pot: false,
@@ -221,7 +265,8 @@ export async function packAsset(
       image: `${entry.id}_${index}.png`,
       mask: `${entry.id}_${index}_mask.png`,
     };
-    if (passes.includes('shadow')) page.shadow = `${entry.id}_${index}_shadow.png`;
+    if (passes.includes('shadow'))
+      page.shadow = `${entry.id}_${index}_shadow.png`;
     pages.push(page);
     for (const sprite of bin.rects) {
       placements[sprite.key] = {
@@ -237,14 +282,21 @@ export async function packAsset(
     for (const pass of passes) {
       const filename = pass === 'body' ? page.image : page[pass]!;
       await sharp({
-        create: { width: bin.width, height: bin.height, channels: 4, background: '#00000000' },
+        create: {
+          width: bin.width,
+          height: bin.height,
+          channels: 4,
+          background: '#00000000',
+        },
       })
-        .composite(bin.rects.map((sprite) => ({
-          input: sprite.pixels[pass]!,
-          raw: { width: sprite.width, height: sprite.height, channels: 4 },
-          left: sprite.x,
-          top: sprite.y,
-        })))
+        .composite(
+          bin.rects.map((sprite) => ({
+            input: sprite.pixels[pass]!,
+            raw: { width: sprite.width, height: sprite.height, channels: 4 },
+            left: sprite.x,
+            top: sprite.y,
+          })),
+        )
         .png({ compressionLevel: 9, adaptiveFiltering: false })
         .toFile(join(outputDir, filename));
     }
@@ -254,18 +306,25 @@ export async function packAsset(
     id: entry.id,
     pages,
     fps: 12,
-    anims: Object.fromEntries(Object.keys(entry.anims).sort().map((name) => [
-      name,
-      { ...entry.anims[name], dirs: entry.dirs },
-    ])),
+    anims: Object.fromEntries(
+      Object.keys(entry.anims)
+        .sort()
+        .map((name) => [name, { ...entry.anims[name], dirs: entry.dirs }]),
+    ),
     frames: Object.fromEntries(keys.map((key) => [key, placements[key]])),
   };
   parseAtlas(atlas);
-  await writeFile(join(outputDir, `${entry.id}.json`), `${JSON.stringify(atlas, null, 2)}\n`);
+  await writeFile(
+    join(outputDir, `${entry.id}.json`),
+    `${JSON.stringify(atlas, null, 2)}\n`,
+  );
   const outputs = outputNames(atlas);
   if (previous?.id === entry.id) {
     for (const filename of outputNames(previous)) {
-      if (!outputs.includes(filename) && new RegExp(`^${entry.id}_\\d+(_mask|_shadow)?\\.png$`).test(filename)) {
+      if (
+        !outputs.includes(filename) &&
+        new RegExp(`^${entry.id}_\\d+(_mask|_shadow)?\\.png$`).test(filename)
+      ) {
         await rm(join(outputDir, filename), { force: true });
       }
     }
@@ -277,16 +336,25 @@ export async function packAsset(
 
 async function main(): Promise<void> {
   const { values } = parseArgs({ options: { asset: { type: 'string' } } });
-  const manifest = parseArtManifest(JSON.parse(await readFile('art/manifest.json', 'utf8')));
-  const entries = values.asset ? manifest.filter((entry) => entry.id === values.asset) : manifest;
+  const manifest = parseArtManifest(
+    JSON.parse(await readFile('art/manifest.json', 'utf8')),
+  );
+  const entries = values.asset
+    ? manifest.filter((entry) => entry.id === values.asset)
+    : manifest;
   if (entries.length === 0) throw new Error(`Unknown asset: ${values.asset}`);
   for (const entry of entries) {
     const result = await packAsset(entry);
-    console.log(`${result.status}: ${result.id} (${result.atlas.pages.length} pages)`);
+    console.log(
+      `${result.status}: ${result.id} (${result.atlas.pages.length} pages)`,
+    );
   }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (
+  process.argv[1] &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
   main().catch((error: unknown) => {
     console.error(error instanceof Error ? error.message : error);
     process.exitCode = 1;

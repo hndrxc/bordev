@@ -53,6 +53,8 @@ export interface BuildCommand {
   x: number;
   z: number;
   queued?: boolean;
+  orientation?: 'horizontal' | 'vertical';
+  targetId?: number;
 }
 
 export interface RepairCommand {
@@ -138,6 +140,12 @@ export const SUPPORTED_COMMAND_KINDS = [
   'hold',
   'delete',
   'setRally',
+  'build',
+  'repair',
+  'farm',
+  'pinMine',
+  'train',
+  'cancelTrain',
 ] as const;
 
 export type SupportedCommandKind = (typeof SUPPORTED_COMMAND_KINDS)[number];
@@ -151,7 +159,13 @@ export function isSupportedCommandKind(
     kind === 'stop' ||
     kind === 'hold' ||
     kind === 'delete' ||
-    kind === 'setRally'
+    kind === 'setRally' ||
+    kind === 'build' ||
+    kind === 'repair' ||
+    kind === 'farm' ||
+    kind === 'pinMine' ||
+    kind === 'train' ||
+    kind === 'cancelTrain'
   );
 }
 

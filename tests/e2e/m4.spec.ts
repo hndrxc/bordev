@@ -755,6 +755,7 @@ test('4. hotkey submenus, queued orders, delete slot, and enemy ownership isolat
   const spawnedIds = await page.evaluate(() => {
     const bordev = window.__bordev;
     if (!bordev?.cheats) throw new Error('Debug cheats not available');
+    bordev.cheats.resources(1000);
     return bordev.cheats.spawnPeasants(1, 60, 60);
   });
   expect(spawnedIds).toHaveLength(1);
@@ -888,7 +889,7 @@ test('4. hotkey submenus, queued orders, delete slot, and enemy ownership isolat
   // Stop cleanly
   await page.keyboard.press('KeyW');
 
-  // 3. Open own peasant Economic submenu by A; W disabled Farm slot must NOT stop/mutate existing move order; Esc or B returns
+  // 3. Economic hotkeys enter placement without interrupting movement until a build is committed
   const econMovePt = await worldToScreen(page, 56, 64);
   expect(econMovePt.y).toBeGreaterThanOrEqual(field.top);
   expect(econMovePt.y).toBeLessThanOrEqual(field.bottom);
@@ -916,22 +917,14 @@ test('4. hotkey submenus, queued orders, delete slot, and enemy ownership isolat
     { timeout: 5_000 },
   );
 
-  // Verify Economic submenu card slots
+  // Own peasant economic slots are actionable.
   const farmBtn = page.getByTestId('command-farm');
   await expect(farmBtn).toBeVisible();
-  const isFarmAriaDisabled = await farmBtn.getAttribute('aria-disabled');
-  const isFarmNativeDisabled = await farmBtn.isDisabled();
-  expect(isFarmNativeDisabled || isFarmAriaDisabled === 'true').toBe(true);
-  await expect(farmBtn).toContainText('Farm');
+  await expect(farmBtn).toBeEnabled();
 
   const cottageBtn = page.getByTestId('command-cottage');
   await expect(cottageBtn).toBeVisible();
-  const isCottageAriaDisabled = await cottageBtn.getAttribute('aria-disabled');
-  const isCottageNativeDisabled = await cottageBtn.isDisabled();
-  expect(isCottageNativeDisabled || isCottageAriaDisabled === 'true').toBe(
-    true,
-  );
-  await expect(cottageBtn).toContainText('Cottage');
+  await expect(cottageBtn).toBeEnabled();
 
   const backBtn = page.getByTestId('command-back');
   await expect(backBtn).toBeVisible();
@@ -952,13 +945,13 @@ test('4. hotkey submenus, queued orders, delete slot, and enemy ownership isolat
   }, peasantId);
   expect(moveBeforeW?.kind).toBe('move');
 
-  // Press W while in Economic submenu (targeting disabled Farm slot)
+  // W enters Farm placement rather than dispatching the main-card Stop command.
   await page.keyboard.press('KeyW');
 
   // ReviewSimTestsDocs#0: wait ≥ 2 sim ticks after key press before asserting
   await waitForTicks(page, 2);
 
-  // W disabled Farm slot must NOT stop or mutate existing move order, nor increment orderGeneration
+  // Entering placement leaves the current move order intact until the ground click.
   const moveAfterW = await page.evaluate((id) => {
     const u = window.__bordev?.sim?.world.entities[id];
     if (!u || u.kind !== 'unit' || !u.order) return null;
@@ -976,8 +969,46 @@ test('4. hotkey submenus, queued orders, delete slot, and enemy ownership isolat
   expect(moveAfterW?.orderGeneration).toBe(moveBeforeW?.orderGeneration);
   expect(moveAfterW?.ordersCount).toBe(moveBeforeW?.ordersCount);
 
-  // Status ticker reflects disabled slot reason
-  await expect(page.getByTestId('hud-status')).toContainText('Milestone 5');
+  const farmBuildPt = await worldToScreen(page, 58.5, 58.5);
+  expect(farmBuildPt.y).toBeGreaterThanOrEqual(field.top);
+  expect(farmBuildPt.y).toBeLessThanOrEqual(field.bottom);
+  await page.mouse.click(farmBuildPt.x, farmBuildPt.y, { button: 'left' });
+  await page.waitForFunction(
+    (id) => {
+      const world = window.__bordev?.sim?.world;
+      const unit = world?.entities[id];
+      if (!world || !unit || unit.kind !== 'unit') return false;
+      const order = unit.order;
+      if (!order) return false;
+      const target = world.entities[order.targetId ?? -1];
+      return (
+        order.kind === 'build' &&
+        target?.kind === 'building' &&
+        target.type === 'farm' &&
+        target.player === 0 &&
+        target.x === 58 &&
+        target.z === 58 &&
+        !target.built
+      );
+    },
+    peasantId,
+    { timeout: 10_000 },
+  );
+  await page.waitForFunction(
+    () => {
+      const world = window.__bordev?.sim?.world;
+      return world?.entities.some(
+        (entity) =>
+          entity?.kind === 'building' &&
+          entity.type === 'farm' &&
+          entity.x === 58 &&
+          entity.z === 58 &&
+          entity.buildProgress > 0,
+      );
+    },
+    undefined,
+    { timeout: 10_000 },
+  );
 
   // B returns to main command card
   await page.keyboard.press('KeyB');
@@ -1002,6 +1033,50 @@ test('4. hotkey submenus, queued orders, delete slot, and enemy ownership isolat
   );
   await expect(farmBtn).toBeVisible();
 
+  // Clicking Cottage uses the same live placement path as the Farm hotkey.
+  await cottageBtn.click();
+  const cottageBuildPt = await worldToScreen(page, 62.5, 58.5);
+  expect(cottageBuildPt.y).toBeGreaterThanOrEqual(field.top);
+  expect(cottageBuildPt.y).toBeLessThanOrEqual(field.bottom);
+  await page.mouse.click(cottageBuildPt.x, cottageBuildPt.y, {
+    button: 'left',
+  });
+  await page.waitForFunction(
+    (id) => {
+      const world = window.__bordev?.sim?.world;
+      const unit = world?.entities[id];
+      if (!world || !unit || unit.kind !== 'unit') return false;
+      const order = unit.order;
+      if (!order) return false;
+      const target = world.entities[order.targetId ?? -1];
+      return (
+        order.kind === 'build' &&
+        target?.kind === 'building' &&
+        target.type === 'cottage' &&
+        target.player === 0 &&
+        target.x === 62 &&
+        target.z === 58 &&
+        !target.built
+      );
+    },
+    peasantId,
+    { timeout: 10_000 },
+  );
+  await page.waitForFunction(
+    () => {
+      const world = window.__bordev?.sim?.world;
+      return world?.entities.some(
+        (entity) =>
+          entity?.kind === 'building' &&
+          entity.type === 'cottage' &&
+          entity.x === 62 &&
+          entity.z === 58 &&
+          entity.buildProgress > 0,
+      );
+    },
+    undefined,
+    { timeout: 10_000 },
+  );
   await page.keyboard.press('Escape');
   await page.waitForFunction(
     () => {
@@ -1013,7 +1088,7 @@ test('4. hotkey submenus, queued orders, delete slot, and enemy ownership isolat
   await expect(farmBtn).toBeHidden();
   await expect(page.getByTestId('command-move')).toBeVisible();
 
-  // Stop the moving peasant cleanly once back in main card
+  // Stop the builder cleanly once back in the main card.
   await page.keyboard.press('KeyW');
   await page.waitForFunction(
     (id) => {
@@ -1287,7 +1362,7 @@ test('5. contextual orders: enemy combat, gold mining, farm economy, repair, ral
     { timeout: 5_000 },
   );
 
-  // 3. Damaged own Keep with peasant selected -> repair message
+  // 3. Right-clicking a damaged own Keep issues repair and restores hit points.
   await page.evaluate((id) => {
     const b = window.__bordev?.sim?.world.entities[id];
     if (!b || b.kind !== 'building') throw new Error('Keep missing');
@@ -1297,15 +1372,40 @@ test('5. contextual orders: enemy combat, gold mining, farm economy, repair, ral
   // Right-click Keep for repair
   const keepRepairPt = await pickablePoint(page, keep.id);
   await page.mouse.click(keepRepairPt.x, keepRepairPt.y, { button: 'right' });
-  await expect(statusEl).toBeVisible();
-  await expect(statusEl).toHaveText('Building repair requires Milestone 5');
+  await page.waitForFunction(
+    ({ unitId, targetId }) => {
+      const unit = window.__bordev?.sim?.world.getEntity(unitId);
+      if (!unit || unit.kind !== 'unit') return false;
+      const order = unit.order;
+      if (!order) return false;
+      return order.kind === 'repair' && order.targetId === targetId;
+    },
+    { unitId: peasantId, targetId: keep.id },
+    { timeout: 10_000 },
+  );
+  await page.waitForFunction(
+    ({ id, damagedHp }) => {
+      const building = window.__bordev?.sim?.world.getEntity(id);
+      return building?.kind === 'building' && building.hp > damagedHp;
+    },
+    { id: keep.id, damagedHp: keep.maxHp - 100 },
+    { timeout: 10_000 },
+  );
 
-  // 4. Right-click farm spawned via __bordev.sim.world.spawnBuilding with peasant selected -> farming message
+  // 4. Right-clicking a completed farm assigns a farmer and collects food.
   // Spawn farm at (25, 20) east of Keep (20..24, 20..24) in clear ground not overlapped by Keep sprite
   const farmId = await page.evaluate(() => {
     const sim = window.__bordev?.sim;
     if (!sim) throw new Error('Sim missing');
-    const f = sim.world.spawnBuilding(0, 'farm', 25, 20, true, 'crown');
+    const f = sim.world.spawnBuilding(
+      0,
+      'farm',
+      25,
+      20,
+      true,
+      undefined,
+      'crown',
+    );
     return f.id;
   });
 
@@ -1325,11 +1425,39 @@ test('5. contextual orders: enemy combat, gold mining, farm economy, repair, ral
   expect(farmPt.y).toBeGreaterThanOrEqual(field.top);
   expect(farmPt.y).toBeLessThanOrEqual(field.bottom);
 
+  const foodBeforeFarm = await page.evaluate(() => {
+    const player = window.__bordev?.sim?.world.players[0];
+    if (!player) throw new Error('Player 0 missing');
+    return player.foodCollected;
+  });
   await page.mouse.click(farmPt.x, farmPt.y, { button: 'right' });
-  await expect(statusEl).toBeVisible();
-  await expect(statusEl).toHaveText('Farming economy requires Milestone 5');
+  await page.waitForFunction(
+    ({ unitId, targetId }) => {
+      const unit = window.__bordev?.sim?.world.getEntity(unitId);
+      if (!unit || unit.kind !== 'unit') return false;
+      const order = unit.order;
+      if (!order) return false;
+      return order.kind === 'farm' && order.targetId === targetId;
+    },
+    { unitId: peasantId, targetId: farmId },
+    { timeout: 10_000 },
+  );
+  await page.waitForFunction(
+    ({ unitId, collected }) => {
+      const world = window.__bordev?.sim?.world;
+      const unit = world?.getEntity(unitId);
+      return (
+        unit?.kind === 'unit' &&
+        unit.workAnimation === 'work' &&
+        world !== undefined &&
+        world.players[0].foodCollected > collected
+      );
+    },
+    { unitId: peasantId, collected: foodBeforeFarm },
+    { timeout: 10_000 },
+  );
 
-  // 5. Right-click gold mine with cart selected -> mining message
+  // 5. Right-clicking a gold mine pins the selected cart and begins loading.
   // Spawn gold mine at (20, 25) south of Keep and cart at (21, 28) in clear ground
   const mineId = await page.evaluate(() => {
     const sim = window.__bordev?.sim;
@@ -1388,8 +1516,35 @@ test('5. contextual orders: enemy combat, gold mining, farm economy, repair, ral
 
   // Right-click gold mine
   await page.mouse.click(minePt.x, minePt.y, { button: 'right' });
-  await expect(statusEl).toBeVisible();
-  await expect(statusEl).toHaveText('Mining economy requires Milestone 5');
+  await page.waitForFunction(
+    ({ unitId, targetId }) => {
+      const unit = window.__bordev?.sim?.world.getEntity(unitId);
+      if (!unit || unit.kind !== 'unit') return false;
+      const order = unit.order;
+      if (!order) return false;
+      return (
+        order.kind === 'pinMine' &&
+        order.targetId === targetId &&
+        unit.cart?.pinnedMineId === targetId
+      );
+    },
+    { unitId: cartId, targetId: mineId },
+    { timeout: 10_000 },
+  );
+  await page.waitForFunction(
+    ({ unitId, targetId }) => {
+      const unit = window.__bordev?.sim?.world.getEntity(unitId);
+      return (
+        unit?.kind === 'unit' &&
+        unit.cart?.pinnedMineId === targetId &&
+        unit.cart.mineId === targetId &&
+        ((unit.cart.phase === 'loading' && unit.cart.ticks > 0) ||
+          unit.cart.carriedGold > 0)
+      );
+    },
+    { unitId: cartId, targetId: mineId },
+    { timeout: 10_000 },
+  );
 
   // 6. Right-click enemy unit with own unit selected -> combat message
   // Spawn enemy at (27, 24) south-east of Keep in clear ground

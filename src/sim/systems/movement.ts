@@ -16,7 +16,7 @@ export function computeFacing(vx: number, vz: number): number {
   if (angle < 0) {
     angle += 2 * Math.PI;
   }
-  return Math.round(((angle * 180) / Math.PI) / 45) % 8;
+  return Math.round((angle * 180) / Math.PI / 45) % 8;
 }
 
 export function clampUnitRadius(
@@ -185,8 +185,17 @@ export function assignFormationSlots(
 
   return assignedSlots;
 }
+function isWorkOrderKind(kind: string): boolean {
+  return (
+    kind === 'build' ||
+    kind === 'repair' ||
+    kind === 'farm' ||
+    kind === 'pinMine'
+  );
+}
 
 export function advanceUnitOrder(world: World, unit: UnitEntity): void {
+  world.pathQueue.cancel(unit.id);
   unit.path = undefined;
   unit.pathTarget = undefined;
   unit.pathPending = false;
@@ -196,6 +205,8 @@ export function advanceUnitOrder(world: World, unit: UnitEntity): void {
   unit.stuckProgressX = unit.x;
   unit.stuckProgressZ = unit.z;
   unit.stuckLastCheckTick = world.tick;
+  unit.workAnimation = undefined;
+  unit.workStartedTick = undefined;
 
   while (unit.orders.length > 0) {
     const nextOrder = unit.orders.shift()!;
@@ -208,6 +219,11 @@ export function advanceUnitOrder(world: World, unit: UnitEntity): void {
       } else {
         return;
       }
+    }
+
+    if (isWorkOrderKind(nextOrder.kind)) {
+      // Construction/economy initializes the approach when this job becomes active.
+      return;
     }
 
     if (
@@ -242,7 +258,10 @@ export function updateMovement(world: World): void {
       ent.pathPending = false;
       ent.path = [...res.path];
       ent.pathTarget = { ...res.target };
-      if (ent.formationSlotX !== undefined && ent.formationSlotZ !== undefined) {
+      if (
+        ent.formationSlotX !== undefined &&
+        ent.formationSlotZ !== undefined
+      ) {
         ent.formationSlotX = res.target.x;
         ent.formationSlotZ = res.target.z;
       }
@@ -270,10 +289,18 @@ export function updateMovement(world: World): void {
     ent.previousX = ent.x;
     ent.previousZ = ent.z;
 
+    const isWork = ent.order !== undefined && isWorkOrderKind(ent.order.kind);
+
     if (
       !ent.order ||
-      (ent.order.kind !== 'move' && ent.order.kind !== 'attackMove')
+      (ent.order.kind !== 'move' && ent.order.kind !== 'attackMove' && !isWork)
     ) {
+      if (
+        (ent.order?.kind === 'stop' || ent.order?.kind === 'hold') &&
+        ent.orders.length > 0
+      ) {
+        advanceUnitOrder(world, ent);
+      }
       continue;
     }
 
@@ -292,13 +319,14 @@ export function updateMovement(world: World): void {
     const targetDestZ = ent.pathTarget?.z ?? ent.formationSlotZ ?? ent.order.z;
 
     if (targetDestX === undefined || targetDestZ === undefined) {
-      ent.order = { kind: 'idle' };
+      if (!isWork) {
+        ent.order = { kind: 'idle' };
+      }
       continue;
     }
     if (ent.pathPending && (!ent.path || ent.path.length === 0)) {
       continue;
     }
-
 
     const distToFinal = Math.hypot(targetDestX - ent.x, targetDestZ - ent.z);
 
@@ -306,7 +334,13 @@ export function updateMovement(world: World): void {
     if (distToFinal <= 0.05) {
       ent.x = targetDestX;
       ent.z = targetDestZ;
-      advanceUnitOrder(world, ent);
+      if (isWork) {
+        ent.path = undefined;
+        ent.pathTarget = undefined;
+        ent.pathPending = false;
+      } else {
+        advanceUnitOrder(world, ent);
+      }
       continue;
     }
 
@@ -451,9 +485,29 @@ export function updateMovement(world: World): void {
   // 5. Stuck detection (progress < 0.1 in 2 s = 40 ticks)
   for (let i = 0; i < activeUnitsBuffer.length; i++) {
     const ent = activeUnitsBuffer[i];
+    const isWork = ent.order !== undefined && isWorkOrderKind(ent.order.kind);
+
     if (
       !ent.order ||
-      (ent.order.kind !== 'move' && ent.order.kind !== 'attackMove')
+      (ent.order.kind !== 'move' && ent.order.kind !== 'attackMove' && !isWork)
+    ) {
+      ent.stuckTicks = 0;
+      ent.stuckProgressX = ent.x;
+      ent.stuckProgressZ = ent.z;
+      ent.stuckLastCheckTick = world.tick;
+      continue;
+    }
+
+    const targetDestX = ent.pathTarget?.x ?? ent.formationSlotX ?? ent.order.x;
+    const targetDestZ = ent.pathTarget?.z ?? ent.formationSlotZ ?? ent.order.z;
+
+    if (
+      isWork &&
+      (targetDestX === undefined ||
+        targetDestZ === undefined ||
+        (!ent.pathPending &&
+          (!ent.path || ent.path.length === 0) &&
+          Math.hypot(targetDestX - ent.x, targetDestZ - ent.z) <= 0.05))
     ) {
       ent.stuckTicks = 0;
       ent.stuckProgressX = ent.x;
@@ -467,10 +521,6 @@ export function updateMovement(world: World): void {
         ent.x - ent.stuckProgressX,
         ent.z - ent.stuckProgressZ,
       );
-      const targetDestX =
-        ent.pathTarget?.x ?? ent.formationSlotX ?? ent.order.x;
-      const targetDestZ =
-        ent.pathTarget?.z ?? ent.formationSlotZ ?? ent.order.z;
 
       if (moved >= 0.1) {
         ent.stuckTicks = 0;
@@ -483,15 +533,41 @@ export function updateMovement(world: World): void {
           if (distToTarget <= 0.25) {
             ent.x = targetDestX;
             ent.z = targetDestZ;
-            advanceUnitOrder(world, ent);
+            if (isWork) {
+              ent.path = undefined;
+              ent.pathTarget = undefined;
+              ent.pathPending = false;
+              ent.stuckTicks = 0;
+            } else {
+              advanceUnitOrder(world, ent);
+            }
             continue;
           }
         }
 
         ent.stuckTicks += 40;
         if (ent.stuckTicks >= 120) {
-          advanceUnitOrder(world, ent);
-          continue;
+          if (isWork) {
+            if (targetDestX !== undefined && targetDestZ !== undefined) {
+              world.pathQueue.request(
+                ent.id,
+                ent.x,
+                ent.z,
+                targetDestX,
+                targetDestZ,
+                ent.player,
+              );
+              ent.pathPending = true;
+            }
+            ent.stuckTicks = 0;
+            ent.stuckProgressX = ent.x;
+            ent.stuckProgressZ = ent.z;
+            ent.stuckLastCheckTick = world.tick;
+            continue;
+          } else {
+            advanceUnitOrder(world, ent);
+            continue;
+          }
         } else if (targetDestX !== undefined && targetDestZ !== undefined) {
           world.pathQueue.request(
             ent.id,

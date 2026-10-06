@@ -1,5 +1,5 @@
 import type { GameSession } from '../game/GameSession';
-import { useHudStore } from './hud';
+import { useHudStore, getEntityDisplayName } from './hud';
 import { Portrait } from './Portrait';
 
 export interface SelectionPanelProps {
@@ -99,6 +99,22 @@ export function SelectionPanel({ session }: SelectionPanelProps) {
             {ent.buildProgress !== undefined && !ent.built ? (
               <div className="stat-badge" title="Construction progress">
                 🔨 {Math.round(ent.buildProgress * 100)}%
+              </div>
+            ) : null}
+            {(ent.trainingQueueCount !== undefined &&
+              ent.trainingQueueCount > 0) ||
+            ent.trainingProgress !== undefined ? (
+              <div
+                className="stat-badge selection-training-badge"
+                title={
+                  ent.trainingUnitType
+                    ? `Training ${getEntityDisplayName({ kind: 'unit', type: ent.trainingUnitType })}: ${Math.round((ent.trainingProgress ?? 0) * 100)}% (${ent.trainingQueueCount ?? 1} queued)`
+                    : `Training: ${Math.round((ent.trainingProgress ?? 0) * 100)}% (${ent.trainingQueueCount ?? 1} queued)`
+                }
+                data-testid="selection-training"
+              >
+                ⏳ {Math.round((ent.trainingProgress ?? 0) * 100)}% (
+                {ent.trainingQueueCount ?? 1})
               </div>
             ) : null}
           </div>

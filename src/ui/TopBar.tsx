@@ -35,7 +35,7 @@ export const TopBar = forwardRef<HTMLElement>(function TopBar(_props, ref) {
         >
           <span className="resource-icon">Food</span>
           <span className="resource-value" data-testid="hud-food">
-            {resources.food}
+            {Math.floor(resources.food)}
           </span>
         </div>
 
@@ -46,21 +46,38 @@ export const TopBar = forwardRef<HTMLElement>(function TopBar(_props, ref) {
         >
           <span className="resource-icon">Gold</span>
           <span className="resource-value" data-testid="hud-gold">
-            {resources.gold}
+            {Math.floor(resources.gold)}
           </span>
         </div>
 
         <div
-          className="resource-item resource-faith"
+          className={`resource-item resource-faith ${resources.lowFaith ? 'low-faith' : ''}`}
           data-testid="resource-faith"
-          title="Faith used / Faith produced"
+          title={
+            resources.lowFaith
+              ? 'Low Faith: Faith used exceeds produced (penalties active)'
+              : 'Faith used / Faith produced'
+          }
         >
           <span className="resource-icon">Faith</span>
-          <span className="resource-value">
+          <span className="resource-value" data-testid="hud-faith">
             {resources.faithUsed} / {resources.faithProduced}
           </span>
+          {resources.lowFaith ? (
+            <span
+              className="low-faith-badge"
+              data-testid="hud-low-faith"
+              style={{
+                color: '#ef4444',
+                fontWeight: 700,
+                fontSize: '0.75rem',
+                marginLeft: '4px',
+              }}
+            >
+              (LOW FAITH)
+            </span>
+          ) : null}
         </div>
-
         <div
           className="resource-item resource-pop"
           data-testid="resource-pop"

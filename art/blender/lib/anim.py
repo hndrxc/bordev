@@ -5,15 +5,10 @@ UNIT_ANIMS = {"idle": {"frames": 4, "loop": True}, "walk": {"frames": 8, "loop":
               "attack": {"frames": 8, "loop": False}, "die": {"frames": 8, "loop": False}}
 WORKER_ANIMS = {**UNIT_ANIMS, "work": {"frames": 8, "loop": True}}
 CART_ANIMS = {"idle": {"frames": 1, "loop": True}, "walk": {"frames": 8, "loop": True},
-              "load": {"frames": 4, "loop": True}}
+              "load": {"frames": 4, "loop": False}}
 BUILDING_ANIMS = {"construct": {"frames": 3, "loop": False}, "idle": {"frames": 1, "loop": True},
                   "damaged": {"frames": 1, "loop": False}, "rubble": {"frames": 1, "loop": False}}
-STATIC_ANIMS = {"idle": {"frames": 1, "loop": True}}
 
-
-def keyframe(obj, path, value, frame):
-    setattr(obj, path, value)
-    obj.keyframe_insert(data_path=path, frame=frame)
 
 
 def bob(obj, frame, count, amount=0.025, base=0.0):
@@ -61,8 +56,8 @@ def character_clips(parts, worker=False):
     descriptors = WORKER_ANIMS if worker else UNIT_ANIMS
 
     def clip(name):
-        count = descriptors[name]["frames"]
-
+        descriptor = descriptors[name]
+        count = descriptor["frames"]
         def apply(frame):
             reset()
             body = parts["body"]
@@ -85,6 +80,9 @@ def character_clips(parts, worker=False):
                 fall(body, frame, count)
                 lean(parts["left_arm"], frame / (count - 1) * -1.1, 1)
                 lean(parts["right_arm"], frame / (count - 1) * 1.1, 1)
+        apply.descriptor = descriptor
+        apply.frames = count
+        apply.loop = descriptor["loop"]
         return apply
     return {name: clip(name) for name in descriptors}
 
@@ -94,6 +92,8 @@ def building_clips(parts):
     levels = parts["levels"]
 
     def clip(name):
+        descriptor = BUILDING_ANIMS[name]
+
         def apply(frame):
             reset()
             visibility(parts["scaffold"], name == "construct")
@@ -107,5 +107,8 @@ def building_clips(parts):
                     level.rotation_euler.y = 0.055
                     level.location.z -= 0.045
                 visibility(level, visible)
+        apply.descriptor = descriptor
+        apply.frames = descriptor["frames"]
+        apply.loop = descriptor["loop"]
         return apply
     return {name: clip(name) for name in BUILDING_ANIMS}

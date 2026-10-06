@@ -8,12 +8,21 @@ export interface OrderMarker {
   expiresAt: number;
 }
 
+export interface PlacementGhostItem {
+  readonly x: number;
+  readonly z: number;
+  readonly width: number;
+  readonly height: number;
+  readonly valid: boolean;
+}
+
 export interface OverlayGeometryInput {
   snapshot?: SessionSnapshot;
   selectedIds?: readonly number[];
   markers?: readonly OrderMarker[];
   timeSeconds?: number;
   getSpriteTopPx?: (id: number) => number | undefined;
+  placement?: readonly PlacementGhostItem[];
 }
 
 export const COLOR_LINE_GREEN: readonly [number, number, number, number] = [
@@ -36,12 +45,66 @@ export const COLOR_NEUTRAL: readonly [number, number, number, number] = [
   0.95, 0.9, 0.25, 0.95,
 ];
 
+export function computePlacementMatrix(
+  out: Float32Array,
+  offset: number,
+  x: number,
+  z: number,
+  width: number,
+  height: number,
+  elevation = 0.015,
+): void {
+  out[offset + 0] = width;
+  out[offset + 1] = 0;
+  out[offset + 2] = 0;
+  out[offset + 3] = 0;
+
+  out[offset + 4] = 0;
+  out[offset + 5] = 1;
+  out[offset + 6] = 0;
+  out[offset + 7] = 0;
+
+  out[offset + 8] = 0;
+  out[offset + 9] = 0;
+  out[offset + 10] = height;
+  out[offset + 11] = 0;
+
+  out[offset + 12] = x;
+  out[offset + 13] = elevation;
+  out[offset + 14] = z;
+  out[offset + 15] = 1;
+}
+
+export function computePlacementColor(
+  out: Float32Array,
+  offset: number,
+  valid: boolean,
+): void {
+  if (valid) {
+    out[offset + 0] = COLOR_LINE_GREEN[0];
+    out[offset + 1] = COLOR_LINE_GREEN[1];
+    out[offset + 2] = COLOR_LINE_GREEN[2];
+    out[offset + 3] = 1.0;
+  } else {
+    out[offset + 0] = COLOR_LINE_RED[0];
+    out[offset + 1] = COLOR_LINE_RED[1];
+    out[offset + 2] = COLOR_LINE_RED[2];
+    out[offset + 3] = 1.0;
+  }
+}
+
 export class OverlayGeometryBuilder {
   // Pre-sized capacities (ReviewRender#2: ellipses/bars >= 256, lines >= 2048)
   private ellipseCapacity = 256;
   public ellipseCount = 0;
   public ellipseMatrices = new Float32Array(256 * 16);
   public ellipseColors = new Float32Array(256 * 4);
+
+  private placementCapacity = 256;
+  public placementCount = 0;
+  public placementMatrices = new Float32Array(256 * 16);
+  public placementColors = new Float32Array(256 * 4);
+  public placementParams = new Float32Array(256 * 4);
 
   private healthBarCapacity = 256;
   public healthBarCount = 0;
@@ -177,6 +240,15 @@ export class OverlayGeometryBuilder {
 
           this.addHealthBar(posX, posZ, barW, barH, frac, barY);
         }
+      }
+    }
+
+    // 3. Placement ghost footprints and outlines
+    this.placementCount = 0;
+    if (input.placement && input.placement.length > 0) {
+      for (let i = 0; i < input.placement.length; i++) {
+        const p = input.placement[i];
+        this.addPlacement(p.x, p.z, p.width, p.height, p.valid);
       }
     }
 
@@ -546,5 +618,79 @@ export class OverlayGeometryBuilder {
     this.lineColors = nextColors;
 
     this.lineCapacity = newCap;
+  }
+
+  addPlacement(
+    x: number,
+    z: number,
+    width: number,
+    height: number,
+    valid: boolean,
+  ): void {
+    if (this.placementCount >= this.placementCapacity) {
+      this.growPlacement();
+    }
+
+    const idx = this.placementCount;
+    const mOffset = idx * 16;
+    const cOffset = idx * 4;
+    const pOffset = idx * 4;
+
+    const w = Math.max(1, width || 1);
+    const h = Math.max(1, height || 1);
+
+    computePlacementMatrix(this.placementMatrices, mOffset, x, z, w, h);
+    computePlacementColor(this.placementColors, cOffset, valid);
+
+    this.placementParams[pOffset + 0] = w;
+    this.placementParams[pOffset + 1] = h;
+    this.placementParams[pOffset + 2] = valid ? 1.0 : 0.0;
+    this.placementParams[pOffset + 3] = 0.0;
+
+    this.placementCount++;
+  }
+
+  getPlacement(index: number): {
+    x: number;
+    z: number;
+    width: number;
+    height: number;
+    valid: boolean;
+    r: number;
+    g: number;
+    b: number;
+    a: number;
+  } {
+    const m = index * 16;
+    const c = index * 4;
+    const p = index * 4;
+    return {
+      x: this.placementMatrices[m + 12],
+      z: this.placementMatrices[m + 14],
+      width: this.placementParams[p + 0],
+      height: this.placementParams[p + 1],
+      valid: this.placementParams[p + 2] > 0.5,
+      r: this.placementColors[c + 0],
+      g: this.placementColors[c + 1],
+      b: this.placementColors[c + 2],
+      a: this.placementColors[c + 3],
+    };
+  }
+
+  private growPlacement(): void {
+    const newCap = this.placementCapacity * 2;
+    const nextMatrices = new Float32Array(newCap * 16);
+    nextMatrices.set(this.placementMatrices);
+    this.placementMatrices = nextMatrices;
+
+    const nextColors = new Float32Array(newCap * 4);
+    nextColors.set(this.placementColors);
+    this.placementColors = nextColors;
+
+    const nextParams = new Float32Array(newCap * 4);
+    nextParams.set(this.placementParams);
+    this.placementParams = nextParams;
+
+    this.placementCapacity = newCap;
   }
 }

@@ -16,7 +16,7 @@
     },
     "load": {
       "frames": 4,
-      "loop": true,
+      "loop": false,
       "dirs": 8
     },
     "walk": {

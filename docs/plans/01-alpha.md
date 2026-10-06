@@ -5,6 +5,7 @@
 **Entry criteria**: `docs/plans/00-overview.md` approved.
 
 **Exit gate** (all must hold):
+
 - [ ] `npm run typecheck && npm run lint && npm test` pass.
 - [ ] `npm run sim:headless -- --map alpha_test --p1 crown:normal --p2 crown:normal --seeds 1-10` finishes all 10 games with a winner within 72 000 ticks (60 game-minutes), zero exceptions.
 - [ ] `npm run e2e` passes the Alpha smoke spec (boot → skirmish → debug-cheat to Age III → train one of each Crown unit → destroy enemy Keep → victory screen).
@@ -14,6 +15,7 @@
 ### M0 — Project foundation
 
 Phases:
+
 1. Scaffold Vite + React 19 + TypeScript project in repo root with the layout and npm script names from the overview; pin versions (`@babylonjs/core` 9.x, `vite` 8.x, `react` 19.x, `typescript` 7.x, `vitest` 5.x, `@playwright/test` 1.63.x, `zustand` 5.x, `sharp`, `maxrects-packer`, `tsx`, `eslint` 10 + typescript-eslint, `prettier`).
 2. ESLint `no-restricted-imports` rule forbidding `@babylonjs/*`, `react`, and `src/render|ui|input|game` imports inside `src/sim/**` and `src/data/**`.
 3. `.gitignore` (`node_modules`, `dist`, `build/`, `test-results`, `playwright-report`); commit generated `public/` assets.
@@ -21,6 +23,7 @@ Phases:
 5. GitHub Actions workflow `.github/workflows/ci.yml`: ubuntu-latest, Node 26, `npm ci`, typecheck, lint, test, build, e2e.
 
 Goalposts:
+
 - [x] `npm run dev` serves a page with a full-window Babylon canvas clearing to a solid colour and a React "bordev" overlay.
 - [x] `npm run build` produces `dist/`; `npm test` runs a placeholder sim test; `npm run e2e` loads the page and asserts the canvas exists and no console errors.
 - [x] Importing `@babylonjs/core` from a file in `src/sim` fails `npm run lint`.
@@ -32,6 +35,7 @@ Local browser verification used extracted Ubuntu libraries through `LD_LIBRARY_P
 ### M1 — Sprite pipeline v1
 
 Phases:
+
 1. `art/blender/lib/rig.py`, `look.py`, `materials.py` (`TEAM` material convention), `anim.py` (keyframe helpers for rigid-part hierarchies: bob, swing, lean, fall), `io.py` (pass/anim/dir/frame output paths); `render_asset.py` CLI with `--asset`, `--out`, `--only-anim`, `--only-dir`.
 2. Calibration assets: `calib_tile` (1×1 tile diamond with red +X and blue +Z edge markers) and `calib_arrow` (arrow pointing along model forward, 8 dirs, 1 frame).
 3. `tools/pack-atlas.ts` and `tools/art-build.ts` per overview (parallelism 4, hash cache).
@@ -40,6 +44,7 @@ Phases:
 6. `render_terrain.py` producing grass, dirt, sand, shallow, water, rock-ground textures.
 
 Goalposts:
+
 - [x] `npm run art:build && npm run art:pack` regenerates all M1 atlases from scratch on this machine; a second run skips everything (cache).
 - [x] Calibration test passes.
 - [x] Each atlas JSON validates against the overview format (Vitest schema test over `public/atlases/*.json`).
@@ -54,6 +59,7 @@ Art commands, cache inputs, partial-render invocation, atlas page/trim conventio
 ### M2 — World rendering
 
 Phases:
+
 1. `render/IsoCamera`: orthographic camera per rendering contract; zoom 0.5–1.5 around cursor; pan clamped to map diamond + 4 tiles margin.
 2. Iso math module `render/iso.ts` (`worldToScreen`, `screenToGround`) with Vitest tests of the axis convention.
 3. `render/Terrain`: map → splat textures → ground `ShaderMaterial`; water UV animation.
@@ -62,11 +68,13 @@ Phases:
 6. Debug scene: renders `alpha_test` with trees, rocks, mines, 2 Keeps and 50 random Crown sprites cycling walk animation in all 8 dirs.
 
 Goalposts:
+
 - [x] Screenshot of the debug scene shows correct 2:1 diamond grid alignment: a Keep's footprint diamond matches a 4×4 tile overlay drawn by `Overlays` (debug grid toggle `G`).
 - [x] Sprites behind (north of) a Keep are hidden by it; sprites in front draw over it.
 - [x] Draw calls for the debug scene ≤ 30 (`scene.getEngine()._drawCalls` / instrumentation logged in `stats()`).
 
 Implementation notes (M0/M1 review):
+
 - `tools/pack-atlas.ts` sizes pages to their content (`smart: true, pot: false`; e.g. `calib_tile` 100×52, `crown_peasant` 1254×1202), not 2048×2048, and the atlas JSON records no page dimensions. UVs use each loaded texture's source dimensions (`getBaseSize()`), including when WebGL1 resizes the GPU texture to a power of two.
 - Building, mine and doodad sprites anchor at the footprint centre (Blender origin). Place them at top-left tile + size/2; the Keep footprint goalpost verifies this. The overview documents this in the Sprite pipeline and Map format sections.
 
@@ -79,6 +87,7 @@ GPU pixel comparisons verified actual depth occlusion: 1,087 opaque north-probe 
 ### M3 — Simulation core
 
 Phases:
+
 1. `sim/rng.ts`, `sim/world.ts`, `sim/entity.ts`, `sim/commands.ts`, `sim/map.ts` (loads map JSON), `sim/grid.ts`, `sim/spatialHash.ts`, `sim/sim.ts` (`step`, `issue`, event queue for the UI: `unitCreated`, `unitDied`, `buildingCompleted`, `underAttack`, `ageReached`, `playerEliminated`).
 2. `sim/path/astar.ts`, `components.ts`, `pathQueue.ts` per contract.
 3. `systems/movement.ts`: seek, separation, formations, stuck repath, shallow-water slowdown, facing index.
@@ -86,6 +95,7 @@ Phases:
 5. `game/GameSession`: fixed-step accumulator, interpolation, owns Sim + Renderer.
 
 Goalposts:
+
 - [x] Vitest: a unit ordered across `alpha_test` around a forest reaches within 0.5 tiles of its target; a unit ordered into a walled-off pocket stops at the nearest reachable tile; 20 units ordered to one point end with no pair overlapping by more than 0.1 tiles.
 - [x] Vitest: two sims with seed 7 and the same command log produce identical entity positions after 2 000 ticks.
 - [x] `bench:sim -- --units 300` (all moving randomly) ≤ 4 ms average tick.
@@ -101,6 +111,7 @@ M3 implements move, movement-only attackMove, stop, hold and delete; later-syste
 ### M4 — Selection, orders and HUD shell
 
 Phases:
+
 1. `input/SelectionController`: click, box, shift, double-click type-select, control groups.
 2. `input/OrderController`: context right-click per overview; shift-queue; move/attack-move markers.
 3. `input/CameraController`: arrows, edge scroll, middle drag, wheel, `H`, double-tap group.
@@ -109,15 +120,16 @@ Phases:
 6. `Minimap` canvas (terrain, units as player-colour dots, camera trapezoid), click to jump, right-click to move.
 
 Goalposts:
+
 - [x] E2E: box-select 5 debug-spawned peasants via mouse drag; right-click ground; within 20 s game time all 5 are within 2 tiles of the target (`__bordev.sim` query).
 - [x] Ctrl+1 then 1 reselects the group; hotkey `W` stops them.
 - [x] HUD numbers match sim state after cheats (`cheats.resources(1000)` → TopBar shows 1000 food and gold).
 
-Implementation notes (M0/M1 review): fix before M5 starts rendering cart loading.
-- `crown_ox_cart` `load` is declared `loop: true` in `art/manifest.json` and `anim.CART_ANIMS`, but the clip is a one-way fill (cargo scale 0.12 → 1.0). At 12 fps it would refill about 18 times per 6 s load. Set `loop: false` in both places (last frame holds) or make the clip cyclic, then rebuild and repack `crown_ox_cart`.
+Implementation note (M5): the cart-load prerequisite is implemented. `crown_ox_cart` loading is non-looping in the manifest and Blender animation descriptor; runtime playback holds the final fill frame instead of repeatedly refilling.
 
 M4 verified:
-- Selection, contextual orders, camera controls, pooled selection/health/rally/waypoint overlays, the 10 Hz Zustand HUD, and interactive minimap are wired end to end. The command card uses one shared 3×5 slot layout for buttons and hotkeys. Portraits crop loaded atlas metadata; build/train entries remain disabled for their assigned M5/M6 systems, and economy/combat contexts report their unavailable milestone instead of silently issuing orders.
+
+- At the M4 gate, selection, contextual orders, camera controls, pooled selection/health/rally/waypoint overlays, the 10 Hz Zustand HUD, and interactive minimap were wired end to end. The command card used one shared 3×5 slot layout for buttons and hotkeys. Portraits cropped loaded atlas metadata; build/train entries were then disabled for their assigned M5/M6 systems, and economy/combat contexts reported their unavailable milestone instead of silently issuing orders. M5's current enabled construction, economy and generic training contracts are documented below.
 - Automated tests: Typecheck, lint, and production build pass. Vitest suite passes 180 unit tests across 18 files. Automated unit coverage includes: camera input math (middle-drag direction and magnitude, wheel zoom clamp to 0.5–1.5 and cursor anchor, edge-scroll stop on pointer exit and window blur, `setPanKey` arrow pans, viewport-inset centring in `CameraController.test.ts`), keyboard dispatch (`Hotkeys.test.ts` covering physical `e.code` AZERTY mapping, `e.repeat` suppression for one-shot actions, editable-target bypass, modifier handling for Ctrl+Digit, and `G` slot precedence over the debug grid), screen rect projection vs independent math at multiple zooms and frontmost picking (`spriteRect.test.ts`), overlay geometry building (`geometryBuilder.test.ts` covering final waypoint cross colouring by the last queued order and animation-frame-independent health bar vertical positioning), HUD store logic (`hud.test.ts` covering 4 s status message auto-clear and restart, slice reference identity preservation across 10 Hz updates, building/mine footprint centre coordinates, unobscured playfield projection for the minimap camera outline, pure minimap/world coordinate transforms, and data-table entity display names), and sim `setRally` validation rejecting non-production buildings, non-finite coordinates, and clamping finite coordinates to map bounds (`sim.test.ts`). E2E Playwright specs (`tests/e2e/`, run with one worker to avoid SwiftShader contention) use the shared fixture `tests/e2e/fixtures/m4.ts` with sim tick synchronization (`waitForTicks`), `pickablePoint` sampling for continuously moving debug-scene walkers, positive controls, and exact assertions. Automated browser coverage includes: the three M4 goalposts (5-peasant box select and move within 2 tiles, Ctrl+1/1 recall and `W` stop, TopBar cheat synchronization and 10 Hz TopBar sync without cheats), click/Shift/double-click selection, queued orders, attack-move, card submenu hotkeys, contextual right-click rejection status messages (enemy attack requires M7, cart on mine requires M5, peasant on farm requires M5, damaged Keep repair requires M5), real-input `setRally` for production buildings, status auto-clear after 4 s, minimap jump and right-click move destinations (off-centre and axis-sensitive), window blur with arrow keys held, edge-scroll exit through the HUD and blur, key autorepeat suppression, active-selection entity ID recycling, and first idle peasant selection on `.`. All 13 Chromium specs (boot, 7 in `m4-boundaries.spec.ts`, 5 in `m4.spec.ts`) pass against a fresh production build; the contextual-orders spec, which clicks entities among moving walkers, also passed 3 consecutive isolated runs.
 - Manual verification: Live Chromium smoke testing on preview build (1280×720 and 640×720, SwiftShader) confirmed visual rendering, GPU buffer stability, and responsive layout that automated suites do not inspect directly:
   - Walking spearman health bar vertical anchor remained stable at 128 px across animation frames while trimmed rect height varied 80–122 px.
@@ -127,11 +139,12 @@ M4 verified:
   - Held `W` key (press + 2 repeats) incremented `orderGeneration` by exactly 1.
   - At 640×720 resolution, all 15 command slots remained fully inside the viewport; top bar remained a single row without overflow; insets 40/186 px matched the HUD bars.
   - Clicking the disabled "Train Peasant" slot showed status "Requires Milestone 6 (Production)"; browser `contextmenu` default was prevented over the top bar, selection panel, command card, and bottom bar.
-- Build metrics and prerequisites: The non-fatal Vite >500 kB chunk warning remains (main approximately 1.41 MB, ≈364 kB gzip). No M5 economy, M6 production or M7 combat systems were added; the cart-load art prerequisite above remains unchanged.
+- Build metrics and prerequisites at the M4 gate: The non-fatal Vite >500 kB chunk warning remained (main approximately 1.41 MB, ≈364 kB gzip). M4 itself added no economy, production or combat systems. M5 subsequently implements economy and brings forward generic unit training; the cart-load prerequisite is now implemented.
 
 #### M4 review fixes
 
 Fixes applied following the M4 review (baseline 762ff4e):
+
 - Input: Added `src/input/Hotkeys.ts` as the single keyboard dispatcher (one window `keydown` and `keyup` listener). Hotkeys map by physical key position (`e.code`), making the 3×5 grid layout-independent (AZERTY verified). `e.repeat` is ignored for one-shot actions (stopping repeated order emission and accidental double-tap jumps). Centralized editable element check (`<input>`, `<textarea>`, `<select>`, `contenteditable`). Enforced modifier policy: card keys, `.`, `Delete`, `Escape`, `H`, and `G` are ignored when Ctrl/Alt/Meta is held; `Digit0-9` with Ctrl or Meta assigns groups, plain recalls (double-tap centres camera only on non-repeat presses within 300 ms); arrows pan regardless of modifiers. `G` executes an enabled card action first, displays the reason if disabled, and only toggles the debug grid if slot G is empty and `session.debugEnabled` is true (release builds never toggle the grid). Overlays' global `G` listener and redundant `mouse*` listeners across controllers were deleted.
 - Camera: `src/input/CameraController.ts` listens only to pointer events. Edge scrolling cancels when the pointer exits the browser window (document `pointerout` with null `relatedTarget`) even when traversing HUD bars, as well as on window `blur`. Implemented `setViewportInsets(top, bottom)` and `viewportInsets`; `centerOn(x, z)` centres the target in the unobscured playfield band between HUD bars. Arrow panning is driven by `setPanKey`. Town Center resolution uses `isTownCenter` directly without string fallbacks. Camera receives clamped frame `dt` from `GameSession`.
 - Selection & orders: `src/input/SelectionController.ts` tracks entity object references in active selection and prunes on identity mismatch (`world.getEntity(id) !== ref`) or death, resolving recycled ID aliasing; removed canvas and keyboard dependencies. `src/input/OrderController.ts` types `execute` with `CardAction` and removes dead branches; right-click with owned buildings selected issues `setRally` to all selected production buildings (`isProductionType`); routing for workers, carts, farms, and mines uses `src/data/roles.ts` (`isWorkerType`, `isCartType`, `isFarmType`, unfinished farms route to construction); status notifications route through `session.showStatus`.
@@ -140,64 +153,79 @@ Fixes applied following the M4 review (baseline 762ff4e):
 - Rendering: Decomposed `src/render/Overlays.ts` into a lightweight entry module with pure `src/render/overlays/geometryBuilder.ts`, `overlayShaders.ts`, and `DebugGrid.ts`. Created `src/render/ThinInstancePool.ts` shared across overlays, `SpriteBatch`, and `UnitShadows`. Overlay GPU pools are pre-sized (ellipses/bars ≥ 256, lines ≥ 2048), reallocating line vertices without mesh recreation. Health bars anchor to a stable per-asset sprite top (`getSpriteTopPx`, maximum `ay` across frames) rather than per-frame walk offsets. Building selection rings use radius 0.8·width to clear footprints. Final waypoint crosses colour by the last queued order. Deleted unused health-bar matrix and `iBarColor` uploads and the unreachable mine bar branch. In `src/render/Renderer.ts`, unified entity-to-asset mapping via `TYPE_TO_ASSET`, anchored building/mine sprites at footprint centres, omitted doodad screen-rect recording, and added allocation-free `worldToScreenInto` in `iso.ts`.
 - Tests: Unit tests expanded to 180 across 18 files with new suites: `CameraController.test.ts` (middle-drag, wheel clamp/anchor, edge-scroll stop on exit/blur, pan keys, inset centring), `Hotkeys.test.ts` (autorepeat, editable target, AZERTY code mapping, Ctrl+digit, G precedence), `spriteRect.test.ts` (rect corners at 3 zooms, frontmost picking), `geometryBuilder.test.ts` (final cross colour, frame-independent bar height), `hud.test.ts` (status expiry, slice identity, footprint centre, inset outline, minimap transforms, data names), and `sim.test.ts` (`setRally` rejection and clamping). E2E tests standardized on `tests/e2e/fixtures/m4.ts` with sim tick waiting, exact assertions, and `pickablePoint(page, id)` to reliably click moving debug-scene walkers where `renderer.pickEntity` returns the target.
 
-#### Notes for M5
+#### M5 integration notes
 
-- Placement controls: `PlacementController` keys (`Escape` to cancel placement, `R` to rotate orientation) must be registered centrally in `Hotkeys` and must not collide with card slots (`KeyR` is Attack-Move on unit command cards and should only rotate during active building placement).
-- Placement ghost: The placement ghost implementation belongs in the refactored `Overlays` module structure (`src/render/overlays/`) and must reuse the pre-sized `ThinInstancePool` / mesh infrastructure.
-- Production rally semantics: Milestone 6 unit production rally semantics build directly upon the validated sim `setRally` command (production buildings only, coordinates clamped to map bounds).
+- Placement `Escape` and `R` are dispatched centrally in `Hotkeys`, taking priority over card slots only during active placement. Right-click cancels, Shift repeats placement, and selection changes clear it.
+- Placement ghosts, wire outlines and drag tiles live in the `Overlays` structure and reuse pre-sized thin-instance pools.
+- M5 generic unit training uses the validated ground `setRally` command. M6 retains advanced unit/building rally targets alongside research, ages, upgrades and remaining unit art.
 
 ### M5 — Economy and construction
 
 Phases:
+
 1. `systems/construction.ts`: placement validation (in bounds, all footprint tiles free and explored, not overlapping units — units get pushed out), cost deduction on placement, builders, `3T/(n+2)` rule, construct frames at 0/50/100 %, repair at 50 % build rate free of cost, cancel refunds 100 % if 0 % built else 50 %.
 2. `input/PlacementController`: ghost, Esc cancel, Shift keeps placing, wall/palisade drag lines (straight or L, tile by tile), gate orientation from wall line or `R` rotate.
 3. `systems/economy.ts`: carts loop, mine queueing (2 loaders), drop-off selection, depletion retargeting; farms + farmers; pinMine.
 4. `systems/faith.ts`: produced/used, Low Faith flag; population and cap.
 5. Crown buildings with first-pass art: `storehouse`, `chapel`, `barracks`, `archery_range`.
+6. `systems/production.ts`: real generic unit queues brought forward from M6 for the extra-cart and Low Faith goalposts; faction/building/age/cost validation, maximum five paid entries, population-cap pause, collision-safe spawn, ground rally and 100 % cancellation refunds.
 
 Goalposts:
-- [ ] Headless test: from standard start with scripted commands (build 2 farms, 1 cottage, train 1 more cart), after 5 game-minutes food ≥ 600 and gold ≥ 500 collected in total (sim counters).
-- [ ] Building a barracks while faith produced is 5 and used would become 7 puts the player in Low Faith; a unit then trains in 2× its listed time (Vitest).
-- [ ] A mine with 3 carts never has more than 2 loading at once and depletes exactly at 6000 delivered + carried.
 
-Implementation notes (M0/M1 review): harden the sprite pipeline before phase 5 renders new building art (and before M6 adds the remaining Crown units).
-- `art:pack` must refuse an asset whose `build/renders/<id>/.hash` marker is missing. Today it packs whatever frames exist, so running it after an interrupted `art:build` writes a mix of stale and new frames into tracked `public/atlases/` and exits 0.
-- Add the resolved `maxrects-packer` version to the atlas cache key (`tools/pack-atlas.ts`, next to `sharp.versions`); it alone decides frame placement and page splits.
-- Frame counts live in both `art/manifest.json` and `art/blender/lib/anim.py`, but `render_asset.py` only cross-checks animation names. Validate counts and loop flags too.
-- Delete unused `anim.keyframe`, `anim.STATIC_ANIMS` and the no-op per-frame `scene.frame_set` in `render_asset.py`: clips pose objects directly.
+- [ ] Headless test: from standard start with scripted commands (build 2 farms, 1 cottage, train 1 more cart), after 5 game-minutes food ≥ 250 and gold ≥ 500 collected in total (sim counters).
+- [x] Building a barracks while faith produced is 5 and used becomes 7 puts the player in Low Faith; a unit then trains in 2× its listed time.
+- [x] A mine with 3 carts never has more than 2 loading at once and depletes exactly at 6000 delivered + carried.
+
+The user explicitly approved replacing the original 600-food goalpost with 250 food, without changing the locked 0.5 food/s rate. Even two farms completed at tick zero can collect at most `2 × 0.5 × 300 = 300` food in five minutes; construction and approach time lower that ceiling, so 600 was impossible. Counters exclude starting stock. The combined food/gold goalpost remains unchecked pending final verification.
+
+Measured runtime smoke evidence: farms completed in 15.05 s and the cottage in 25 s; food collected was 285 at five minutes. The mine smoke ran 4961 ticks, observed at most two simultaneous loaders, and finished with 6000 delivered, zero remaining and zero carried. Faith smoke observed produced/used 5/7 after barracks completion and peasant training in 400 ticks normally versus 800 ticks in Low Faith. These are scoped observations, not a claim that all M5 gates or the five-minute gold criterion have passed.
+
+Implemented sprite-pipeline prerequisites:
+
+- `art:pack` requires the complete-render `.hash` marker before cache lookup, preventing interrupted renders from being packed as a complete asset.
+- Atlas cache keys include the resolved `maxrects-packer` version alongside sharp versions.
+- Blender animation descriptors are checked against manifest names, frame counts and loop flags; cart `load` is non-looping.
+
+Placement already validates each player's exploration array. M5 initializes it fully explored; M8 supplies actual fog/exploration updates and rendering. No whole-M5 completion claim is made here; final test/build/E2E/art gates remain for the integration owner.
 
 ### M6 — Production and progression
 
 Phases:
-1. `systems/production.ts`: per-building queue of up to 5, pop blocking, rally points (ground or unit/building), cancel refund 100 %.
+
+1. Extend M5's implemented generic training queues and ground rallies with advanced unit/building rally semantics; retain the maximum-five queue, population blocking and 100 % cancellation refund contracts.
 2. Ages I→III research with requirements; age-gated command card entries greyed with tooltip listing missing requirements.
 3. Upgrades system with effect application (stat modifiers stack additively per upgrade), first Crown upgrade (`heavy_plough`) wired end to end; the rest in Beta.
 4. Crown `stable`, `siege_workshop` buildings and all remaining Crown units' first-pass art.
 
 Goalposts:
+
 - [ ] Vitest: Age II research is unavailable until 2 qualifying buildings are complete; completes in 40 s (800 ticks) normally and 80 s in Low Faith.
 - [ ] E2E (with cheats): train one of each of the 10 Crown units; all appear at the rally point.
 
 ### M7 — Combat, towers, walls and gates
 
 Phases:
+
 1. `systems/combat.ts`: target acquisition via spatial hash every 10 ticks, chase, melee hit frame, ranged projectiles (`systems/projectiles.ts`), bonus damage, min range, siege armor rule, death/corpse/rubble, building destruction frees grid + recomputes components.
 2. Attack-move, hold position, attack building, auto-retaliation for idle units.
 3. Towers and Keep arrows; Sanctuary aura (`systems/auras.ts`).
 4. Stone wall/gate/tower art; gates open (animation frame swap) when an owned/allied unit is within 1 tile.
 
 Goalposts:
+
 - [ ] Vitest duel matrix (deterministic seed): 10 spearmen beat 5 knights; 5 knights beat 10 longbowmen in open ground; a trebuchet destroys a stone tower in 3 hits (200 + 250 bonus vs 1000 HP); a man-at-arms hitting a stone wall removes exactly `max(1, 6−8) + 2 = 3` HP per hit.
 - [ ] Enemy units path around a closed wall ring; owner units pass through its gate; a unit inside a fully walled enemy base with no gate is unreachable and attack orders against it make attackers target the wall.
 
 ### M8 — Fog of war
 
 Phases:
+
 1. `systems/fog.ts` per contract, ghosts for enemy buildings/mines.
 2. `render/FogTexture` + terrain shader integration; hide non-visible enemy sprites and health bars; minimap respects fog.
-3. Placement requires explored tiles.
+3. Feed real explored state into M5's existing placement validator (already checks the per-player array).
 
 Goalposts:
+
 - [ ] At match start only the area around the player's Keep is visible; the rest is black.
 - [ ] An enemy building seen then left behind remains drawn as a ghost at last-seen HP/state; if destroyed while unseen, the ghost disappears only after its tile becomes visible again.
 - [ ] Fog update cost ≤ 0.5 ms per update at 300 units (bench output).
@@ -205,6 +233,7 @@ Goalposts:
 ### M9 — Skirmish flow and Normal AI
 
 Phases:
+
 1. Screens: `MainMenu` (Skirmish, Quit placeholder), `SkirmishSetup` (map = alpha_test, 2 slots, faction locked to Crown, AI difficulty locked to Normal, player colour), `GameScreen`, `Results` (winner, time, units trained/lost, resources gathered).
 2. `systems/victory.ts`: elimination rule from overview; game menu (Esc) with Resume / Surrender / Quit to menu.
 3. AI v1 (`sim/ai/*`) for Crown Normal: JSON build order (peasants to 12, carts to 4, farms per 4 peasants, cottages at pop-cap − 5, storehouse near far mines, barracks, archery range, Age II, stable, Age III, workshop); military composition per age; attack wave when army ≥ 12 or at minute 10; defend when own buildings attacked within 20 tiles; retreat units under 30 % HP to base.
@@ -212,6 +241,7 @@ Phases:
 5. Alerts: "Under attack", "Age reached", "Not enough gold/food/population/faith" toasts with `Space` jump.
 
 Goalposts:
+
 - [ ] Exit-gate headless run (10 seeds) passes.
 - [ ] A human who does nothing loses to Normal AI before minute 25 in 3/3 seeds (headless with an idle player slot `none`).
 - [ ] Alpha E2E smoke spec passes.

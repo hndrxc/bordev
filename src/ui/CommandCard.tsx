@@ -2,8 +2,8 @@ import type { GameSession } from '../game/GameSession';
 import { useHudStore } from './hud';
 import {
   getCommandSlots,
+  getCommandSlotContext,
   type CommandSlot,
-  type CardAction,
 } from './commandSlots';
 
 export interface CommandCardProps {
@@ -14,7 +14,11 @@ export function CommandCard({ session }: CommandCardProps) {
   const selection = useHudStore((state) => state.selection);
   const orders = useHudStore((state) => state.orders);
 
-  const slots = getCommandSlots(selection, orders.submenu);
+  const slots = getCommandSlots(
+    selection,
+    orders.submenu,
+    getCommandSlotContext(session?.sim?.world),
+  );
 
   const rows: (readonly CommandSlot[])[] = [
     slots.slice(0, 5),
@@ -29,9 +33,7 @@ export function CommandCard({ session }: CommandCardProps) {
       }
       return;
     }
-    if (slot.action) {
-      session?.input?.orders.execute(slot.action as CardAction);
-    }
+    session?.input?.orders?.executeSlot(slot);
   };
 
   return (
@@ -56,8 +58,10 @@ export function CommandCard({ session }: CommandCardProps) {
 
             const isActive =
               (slot.action === 'move' && orders.mode === 'move') ||
-              (slot.action === 'attackMove' && orders.mode === 'attackMove');
-
+              (slot.action === 'attackMove' && orders.mode === 'attackMove') ||
+              (slot.action === 'build' &&
+                !!slot.buildingType &&
+                orders.placementBuilding === slot.buildingType);
             return (
               <button
                 key={cIdx}

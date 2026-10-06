@@ -53,6 +53,8 @@ def clips(parts):
     reset = anim.resetter(parts["root"])
 
     def clip(name):
+        descriptor = anim.CART_ANIMS[name]
+
         def apply(frame):
             reset()
             if name == "walk":
@@ -67,5 +69,8 @@ def clips(parts):
                 anim.lean(parts["head"],0.18*math.sin(frame*math.pi/2))
             else:
                 anim.visibility(parts["cargo"],False)
+        apply.descriptor = descriptor
+        apply.frames = descriptor["frames"]
+        apply.loop = descriptor["loop"]
         return apply
     return {name:clip(name) for name in anim.CART_ANIMS}

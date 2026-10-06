@@ -6,26 +6,33 @@ A single-player 2.5D medieval RTS for the browser. It combines Command & Conquer
 
 ## Current state
 
-| Milestone | State |
-|---|---|
-| M0 Project foundation | ✅ done |
-| M1 Sprite pipeline v1 (15 Blender assets, atlases, terrain textures) | ✅ done |
-| M2 World rendering (iso camera, terrain, sprite batches, shadows, overlays) | ✅ done |
-| M3 Simulation core (20 Hz fixed step, grid, A*, movement, determinism) | ✅ done |
-| M4 Selection, orders and HUD shell | ✅ done |
-| M5 Economy and construction | ⏭ next |
-| M6–M9 Production, combat, fog, skirmish flow and AI | not started |
+| Milestone                                                                           | State                                       |
+| ----------------------------------------------------------------------------------- | ------------------------------------------- |
+| M0 Project foundation                                                               | ✅ done                                     |
+| M1 Sprite pipeline v1 (15 Blender assets, atlases, terrain textures)                | ✅ done                                     |
+| M2 World rendering (iso camera, terrain, sprite batches, shadows, overlays)         | ✅ done                                     |
+| M3 Simulation core (20 Hz fixed step, grid, A*, movement, determinism)              | ✅ done                                     |
+| M4 Selection, orders and HUD shell                                                  | ✅ done                                     |
+| M5 Economy and construction                                                         | implemented; final acceptance gates pending |
+| M6–M9 Research/progression, remaining production, combat, fog, skirmish flow and AI | outside the current implementation          |
 
-`npm run dev` loads `public/maps/alpha_test.json`, runs the sim at 20 Hz, and renders terrain, unit sprites, and overlays along with a debug scene (start units plus seeded Crown units for player 0). Selection (click, drag-box, Shift multi-select, double-click type selection, control groups 0–9), orders (contextual right-click, Shift queueing, rally points, stop, hold, delete), the React HUD (top bar resources, selection panel with portraits and stats, 3×5 command card), interactive minimap, and camera controls (pan keys, middle-drag, cursor wheel zoom, edge scrolling, Town Center jump) are fully implemented. The sim accepts `move`, `attackMove` (movement only), `stop`, `hold`, `delete`, and `setRally` commands. Other command kinds throw until their milestone systems are built. There is no AI yet (scheduled for M9).
+`npm run dev` loads `public/maps/alpha_test.json`, runs the sim at 20 Hz, and renders terrain, unit/building sprites, and overlays along with a debug scene (start units plus seeded Crown units for player 0). Selection (click, drag-box, Shift multi-select, double-click type selection, control groups 0–9), contextual orders and Shift queueing, rally points, stop/hold/delete, the React HUD, interactive minimap, and camera controls remain available.
+
+M5 adds working construction placement and repair, automatic cart hauling, farms, faith/population accounting, and the training queues needed by the economy and Low Faith goalposts. This is still a developer sandbox, not a complete playable match: research, age progression, upgrades, combat, fog rendering/exploration, victory and AI remain outside this milestone. M5 is implemented but is **not marked complete** until its final test/build/browser/art gates and acceptance measurements are recorded in the Alpha plan.
+
+- **Construction and placement.** Select a worker and choose an economic or military building from the command card (buttons and physical hotkeys share one dispatcher). The snapped footprint ghost shows valid/invalid placement; validation checks bounds, resources, faction/age, explored tiles and occupancy. Units are displaced rather than blocking foundations. Left-click places; `Escape` or right-click cancels; `R` rotates during active placement (rather than invoking its card action); `Shift` keeps placement active for repeat builds. Wall/palisade placement supports straight or L-shaped drag lines, and gates infer orientation from nearby wall runs. Age-gated entries remain unavailable without age progression. Right-click an unfinished site to build/resume it, a damaged owned building to repair it, or an unworked farm to assign a farmer. Construction uses multiple arrived builders, free repair runs at half the build rate, and deleting an unfinished site refunds 100% at zero progress or 50% after work begins.
+- **Economy.** Starting and newly trained carts automatically seek mines and haul gold to completed owned Town Centers/storehouses. Each load is 100 gold in 6 seconds, with at most two loaders per mine; unloading takes 2 seconds. Right-click a mine to pin a cart; depleted mines trigger eligible nearby retargeting. Stop/hold/manual movement interrupts automatic work without discarding cargo. Each farm supports one worker at the locked **0.5 food/s** rate; an eligible builder finishing a farm starts farming automatically.
+- **Faith and training.** Completed buildings contribute faith and population capacity; unfinished sites do not. Low Faith halves training speed. Paid training queues validate building, faction, age and resource prerequisites, pause at the population cap, and support cancellation/refunds and rally points. This prerequisite training implementation does not imply M6 research or age progression is complete.
+- **Collection counters.** `sim.world.players[player].foodCollected` counts generated farm food and `goldCollected` counts delivered gold, excluding initial stock and spending. The approved two-farm, five-minute food goalpost is **250 collected**, not 600 (two farms can produce at most 300 at the locked rate even with no construction delay). Final five-minute gold acceptance remains pending; current smoke measurements are not a substitute for the final gates.
 
 ## Prerequisites
 
-| Tool | Version | Needed for |
-|---|---|---|
-| Node.js | 26.8.1 (`.nvmrc`, `engines: 26.x`) | everything |
-| npm | 12 | `npm ci`. The pinned esbuild install script is allowed through `allowScripts` in `package.json` |
-| Playwright Chromium | `@playwright/test` 1.63 | `npm run e2e` |
-| Blender | 5.2 LTS on `PATH` as `blender` | regenerating art only |
+| Tool                | Version                            | Needed for                                                                                      |
+| ------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Node.js             | 26.8.1 (`.nvmrc`, `engines: 26.x`) | everything                                                                                      |
+| npm                 | 12                                 | `npm ci`. The pinned esbuild install script is allowed through `allowScripts` in `package.json` |
+| Playwright Chromium | `@playwright/test` 1.63            | `npm run e2e`                                                                                   |
+| Blender             | 5.2 LTS on `PATH` as `blender`     | regenerating art only                                                                           |
 
 Development runs on a headless Linux box with no GPU. Blender renders with Cycles on the CPU, and Playwright uses SwiftShader WebGL. You only need Blender to change art: the generated atlases, terrain textures and maps are committed under `public/`.
 
@@ -45,21 +52,21 @@ Do not use `npm install --force` or `--legacy-peer-deps`. See [TypeScript and li
 
 The script names are fixed by the overview. Arguments to tools go after `--`.
 
-| Script | What it does |
-|---|---|
-| `dev` | Vite dev server with HMR and the debug hook enabled |
-| `build` | `tsc -b && vite build` → `dist/` |
-| `preview` | Serves `dist/` at `127.0.0.1:4173` (strict port, also used by e2e) |
-| `test` / `test:watch` | Vitest (Node environment) over `src/**/*.test.ts` and `tools/**/*.test.ts` |
-| `e2e` | Playwright specs in `tests/e2e/` against `npm run preview`. **Run `npm run build` first** |
-| `lint` | ESLint, including the sim/data import seam (see below) |
-| `typecheck` | `tsc -b` across all three TS projects |
-| `art:build` | Renders sprites and terrain through Blender into `build/` (cached). `-- --asset <id>` renders one asset |
-| `art:pack` | Packs `build/renders/` into `public/atlases/` (cached). `-- --asset <id>` packs one asset |
-| `art:terrain` | Re-renders the six terrain textures directly, with no cache |
-| `map:gen` | Deterministic map generator, e.g. `-- --seed 1 --players 2 --out alpha_test` |
-| `bench:sim` | Headless sim tick benchmark, e.g. `-- --units 300` |
-| `sim:headless`, `balance`, `desktop:dev`, `desktop:build` | Names are reserved but not implemented yet (the tool files and Electron are missing) |
+| Script                                                    | What it does                                                                                            |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `dev`                                                     | Vite dev server with HMR and the debug hook enabled                                                     |
+| `build`                                                   | `tsc -b && vite build` → `dist/`                                                                        |
+| `preview`                                                 | Serves `dist/` at `127.0.0.1:4173` (strict port, also used by e2e)                                      |
+| `test` / `test:watch`                                     | Vitest (Node environment) over `src/**/*.test.ts` and `tools/**/*.test.ts`                              |
+| `e2e`                                                     | Playwright specs in `tests/e2e/` against `npm run preview`. **Run `npm run build` first**               |
+| `lint`                                                    | ESLint, including the sim/data import seam (see below)                                                  |
+| `typecheck`                                               | `tsc -b` across all three TS projects                                                                   |
+| `art:build`                                               | Renders sprites and terrain through Blender into `build/` (cached). `-- --asset <id>` renders one asset |
+| `art:pack`                                                | Packs `build/renders/` into `public/atlases/` (cached). `-- --asset <id>` packs one asset               |
+| `art:terrain`                                             | Re-renders the six terrain textures directly, with no cache                                             |
+| `map:gen`                                                 | Deterministic map generator, e.g. `-- --seed 1 --players 2 --out alpha_test`                            |
+| `bench:sim`                                               | Headless sim tick benchmark, e.g. `-- --units 300`                                                      |
+| `sim:headless`, `balance`, `desktop:dev`, `desktop:build` | Names are reserved but not implemented yet (the tool files and Electron are missing)                    |
 
 ### Before pushing
 
@@ -88,7 +95,8 @@ src/
                     upgrades, ages, factions, combat, economy, terrain
   assets/           art manifest + atlas JSON types/parsers (shared with tools)
   input/            Hotkeys (single keyboard dispatcher), InputController,
-                    SelectionController, OrderController, CameraController
+                    SelectionController, OrderController, PlacementController,
+                    CameraController
   ui/               HudRoot (Hud), TopBar, SelectionPanel, CommandCard, Portrait,
                     Minimap, commandSlots, hud (Zustand store)
 art/
@@ -202,7 +210,7 @@ const ids = __bordev.renderer.debugProbes.allDebugUnitIds.slice(0, 5);
 __bordev.issue({ kind: 'move', player: 0, ids, x: 40, z: 40 });
 ```
 
-Additional cheats (fog, construction, combat) will appear as their milestones are completed.
+Construction, farming, mine pinning, repair, training and training cancellation can be exercised through `issue(cmd)`; they are real sim commands rather than cheats. Additional fog/combat cheats will appear with their milestones.
 
 ## Art pipeline
 
@@ -221,6 +229,8 @@ public/terrain/<type>.png                                              (committe
 
 \* Shadow passes are rendered only for buildings and doodads.
 
+M5 adds the building atlas IDs `crown_storehouse`, `crown_chapel`, `crown_barracks`, and `crown_archery_range`. Runtime animation selection uses construction progress frames, arrived-worker `work` clips, and a non-looping cart `load` clip whose final frame holds; walking is selected only while moving.
+
 - **Adding an asset.** Add a manifest entry, then add `art/blender/assets/<id>.py` exposing `build()` and `anims()`. Name the team-coloured material `TEAM`. Run `npm run art:build -- --asset <id> && npm run art:pack -- --asset <id>`.
 - **Previewing one animation or facing** without touching the cache:
   ```sh
@@ -228,8 +238,8 @@ public/terrain/<type>.png                                              (committe
     -- --asset crown_peasant --out build/preview --only-anim walk --only-dir 2
   ```
 - **Renderer changes.** Render the smallest representative cases first: `calib_tile`/`calib_arrow`, one animated unit frame, and one building body/mask/shadow frame. Check projection, alpha, TEAM coverage and shadow bounds, then start a full build.
-- **Caching.** A raw render is skipped when its hash covers the Blender version, manifest entry, asset script, shared `lib/`, renderer and build tool, and every expected output exists. Packing hashes the frame contents, manifest, packer/schema and sharp version. After a full build, an unchanged rerun should skip everything. To force a complete rebuild, delete `build/`. The tracked `public/` files are overwritten, not deleted.
-- **Known caveat.** `art:pack` does not yet check for the `build/renders/<id>/.hash` success marker. If you run it after an interrupted `art:build`, it can pack a mix of stale and new frames into `public/atlases/` without failing. This is fixed in M5. Until then, rerun `art:build` to completion before packing.
+- **Caching.** A raw render is skipped when its hash covers the Blender version, manifest entry, asset script, shared `lib/`, renderer and build tool, and every expected output exists. Packing hashes the frame contents, manifest, packer/schema, sharp version and the **resolved `maxrects-packer` package version**, so packing-library changes invalidate cached atlases. After a full build, an unchanged rerun should skip everything. To force a complete rebuild, delete `build/`. The tracked `public/` files are overwritten, not deleted.
+- **Render-success guard.** `art:pack` now refuses assets missing `build/renders/<id>/.hash`, the success marker written by `art:build`. An interrupted render must be completed successfully before packing; the old M4 caveat about packing without this marker no longer applies. Render validation also cross-checks animation frame counts and loop flags against the manifest.
 
 ## Maps
 

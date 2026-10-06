@@ -22,11 +22,15 @@ export interface PlayerState {
   age: 1 | 2 | 3;
   food: number;
   gold: number;
+  foodCollected: number;
+  goldCollected: number;
   faithProduced: number;
   faithUsed: number;
+  lowFaith: boolean;
   pop: number;
   popCap: number;
   eliminated: boolean;
+  explored: Uint8Array;
 }
 
 export class World {
@@ -42,7 +46,11 @@ export class World {
   tick = 0;
   private readonly freeIds: number[] = [];
 
-  constructor(map: GameMap, rng: Rng, playerFactions?: Record<number, Faction>) {
+  constructor(
+    map: GameMap,
+    rng: Rng,
+    playerFactions?: Record<number, Faction>,
+  ) {
     this.map = map;
     this.grid = new Grid(map);
     this.rng = rng;
@@ -89,8 +97,7 @@ export class World {
     explicitFaction?: Faction,
   ): UnitEntity {
     const pState = this.players[player];
-    const faction: Faction =
-      explicitFaction ?? pState?.faction ?? 'crown';
+    const faction: Faction = explicitFaction ?? pState?.faction ?? 'crown';
     const uData = getUnitData(type, faction);
     if (!uData) {
       throw new Error(`Unknown unit type '${type}' for faction '${faction}'`);
@@ -168,11 +175,11 @@ export class World {
     x: number,
     z: number,
     built = true,
+    orientation?: 'horizontal' | 'vertical',
     explicitFaction?: Faction,
   ): BuildingEntity {
     const pState = this.players[player];
-    const faction: Faction =
-      explicitFaction ?? pState?.faction ?? 'crown';
+    const faction: Faction = explicitFaction ?? pState?.faction ?? 'crown';
     const bData = getBuildingData(type, faction);
     if (!bData) {
       throw new Error(
@@ -180,8 +187,20 @@ export class World {
       );
     }
 
-    const width = bData.width;
-    const height = bData.height;
+    let width = bData.width;
+    let height = bData.height;
+    const isGate = bData.isGate ?? type.includes('gate');
+    const resolvedOrientation =
+      orientation ??
+      (isGate && bData.gateOrientations ? 'horizontal' : undefined);
+    if (resolvedOrientation && bData.gateOrientations) {
+      const gateDim = bData.gateOrientations[resolvedOrientation];
+      if (gateDim) {
+        width = gateDim.width;
+        height = gateDim.height;
+      }
+    }
+
     const hp = bData.hp;
     const pop = bData.pop;
     const faith = bData.faith;
@@ -191,7 +210,6 @@ export class World {
     const isTownCenter =
       bData.isTownCenter ?? (type === 'keep' || type === 'great_hall');
     const isDropOff = bData.isDropOff ?? isTownCenter;
-    const isGate = bData.isGate ?? type.includes('gate');
     const id = this.allocateId();
     const building: BuildingEntity = {
       id,
@@ -205,7 +223,7 @@ export class World {
       previousZ: z,
       width,
       height,
-      hp,
+      hp: built ? hp : 1,
       maxHp: hp,
       built,
       buildProgress: built ? 1 : 0,
@@ -218,6 +236,8 @@ export class World {
       isTownCenter,
       isDropOff,
       isGate,
+      orientation: resolvedOrientation,
+      trainingQueue: [],
     };
 
     if (id < this.entities.length) {
@@ -232,7 +252,7 @@ export class World {
     }
 
     if (built && pState) {
-      pState.popCap += pop;
+      pState.popCap = Math.min(150, pState.popCap + pop);
       if (faith > 0) {
         pState.faithProduced += faith;
       } else if (faith < 0) {
@@ -249,6 +269,34 @@ export class World {
     }
 
     return building;
+  }
+
+  completeBuilding(building: BuildingEntity): void {
+    if (building.built || this.entities[building.id] !== building) {
+      return;
+    }
+    building.built = true;
+    building.buildProgress = 1;
+    building.hp = building.maxHp;
+
+    const pState = this.players[building.player];
+    if (pState) {
+      pState.popCap = Math.min(150, pState.popCap + building.pop);
+      if (building.faith > 0) {
+        pState.faithProduced += building.faith;
+      } else if (building.faith < 0) {
+        pState.faithUsed += -building.faith;
+      }
+    }
+
+    this.emitEvent({
+      kind: 'buildingCompleted',
+      entityId: building.id,
+      player: building.player,
+      buildingType: building.type,
+      x: building.x,
+      z: building.z,
+    });
   }
 
   spawnMine(x: number, z: number, goldRemaining = 6000): MineEntity {
@@ -310,11 +358,11 @@ export class World {
       }
       const pState = this.players[ent.player];
       if (pState && ent.built) {
-        pState.popCap = Math.max(0, pState.popCap - ent.pop);
+        pState.popCap = Math.max(0, Math.min(150, pState.popCap - ent.pop));
         if (ent.faith > 0) {
           pState.faithProduced = Math.max(0, pState.faithProduced - ent.faith);
         } else if (ent.faith < 0) {
-          pState.faithUsed = Math.max(0, pState.faithUsed - (-ent.faith));
+          pState.faithUsed = Math.max(0, pState.faithUsed - -ent.faith);
         }
       }
 
@@ -358,8 +406,11 @@ export class World {
 
   private initPlayers(playerFactions?: Record<number, Faction>): void {
     const count = this.map.players;
+    const totalTiles = this.map.size * this.map.size;
     for (let i = 0; i < count; i++) {
       const faction: Faction = playerFactions?.[i] ?? 'crown';
+      const explored = new Uint8Array(totalTiles);
+      explored.fill(1);
       this.players.push({
         id: i,
         faction,
@@ -367,11 +418,15 @@ export class World {
         age: 1,
         food: 300,
         gold: 200,
+        foodCollected: 0,
+        goldCollected: 0,
         faithProduced: 0,
         faithUsed: 0,
+        lowFaith: false,
         pop: 0,
         popCap: 0,
         eliminated: false,
+        explored,
       });
     }
   }
@@ -395,7 +450,7 @@ export class World {
       const [sx, sz] = start;
       const player = this.players[p];
       const tcType = player.faction === 'crown' ? 'keep' : 'great_hall';
-      this.spawnBuilding(p, tcType, sx, sz, true);
+      this.spawnBuilding(p, tcType, sx, sz, true, undefined, player.faction);
 
       const peasantType = player.faction === 'crown' ? 'peasant' : 'thrall';
       const cartType = player.faction === 'crown' ? 'ox_cart' : 'haul_wagon';
@@ -409,10 +464,10 @@ export class World {
       ];
 
       for (const [px, pz] of peasantOffsets) {
-        this.spawnUnit(p, peasantType, px, pz);
+        this.spawnUnit(p, peasantType, px, pz, player.faction);
       }
 
-      this.spawnUnit(p, cartType, sx + 4.5, sz + 3.5);
+      this.spawnUnit(p, cartType, sx + 4.5, sz + 3.5, player.faction);
     }
   }
 }

@@ -12,7 +12,45 @@ import {
 } from './commands.js';
 import type { UnitEntity } from './entity.js';
 import { assignFormationSlots, updateMovement } from './systems/movement.js';
+import {
+  applyBuildCommand,
+  applyRepairCommand,
+  cancelConstruction,
+  updateConstruction,
+} from './systems/construction.js';
+import {
+  applyFarmCommand,
+  applyPinMineCommand,
+  updateEconomy,
+} from './systems/economy.js';
+import { updateFaith } from './systems/faith.js';
+import {
+  applyCancelTrainCommand,
+  applyTrainCommand,
+  updateProduction,
+} from './systems/production.js';
+
 export const SIM_DT = 0.05;
+
+function clearActiveWorkAndCartTransientState(unit: UnitEntity): void {
+  unit.workAnimation = undefined;
+  unit.workStartedTick = undefined;
+  if (unit.cart) {
+    unit.cart.phase = 'idle';
+    unit.cart.ticks = 0;
+    unit.cart.mineId = undefined;
+    unit.cart.mineRef = undefined;
+    unit.cart.dropOffId = undefined;
+    unit.cart.dropOffRef = undefined;
+    unit.cart.pinnedMineId = undefined;
+    unit.cart.pinnedMineRef = undefined;
+    unit.loaded = unit.cart.carriedGold > 0;
+    unit.speed =
+      unit.loaded && unit.loadedSpeed !== undefined
+        ? unit.loadedSpeed
+        : unit.baseSpeed;
+  }
+}
 
 export class Sim {
   readonly world: World;
@@ -47,6 +85,10 @@ export class Sim {
     }
 
     updateMovement(this.world);
+    updateConstruction(this.world);
+    updateEconomy(this.world);
+    updateFaith(this.world);
+    updateProduction(this.world);
     this.world.tick++;
   }
 
@@ -73,6 +115,24 @@ export class Sim {
         break;
       case 'setRally':
         this.applySetRallyCommand(cmd);
+        break;
+      case 'build':
+        applyBuildCommand(this.world, cmd);
+        break;
+      case 'repair':
+        applyRepairCommand(this.world, cmd);
+        break;
+      case 'farm':
+        applyFarmCommand(this.world, cmd);
+        break;
+      case 'pinMine':
+        applyPinMineCommand(this.world, cmd);
+        break;
+      case 'train':
+        applyTrainCommand(this.world, cmd);
+        break;
+      case 'cancelTrain':
+        applyCancelTrainCommand(this.world, cmd);
         break;
       default:
         throw new Error(`Unsupported command: ${(cmd as Command).kind}`);
@@ -115,22 +175,29 @@ export class Sim {
 
     if (units.length === 1) {
       const unit = units[0];
-      const isMoving =
-        unit.order &&
-        (unit.order.kind === 'move' || unit.order.kind === 'attackMove');
-      if (cmd.queued && isMoving) {
+      const isBusy =
+        unit.order !== undefined &&
+        unit.order.kind !== 'idle' &&
+        unit.order.kind !== 'stop' &&
+        unit.order.kind !== 'hold';
+      if (cmd.queued && isBusy) {
         unit.orders.push({
           kind: cmd.kind,
           x: cmd.x,
           z: cmd.z,
         });
       } else {
+        clearActiveWorkAndCartTransientState(unit);
         unit.order = { kind: cmd.kind, x: cmd.x, z: cmd.z };
         unit.orders = [];
         unit.orderGeneration++;
         unit.formationSlotX = undefined;
         unit.formationSlotZ = undefined;
         unit.path = undefined;
+        unit.stuckTicks = 0;
+        unit.stuckProgressX = unit.x;
+        unit.stuckProgressZ = unit.z;
+        unit.stuckLastCheckTick = this.world.tick;
         unit.pathTarget = undefined;
         this.world.pathQueue.cancel(unit.id);
         this.world.pathQueue.request(
@@ -161,21 +228,28 @@ export class Sim {
       const targetX = slot ? slot.x : cmd.x;
       const targetZ = slot ? slot.z : cmd.z;
 
-      const isMoving =
-        unit.order &&
-        (unit.order.kind === 'move' || unit.order.kind === 'attackMove');
-      if (cmd.queued && isMoving) {
+      const isBusy =
+        unit.order !== undefined &&
+        unit.order.kind !== 'idle' &&
+        unit.order.kind !== 'stop' &&
+        unit.order.kind !== 'hold';
+      if (cmd.queued && isBusy) {
         unit.orders.push({
           kind: cmd.kind,
           x: targetX,
           z: targetZ,
         });
       } else {
+        clearActiveWorkAndCartTransientState(unit);
         unit.order = { kind: cmd.kind, x: targetX, z: targetZ };
         unit.orders = [];
         unit.orderGeneration++;
         unit.formationSlotX = targetX;
         unit.formationSlotZ = targetZ;
+        unit.stuckTicks = 0;
+        unit.stuckProgressX = unit.x;
+        unit.stuckProgressZ = unit.z;
+        unit.stuckLastCheckTick = this.world.tick;
         unit.path = undefined;
         unit.pathTarget = undefined;
         this.world.pathQueue.cancel(unit.id);
@@ -196,12 +270,15 @@ export class Sim {
     for (let i = 0; i < cmd.ids.length; i++) {
       const ent = this.world.entities[cmd.ids[i]];
       if (ent && ent.kind === 'unit' && ent.player === cmd.player) {
-        const isMoving =
-          ent.order &&
-          (ent.order.kind === 'move' || ent.order.kind === 'attackMove');
-        if (cmd.queued && isMoving) {
+        const isBusy =
+          ent.order !== undefined &&
+          ent.order.kind !== 'idle' &&
+          ent.order.kind !== 'stop' &&
+          ent.order.kind !== 'hold';
+        if (cmd.queued && isBusy) {
           ent.orders.push({ kind: 'stop' });
         } else {
+          clearActiveWorkAndCartTransientState(ent);
           ent.order = { kind: 'stop' };
           ent.orders = [];
           ent.orderGeneration++;
@@ -220,12 +297,15 @@ export class Sim {
     for (let i = 0; i < cmd.ids.length; i++) {
       const ent = this.world.entities[cmd.ids[i]];
       if (ent && ent.kind === 'unit' && ent.player === cmd.player) {
-        const isMoving =
-          ent.order &&
-          (ent.order.kind === 'move' || ent.order.kind === 'attackMove');
-        if (cmd.queued && isMoving) {
+        const isBusy =
+          ent.order !== undefined &&
+          ent.order.kind !== 'idle' &&
+          ent.order.kind !== 'stop' &&
+          ent.order.kind !== 'hold';
+        if (cmd.queued && isBusy) {
           ent.orders.push({ kind: 'hold' });
         } else {
+          clearActiveWorkAndCartTransientState(ent);
           ent.order = { kind: 'hold' };
           ent.orders = [];
           ent.orderGeneration++;
@@ -244,6 +324,24 @@ export class Sim {
     for (let i = 0; i < cmd.ids.length; i++) {
       const ent = this.world.entities[cmd.ids[i]];
       if (ent && 'player' in ent && ent.player === cmd.player) {
+        if (ent.kind === 'building') {
+          if (!ent.built) {
+            cancelConstruction(this.world, ent);
+            continue;
+          } else {
+            if (ent.trainingQueue && ent.trainingQueue.length > 0) {
+              const pState = this.world.players[ent.player];
+              if (pState) {
+                for (let q = 0; q < ent.trainingQueue.length; q++) {
+                  const item = ent.trainingQueue[q];
+                  pState.food += item.food;
+                  pState.gold += item.gold;
+                }
+              }
+              ent.trainingQueue.length = 0;
+            }
+          }
+        }
         this.world.removeEntity(ent.id);
       }
     }

@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "id": "crown_archery_range",
+  "pages": [
+    {
+      "image": "crown_archery_range_0.png",
+      "mask": "crown_archery_range_0_mask.png",
+      "shadow": "crown_archery_range_0_shadow.png"
+    }
+  ],
+  "fps": 12,
+  "anims": {
+    "construct": {
+      "frames": 3,
+      "loop": false,
+      "dirs": 1
+    },
+    "damaged": {
+      "frames": 1,
+      "loop": false,
+      "dirs": 1
+    },
+    "idle": {
+      "frames": 1,
+      "loop": true,
+      "dirs": 1
+    },
+    "rubble": {
+      "frames": 1,
+      "loop": false,
+      "dirs": 1
+    }
+  },
+  "frames": {
+    "construct/0/0": {
+      "page": 0,
+      "x": 2,
+      "y": 812,
+      "w": 360,
+      "h": 245,
+      "ax": 144,
+      "ay": 172
+    },
+    "construct/0/1": {
+      "page": 0,
+      "x": 2,
+      "y": 2,
+      "w": 512,
+      "h": 403,
+      "ax": 256,
+      "ay": 238
+    },
+    "construct/0/2": {
+      "page": 0,
+      "x": 2,
+      "y": 407,
+      "w": 512,
+      "h": 403,
+      "ax": 256,
+      "ay": 238
+    },
+    "damaged/0/0": {
+      "page": 0,
+      "x": 516,
+      "y": 2,
+      "w": 512,
+      "h": 403,
+      "ax": 256,
+      "ay": 238
+    },
+    "idle/0/0": {
+      "page": 0,
+      "x": 516,
+      "y": 407,
+      "w": 512,
+      "h": 403,
+      "ax": 256,
+      "ay": 238
+    },
+    "rubble/0/0": {
+      "page": 0,
+      "x": 364,
+      "y": 812,
+      "w": 251,
+      "h": 135,
+      "ax": 152,
+      "ay": 71
+    }
+  }
+}

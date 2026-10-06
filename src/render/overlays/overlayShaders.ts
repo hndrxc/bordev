@@ -3,6 +3,7 @@ import { Effect } from '@babylonjs/core/Materials/effect';
 export const ELLIPSE_SHADER_KEY = 'bordevSelectionEllipse';
 export const HEALTH_SHADER_KEY = 'bordevHealthBar';
 export const MARQUEE_SHADER_KEY = 'bordevMarquee';
+export const PLACEMENT_GHOST_SHADER_KEY = 'bordevPlacementGhost';
 
 export function ensureOverlayShaders(): void {
   if (!Effect.ShadersStore[`${ELLIPSE_SHADER_KEY}VertexShader`]) {
@@ -161,6 +162,79 @@ void main() {
     } else {
         gl_FragColor = vec4(0.2, 0.92, 0.38, 0.12);
     }
+}
+`;
+  }
+  if (!Effect.ShadersStore[`${PLACEMENT_GHOST_SHADER_KEY}VertexShader`]) {
+    Effect.ShadersStore[`${PLACEMENT_GHOST_SHADER_KEY}VertexShader`] = `
+precision highp float;
+attribute vec3 position;
+attribute vec2 uv;
+attribute vec4 world0;
+attribute vec4 world1;
+attribute vec4 world2;
+attribute vec4 world3;
+attribute vec4 iColor;
+attribute vec4 iParams;
+
+uniform mat4 viewProjection;
+varying vec2 vUV;
+varying vec4 vColor;
+varying vec4 vParams;
+
+void main() {
+    mat4 finalWorld = mat4(world0, world1, world2, world3);
+    gl_Position = viewProjection * (finalWorld * vec4(position, 1.0));
+    vUV = uv;
+    vColor = iColor;
+    vParams = iParams;
+}
+`;
+  }
+
+  if (!Effect.ShadersStore[`${PLACEMENT_GHOST_SHADER_KEY}FragmentShader`]) {
+    Effect.ShadersStore[`${PLACEMENT_GHOST_SHADER_KEY}FragmentShader`] = `
+precision highp float;
+varying vec2 vUV;
+varying vec4 vColor;
+varying vec4 vParams;
+
+void main() {
+    vec2 size = vParams.xy;
+    vec2 tileCoord = vUV * size;
+
+    // 1. Distance to the outer perimeter (in tile units)
+    float distToLeft = tileCoord.x;
+    float distToRight = size.x - tileCoord.x;
+    float distToTop = tileCoord.y;
+    float distToBottom = size.y - tileCoord.y;
+    float borderDist = min(min(distToLeft, distToRight), min(distToTop, distToBottom));
+
+    // Outer outline: border width is ~0.06 tiles (~3-4 screen pixels at zoom 1)
+    // Anti-aliased edge between 0.04 and 0.07
+    float borderFactor = 1.0 - smoothstep(0.04, 0.07, borderDist);
+
+    // 2. Internal tile grid lines (for footprints with width > 1 or height > 1)
+    // Distance to nearest integer tile border
+    float gridDistX = abs(fract(tileCoord.x - 0.5) - 0.5);
+    float gridDistY = abs(fract(tileCoord.y - 0.5) - 0.5);
+    float gridDist = min(gridDistX, gridDistY);
+
+    // Grid line width ~0.03 tiles (~2 screen pixels)
+    // Only apply grid inside the footprint (where borderDist > 0.05)
+    float gridFactor = (1.0 - smoothstep(0.015, 0.035, gridDist)) * step(0.05, borderDist);
+
+    // 3. Composite fill and lines
+    // Base translucent ground footprint: alpha 0.28
+    // Outer outline: alpha 0.90
+    // Inner grid lines: alpha 0.60
+    float fillAlpha = 0.28;
+    float alpha = clamp(fillAlpha + borderFactor * 0.62 + gridFactor * 0.32, 0.0, 1.0) * vColor.a;
+
+    // Slight brightness boost on the border and grid lines to make the outline pop
+    vec3 rgb = vColor.rgb * (1.0 + borderFactor * 0.35 + gridFactor * 0.15);
+
+    gl_FragColor = vec4(rgb, alpha);
 }
 `;
   }

@@ -18,10 +18,14 @@ interface FakeEntity {
   hp?: number;
   maxHp?: number;
   player?: number;
+  built?: boolean;
+  buildProgress?: number;
+  trainingQueue?: readonly { unitType: string; progress: number }[];
 }
 
 function createFakeSession(options?: {
   food?: number;
+  lowFaith?: boolean;
   selectedIds?: number[];
   entities?: FakeEntity[];
   snapshotEntities?: {
@@ -42,12 +46,12 @@ function createFakeSession(options?: {
     gold: 50,
     faithUsed: 0,
     faithProduced: 0,
+    lowFaith: options?.lowFaith ?? false,
     pop: 4,
     popCap: 10,
     age: 1 as const,
     faction: 'crown',
   };
-
   const entitiesById: Record<number, FakeEntity> = {};
   if (options?.entities) {
     for (const e of options.entities) {
@@ -73,6 +77,7 @@ function createFakeSession(options?: {
       orders: {
         mode: null,
         submenu: null,
+        placementBuilding: null,
       },
       camera: {
         viewportInsets: options?.viewportInsets ?? { top: 0, bottom: 0 },
@@ -313,5 +318,84 @@ describe('HUD Store & Minimap', () => {
     expect(getEntityDisplayName({ kind: 'doodad', type: 'rock_large' })).toBe(
       'Rock',
     );
+  });
+
+  it('updates resources on live LowFaith state transitions', () => {
+    const session = createFakeSession({
+      lowFaith: false,
+    });
+    publishHud(session);
+    expect(useHudStore.getState().resources.lowFaith).toBe(false);
+
+    // Live state transition: LowFaith triggers
+    session.sim!.world.players[0].lowFaith = true;
+    publishHud(session);
+    expect(useHudStore.getState().resources.lowFaith).toBe(true);
+
+    // Live state transition: LowFaith clears
+    session.sim!.world.players[0].lowFaith = false;
+    publishHud(session);
+    expect(useHudStore.getState().resources.lowFaith).toBe(false);
+  });
+
+  it('tracks construction progress and training progress state transitions on selected entities', () => {
+    const site: FakeEntity = {
+      id: 10,
+      kind: 'building',
+      type: 'farm',
+      built: false,
+      buildProgress: 0.45,
+      hp: 180,
+      maxHp: 400,
+    };
+    const barracks: FakeEntity = {
+      id: 11,
+      kind: 'building',
+      type: 'barracks',
+      built: true,
+      buildProgress: 1.0,
+      hp: 800,
+      maxHp: 800,
+      trainingQueue: [{ unitType: 'spearman', progress: 10 }],
+    };
+    const session = createFakeSession({
+      selectedIds: [10, 11],
+      entities: [site, barracks],
+    });
+
+    publishHud(session);
+    let sel = useHudStore.getState().selection;
+    expect(sel).toHaveLength(2);
+
+    // Initial state: site under construction, barracks training
+    expect(sel[0].built).toBe(false);
+    expect(sel[0].buildProgress).toBe(0.45);
+    expect(sel[1].built).toBe(true);
+    expect(sel[1].trainingQueueCount).toBe(1);
+    expect(sel[1].trainingUnitType).toBe('spearman');
+    expect(sel[1].trainingProgress).toBeCloseTo(0.5, 2);
+
+    // User-visible state transition: site construction completes
+    site.built = true;
+    site.buildProgress = 1.0;
+    site.hp = 400;
+
+    // User-visible state transition: barracks training advances
+    (
+      barracks.trainingQueue as { unitType: string; progress: number }[]
+    )[0].progress = 15;
+
+    publishHud(session);
+    sel = useHudStore.getState().selection;
+    expect(sel[0].built).toBe(true);
+    expect(sel[0].buildProgress).toBe(1.0);
+    expect(sel[1].trainingProgress).toBeCloseTo(0.75, 2);
+
+    // User-visible state transition: training queue empties
+    barracks.trainingQueue = [];
+    publishHud(session);
+    sel = useHudStore.getState().selection;
+    expect(sel[1].trainingQueueCount).toBeUndefined();
+    expect(sel[1].trainingProgress).toBeUndefined();
   });
 });

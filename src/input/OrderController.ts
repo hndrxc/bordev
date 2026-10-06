@@ -2,7 +2,9 @@ import type { GameSession } from '../game/GameSession';
 import type { SelectionController } from './SelectionController';
 import type { BuildingEntity, UnitEntity } from '../sim/entity';
 import { screenToGround } from '../render/iso';
-import type { CardAction } from '../ui/commandSlots';
+import type { CardAction, CommandSlot } from '../ui/commandSlots';
+import type { PlacementController } from './PlacementController';
+import { getUnitData } from '../data/units';
 import {
   isCartType,
   isFarmType,
@@ -22,7 +24,11 @@ export class OrderController {
 
   public mode: 'move' | 'attackMove' | null = null;
   public submenu: 'economic' | 'military' | null = null;
+  public placement: PlacementController | null = null;
 
+  public get placementBuilding(): string | null {
+    return this.placement?.buildingType ?? null;
+  }
   private readonly markerPool: OrderMarker[] = [];
   private markerCount = 0;
   private readonly exposedMarkers: OrderMarker[] = [];
@@ -56,10 +62,62 @@ export class OrderController {
   public clearModeAndSubmenu(): void {
     this.mode = null;
     this.submenu = null;
+    if (this.placement?.active) {
+      this.placement.cancel();
+    }
+  }
+
+  public executeSlot(slot: CommandSlot): void {
+    if (this.isDisposed) return;
+    if (slot.disabled) {
+      if (slot.reason) {
+        this.session.showStatus(slot.reason);
+      }
+      return;
+    }
+    if (!slot.action) return;
+
+    if (slot.action === 'build' && slot.buildingType) {
+      if (this.placement) {
+        this.placement.start(slot.buildingType);
+      }
+      return;
+    }
+
+    if (slot.action === 'train' && slot.unitType) {
+      const sim = this.session.sim;
+      if (!sim) return;
+      const ids = this.selection.ids;
+      for (let i = 0; i < ids.length; i++) {
+        const ent = sim.world.getEntity(ids[i]);
+        if (
+          ent &&
+          ent.kind === 'building' &&
+          ent.player === 0 &&
+          ent.hp > 0 &&
+          ent.built &&
+          getUnitData(slot.unitType, ent.faction)?.from === ent.type
+        ) {
+          this.session.issue({
+            kind: 'train',
+            player: 0,
+            buildingId: ent.id,
+            unitType: slot.unitType,
+          });
+          break;
+        }
+      }
+      return;
+    }
+
+    this.execute(slot.action);
   }
 
   public execute(action: CardAction): void {
     if (this.isDisposed) return;
+    if (this.placement?.active) {
+      this.placement.cancel();
+    }
     const sim = this.session.sim;
     const ids = this.selection.ids;
 
@@ -278,16 +336,23 @@ export class OrderController {
 
     // 3. Gold mine with cart precedence -> pin mine (Economy M5)
     if (targetEntity && targetEntity.kind === 'mine') {
-      const hasCart = ownUnits.some((e) => isCartType(e.type));
-      if (hasCart) {
-        this.session.showStatus('Mining economy requires Milestone 5');
+      const ownCarts = ownUnits.filter((e) => isCartType(e.type));
+      if (ownCarts.length > 0) {
+        this.session.issue({
+          kind: 'pinMine',
+          player: 0,
+          ids: ownCarts.map((e) => e.id),
+          targetId: targetEntity.id,
+          queued,
+        });
+        this.addMarker(targetEntity.x, targetEntity.z, 'move');
         return;
       }
     }
 
     const hasWorker = ownUnits.some((e) => isWorkerType(e.type));
 
-    // 4. Unworked farm with worker precedence -> farm (Economy M5)
+    // 4. Built farm with worker precedence -> farm (Economy M5)
     if (
       targetEntity &&
       targetEntity.kind === 'building' &&
@@ -295,24 +360,62 @@ export class OrderController {
       targetEntity.built
     ) {
       if (hasWorker) {
-        this.session.showStatus('Farming economy requires Milestone 5');
+        const ownWorkers = ownUnits.filter((e) => isWorkerType(e.type));
+        this.session.issue({
+          kind: 'farm',
+          player: 0,
+          ids: ownWorkers.map((e) => e.id),
+          targetId: targetEntity.id,
+          queued,
+        });
+        this.addMarker(targetEntity.x, targetEntity.z, 'move');
         return;
       }
     }
 
-    // 5. Own unfinished/damaged building with worker precedence -> build/repair (M5)
+    // 5. Own unfinished building with worker precedence -> build (M5)
     if (
       targetEntity &&
       targetEntity.kind === 'building' &&
       targetEntity.player === 0 &&
-      (!targetEntity.built || targetEntity.hp < targetEntity.maxHp)
+      !targetEntity.built
     ) {
       if (hasWorker) {
-        if (!targetEntity.built) {
-          this.session.showStatus('Building construction requires Milestone 5');
-        } else {
-          this.session.showStatus('Building repair requires Milestone 5');
-        }
+        const ownWorkers = ownUnits.filter((e) => isWorkerType(e.type));
+        this.session.issue({
+          kind: 'build',
+          player: 0,
+          ids: ownWorkers.map((e) => e.id),
+          buildingType: targetEntity.type,
+          x: targetEntity.x,
+          z: targetEntity.z,
+          orientation: targetEntity.orientation,
+          targetId: targetEntity.id,
+          queued,
+        });
+        this.addMarker(targetEntity.x, targetEntity.z, 'move');
+        return;
+      }
+    }
+
+    // 6. Own damaged building with worker precedence -> repair (M5)
+    if (
+      targetEntity &&
+      targetEntity.kind === 'building' &&
+      targetEntity.player === 0 &&
+      targetEntity.built &&
+      targetEntity.hp < targetEntity.maxHp
+    ) {
+      if (hasWorker) {
+        const ownWorkers = ownUnits.filter((e) => isWorkerType(e.type));
+        this.session.issue({
+          kind: 'repair',
+          player: 0,
+          ids: ownWorkers.map((e) => e.id),
+          targetId: targetEntity.id,
+          queued,
+        });
+        this.addMarker(targetEntity.x, targetEntity.z, 'move');
         return;
       }
     }

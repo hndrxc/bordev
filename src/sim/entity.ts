@@ -8,13 +8,40 @@ export type UnitOrderKind =
   | 'attackMove'
   | 'attack'
   | 'hold'
-  | 'stop';
+  | 'stop'
+  | 'build'
+  | 'repair'
+  | 'farm'
+  | 'pinMine';
 
 export interface UnitOrder {
   kind: UnitOrderKind;
   x?: number;
   z?: number;
   targetId?: number;
+  targetRef?: BuildingEntity | MineEntity;
+}
+
+export type CartPhase =
+  'toMine' | 'waiting' | 'loading' | 'toDropOff' | 'unloading' | 'idle';
+
+export interface CartState {
+  phase: CartPhase;
+  carriedGold: number;
+  ticks: number;
+  mineId?: number;
+  mineRef?: MineEntity;
+  dropOffId?: number;
+  dropOffRef?: BuildingEntity;
+  pinnedMineId?: number;
+  pinnedMineRef?: MineEntity;
+}
+
+export interface TrainingItem {
+  unitType: string;
+  progress: number;
+  food: number;
+  gold: number;
 }
 
 export interface UnitEntity {
@@ -58,6 +85,9 @@ export interface UnitEntity {
   loaded?: boolean;
   formationSlotX?: number;
   formationSlotZ?: number;
+  workAnimation?: 'work' | 'load';
+  workStartedTick?: number;
+  cart?: CartState;
 }
 
 export interface BuildingEntity {
@@ -86,6 +116,8 @@ export interface BuildingEntity {
   isDropOff?: boolean;
   isGate?: boolean;
   rallyPoint?: { x: number; z: number };
+  orientation?: 'horizontal' | 'vertical';
+  trainingQueue: TrainingItem[];
 }
 
 export interface MineEntity {
@@ -126,8 +158,4 @@ export interface ProjectileEntity {
 }
 
 export type Entity =
-  | UnitEntity
-  | BuildingEntity
-  | MineEntity
-  | DoodadEntity
-  | ProjectileEntity;
+  UnitEntity | BuildingEntity | MineEntity | DoodadEntity | ProjectileEntity;

@@ -31,6 +31,27 @@ def main():
     clips = module.anims()
     if set(clips) != set(entry["anims"]):
         raise ValueError(f"Animation implementation does not match manifest: {args.asset}")
+    for name, expected in entry["anims"].items():
+        clip = clips[name]
+        descriptor = getattr(clip, "descriptor", None)
+        if descriptor is not None:
+            actual_frames = descriptor["frames"]
+            actual_loop = descriptor["loop"]
+        elif hasattr(clip, "frames") and hasattr(clip, "loop"):
+            actual_frames = clip.frames
+            actual_loop = clip.loop
+        elif name == "idle":
+            actual_frames = 1
+            actual_loop = True
+        else:
+            raise ValueError(f"Missing animation descriptor for {args.asset}.{name}")
+
+        if expected["frames"] != actual_frames or expected["loop"] != actual_loop:
+            raise ValueError(
+                f"Animation descriptor mismatch for {args.asset}.{name}: "
+                f"manifest has frames={expected['frames']} loop={expected['loop']}, "
+                f"asset has frames={actual_frames} loop={actual_loop}"
+            )
     objects = [model, *model.children_recursive]
     initial_rotation = model.rotation_euler.z
     renders = 0
@@ -41,7 +62,6 @@ def main():
             if args.only_dir is not None and direction != args.only_dir:
                 continue
             for frame in range(animation["frames"]):
-                bpy.context.scene.frame_set(frame)
                 clips[name](frame)
                 model.rotation_euler.z = initial_rotation - direction * math.pi / 4
                 bpy.context.view_layer.update()

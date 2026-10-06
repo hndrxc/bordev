@@ -1,4 +1,76 @@
 import { isTownCenterType, isWorkerType } from '../data/roles';
+import { getBuildingData } from '../data/buildings';
+import type { Faction } from '../data/types';
+import type { World } from '../sim/world';
+
+export interface CommandSlotContext {
+  age: number;
+  faction: Faction;
+  townCenterCount: number;
+}
+
+export function getCommandSlotContext(
+  world: World | undefined,
+): CommandSlotContext | null {
+  const player = world?.players[0];
+  if (!world || !player) return null;
+  let townCenterCount = 0;
+  for (const entity of world.entities) {
+    if (
+      entity?.kind === 'building' &&
+      entity.player === 0 &&
+      entity.hp > 0 &&
+      isTownCenterType(entity.type)
+    )
+      townCenterCount++;
+  }
+  return { age: player.age, faction: player.faction, townCenterCount };
+}
+
+const clansTypes: Readonly<Record<string, string>> = {
+  cottage: 'longhouse',
+  farm: 'field',
+  storehouse: 'hoard',
+  chapel: 'war_shrine',
+  keep: 'great_hall',
+  barracks: 'mead_hall',
+  archery_range: 'hunters_lodge',
+  stable: 'horse_pen',
+  siege_workshop: 'ram_shed',
+  stone_tower: 'watchtower',
+  stone_wall: 'palisade',
+  stone_gate: 'palisade_gate',
+};
+function gateBuildingSlots(
+  slots: CommandSlot[],
+  context: CommandSlotContext | null,
+): CommandSlot[] {
+  for (const slot of slots) {
+    if (!slot.buildingType) continue;
+    if (context?.faction === 'clans')
+      slot.buildingType = clansTypes[slot.buildingType] ?? slot.buildingType;
+    const data = getBuildingData(slot.buildingType);
+    const requiredAge =
+      data && data.isTownCenter && context && context.townCenterCount > 0
+        ? (data.additionalAge ?? data.age)
+        : data?.age;
+    slot.action = 'build';
+    slot.disabled =
+      !context ||
+      !data ||
+      data.faction !== context.faction ||
+      requiredAge === undefined ||
+      context.age < requiredAge;
+    slot.reason = !context
+      ? 'Simulation not ready'
+      : slot.disabled
+        ? `Requires Age ${requiredAge}`
+        : undefined;
+    slot.tooltip = `${data?.name ?? slot.label} [${slot.key}]${slot.reason ? ` (${slot.reason})` : ''}`;
+    if (data) slot.label = data.name.replace(' (Town Center)', '');
+  }
+  return slots;
+}
 
 export type CardAction =
   | 'move'
@@ -8,7 +80,9 @@ export type CardAction =
   | 'economic'
   | 'military'
   | 'delete'
-  | 'back';
+  | 'back'
+  | 'build'
+  | 'train';
 
 export interface CommandSlot {
   key: string;
@@ -18,6 +92,8 @@ export interface CommandSlot {
   reason?: string;
   id?: string;
   tooltip?: string;
+  buildingType?: string;
+  unitType?: string;
 }
 
 export const CARD_KEYS = [
@@ -41,6 +117,7 @@ export const CARD_KEYS = [
 export function getCommandSlots(
   selection: readonly { kind: string; type: string; player?: number }[],
   submenu: 'economic' | 'military' | null,
+  context: CommandSlotContext | null,
 ): readonly CommandSlot[] {
   // Only player 0 entities can be commanded
   const own = selection.filter((e) => e.player === 0);
@@ -68,49 +145,46 @@ export function getCommandSlots(
       key: 'Q',
       id: 'cottage',
       label: 'Cottage',
-      action: null,
-      disabled: true,
-      reason: 'Requires Milestone 5 (Economy & Construction)',
-      tooltip:
-        'Build Cottage [Q] (Requires Milestone 5: Economy & Construction)',
+      action: 'build',
+      buildingType: 'cottage',
+      disabled: false,
+      tooltip: 'Build Cottage [Q]',
     };
     slots[1] = {
       key: 'W',
       id: 'farm',
       label: 'Farm',
-      action: null,
-      disabled: true,
-      reason: 'Requires Milestone 5 (Economy & Construction)',
-      tooltip: 'Build Farm [W] (Requires Milestone 5: Economy & Construction)',
+      action: 'build',
+      buildingType: 'farm',
+      disabled: false,
+      tooltip: 'Build Farm [W]',
     };
     slots[2] = {
       key: 'E',
       id: 'storehouse',
       label: 'Storehouse',
-      action: null,
-      disabled: true,
-      reason: 'Requires Milestone 5 (Economy & Construction)',
-      tooltip:
-        'Build Storehouse [E] (Requires Milestone 5: Economy & Construction)',
+      action: 'build',
+      buildingType: 'storehouse',
+      disabled: false,
+      tooltip: 'Build Storehouse [E]',
     };
     slots[3] = {
       key: 'R',
       id: 'chapel',
       label: 'Chapel',
-      action: null,
-      disabled: true,
-      reason: 'Requires Milestone 5 (Economy & Construction)',
-      tooltip:
-        'Build Chapel [R] (Requires Milestone 5: Economy & Construction)',
+      action: 'build',
+      buildingType: 'chapel',
+      disabled: false,
+      tooltip: 'Build Chapel [R]',
     };
     slots[4] = {
       key: 'T',
       id: 'keep',
       label: 'Keep',
-      action: null,
-      disabled: true,
-      reason: 'Requires Milestone 5 (Economy & Construction)',
-      tooltip: 'Build Keep [T] (Requires Milestone 5: Economy & Construction)',
+      action: 'build',
+      buildingType: 'keep',
+      disabled: false,
+      tooltip: 'Build Keep [T]',
     };
     slots[14] = {
       key: 'B',
@@ -120,7 +194,7 @@ export function getCommandSlots(
       disabled: false,
       tooltip: 'Back [Esc / B]',
     };
-    return slots;
+    return gateBuildingSlots(slots, context);
   }
 
   // 2. Military Submenu (only available if own worker selected)
@@ -129,71 +203,58 @@ export function getCommandSlots(
       key: 'Q',
       id: 'barracks',
       label: 'Barracks',
-      action: null,
-      disabled: true,
-      reason: 'Requires Milestone 5 (Economy & Construction)',
-      tooltip:
-        'Build Barracks [Q] (Requires Milestone 5: Economy & Construction)',
+      action: 'build',
+      buildingType: 'barracks',
+      disabled: false,
+      tooltip: 'Build Barracks [Q]',
     };
     slots[1] = {
       key: 'W',
       id: 'archery-range',
       label: 'Archery',
-      action: null,
-      disabled: true,
-      reason: 'Requires Milestone 5 (Economy & Construction)',
-      tooltip:
-        'Build Archery Range [W] (Requires Milestone 5: Economy & Construction)',
+      action: 'build',
+      buildingType: 'archery_range',
+      disabled: false,
     };
     slots[2] = {
       key: 'E',
       id: 'stable',
       label: 'Stable',
-      action: null,
-      disabled: true,
-      reason: 'Requires Milestone 5 (Economy & Construction)',
-      tooltip:
-        'Build Stable [E] (Requires Milestone 5: Economy & Construction)',
+      action: 'build',
+      buildingType: 'stable',
+      disabled: false,
     };
     slots[3] = {
       key: 'R',
       id: 'siege-workshop',
       label: 'Siege',
-      action: null,
-      disabled: true,
-      reason: 'Requires Milestone 5 (Economy & Construction)',
-      tooltip:
-        'Build Siege Workshop [R] (Requires Milestone 5: Economy & Construction)',
+      action: 'build',
+      buildingType: 'siege_workshop',
+      disabled: false,
     };
     slots[4] = {
       key: 'T',
       id: 'stone-tower',
       label: 'Tower',
-      action: null,
-      disabled: true,
-      reason: 'Requires Milestone 5 (Economy & Construction)',
-      tooltip:
-        'Build Stone Tower [T] (Requires Milestone 5: Economy & Construction)',
+      action: 'build',
+      buildingType: 'stone_tower',
+      disabled: false,
     };
     slots[5] = {
       key: 'A',
       id: 'stone-wall',
       label: 'Wall',
-      action: null,
-      disabled: true,
-      reason: 'Requires Milestone 5 (Economy & Construction)',
-      tooltip:
-        'Build Stone Wall [A] (Requires Milestone 5: Economy & Construction)',
+      action: 'build',
+      buildingType: 'stone_wall',
+      disabled: false,
     };
     slots[6] = {
       key: 'S',
       id: 'stone-gate',
       label: 'Gate',
-      action: null,
-      disabled: true,
-      reason: 'Requires Milestone 5 (Economy & Construction)',
-      tooltip:
-        'Build Stone Gate [S] (Requires Milestone 5: Economy & Construction)',
+      action: 'build',
+      buildingType: 'stone_gate',
+      disabled: false,
     };
     slots[14] = {
       key: 'B',
@@ -203,7 +264,7 @@ export function getCommandSlots(
       disabled: false,
       tooltip: 'Back [Esc / B]',
     };
-    return slots;
+    return gateBuildingSlots(slots, context);
   }
 
   // 3. Unit Commands
@@ -278,19 +339,19 @@ export function getCommandSlots(
         key: 'Q',
         id: 'train-peasant',
         label: 'Train Peasant',
-        action: null,
-        disabled: true,
-        reason: 'Requires Milestone 6 (Production)',
-        tooltip: 'Train Peasant [Q] (Requires Milestone 6: Production)',
+        action: 'train',
+        unitType: 'peasant',
+        disabled: false,
+        tooltip: 'Train Peasant [Q]',
       };
       slots[1] = {
         key: 'W',
         id: 'train-ox-cart',
         label: 'Train Ox Cart',
-        action: null,
-        disabled: true,
-        reason: 'Requires Milestone 6 (Production)',
-        tooltip: 'Train Ox Cart [W] (Requires Milestone 6: Production)',
+        action: 'train',
+        unitType: 'ox_cart',
+        disabled: false,
+        tooltip: 'Train Ox Cart [W]',
       };
     }
 

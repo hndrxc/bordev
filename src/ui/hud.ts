@@ -14,6 +14,7 @@ export interface HudResources {
   popCap: number;
   age: 1 | 2 | 3;
   faction: string;
+  lowFaith: boolean;
 }
 
 export interface SelectedEntityData {
@@ -34,6 +35,9 @@ export interface SelectedEntityData {
   goldRemaining?: number;
   built?: boolean;
   buildProgress?: number;
+  trainingProgress?: number;
+  trainingQueueCount?: number;
+  trainingUnitType?: string;
 }
 
 export interface MinimapUnit {
@@ -60,6 +64,7 @@ export interface MinimapData {
 export interface HudOrders {
   mode: 'move' | 'attackMove' | null;
   submenu: 'economic' | 'military' | null;
+  placementBuilding: string | null;
 }
 
 export interface HudState {
@@ -101,11 +106,13 @@ const INITIAL_RESOURCES: HudResources = {
   popCap: 0,
   age: 1,
   faction: 'crown',
+  lowFaith: false,
 };
 
 const INITIAL_ORDERS: HudOrders = {
   mode: null,
   submenu: null,
+  placementBuilding: null,
 };
 
 const INITIAL_MINIMAP: MinimapData = {
@@ -166,7 +173,8 @@ function areResourcesEqual(a: HudResources, b: HudResources): boolean {
     a.pop === b.pop &&
     a.popCap === b.popCap &&
     a.age === b.age &&
-    a.faction === b.faction
+    a.faction === b.faction &&
+    a.lowFaith === b.lowFaith
   );
 }
 
@@ -196,7 +204,10 @@ function areSelectionsEqual(
       eA.speed !== eB.speed ||
       eA.goldRemaining !== eB.goldRemaining ||
       eA.built !== eB.built ||
-      eA.buildProgress !== eB.buildProgress
+      eA.buildProgress !== eB.buildProgress ||
+      eA.trainingProgress !== eB.trainingProgress ||
+      eA.trainingQueueCount !== eB.trainingQueueCount ||
+      eA.trainingUnitType !== eB.trainingUnitType
     ) {
       return false;
     }
@@ -255,6 +266,7 @@ export function publishHud(session: GameSession): void {
         popCap: p0.popCap,
         age: p0.age,
         faction: p0.faction,
+        lowFaith: p0.lowFaith,
       }
     : INITIAL_RESOURCES;
 
@@ -266,6 +278,33 @@ export function publishHud(session: GameSession): void {
   for (const id of selectedIds) {
     const raw = world?.getEntity?.(id);
     if (!raw || raw.kind === 'projectile') continue;
+
+    let trainingProgress: number | undefined;
+    let trainingQueueCount: number | undefined;
+    let trainingUnitType: string | undefined;
+
+    if (
+      raw.kind === 'building' &&
+      'trainingQueue' in raw &&
+      Array.isArray(raw.trainingQueue) &&
+      raw.trainingQueue.length > 0
+    ) {
+      const queue = raw.trainingQueue as readonly {
+        unitType: string;
+        progress: number;
+      }[];
+      trainingQueueCount = queue.length;
+      const current = queue[0];
+      if (current && typeof current === 'object') {
+        trainingUnitType = current.unitType;
+        const unitData = getUnitData(current.unitType);
+        const totalTime = unitData?.trainTime ?? 20;
+        trainingProgress =
+          totalTime > 0
+            ? Math.min(1, Math.max(0, current.progress / totalTime))
+            : 1;
+      }
+    }
 
     const entData: SelectedEntityData = {
       id: raw.id,
@@ -285,6 +324,9 @@ export function publishHud(session: GameSession): void {
       goldRemaining: 'goldRemaining' in raw ? raw.goldRemaining : undefined,
       built: 'built' in raw ? raw.built : undefined,
       buildProgress: 'buildProgress' in raw ? raw.buildProgress : undefined,
+      trainingProgress,
+      trainingQueueCount,
+      trainingUnitType,
     };
     selectedList.push(entData);
   }
@@ -292,8 +334,8 @@ export function publishHud(session: GameSession): void {
   const nextOrders: HudOrders = {
     mode: ordersMode,
     submenu: ordersSubmenu,
+    placementBuilding: session.input?.orders?.placementBuilding ?? null,
   };
-
   const map = session.map;
   const mapSize = map?.size ?? 128;
   const tiles = map?.tiles ?? null;
@@ -355,7 +397,8 @@ export function publishHud(session: GameSession): void {
 
     const finalOrders =
       prev.orders.mode === nextOrders.mode &&
-      prev.orders.submenu === nextOrders.submenu
+      prev.orders.submenu === nextOrders.submenu &&
+      prev.orders.placementBuilding === nextOrders.placementBuilding
         ? prev.orders
         : nextOrders;
 

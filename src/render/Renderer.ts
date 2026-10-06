@@ -57,6 +57,14 @@ export interface PortraitMetadata {
   h: number;
 }
 
+export interface PlacementPreviewItem {
+  readonly x: number;
+  readonly z: number;
+  readonly width: number;
+  readonly height: number;
+  readonly valid: boolean;
+}
+
 export const REQUIRED_ATLASES = [
   'crown_keep',
   'crown_peasant',
@@ -64,6 +72,10 @@ export const REQUIRED_ATLASES = [
   'crown_ox_cart',
   'crown_cottage',
   'crown_farm',
+  'crown_storehouse',
+  'crown_chapel',
+  'crown_barracks',
+  'crown_archery_range',
   'gold_mine',
   'tree_1',
   'tree_2',
@@ -86,6 +98,20 @@ const TYPE_TO_ASSET: Record<string, string> = {
   keep: 'crown_keep',
   cottage: 'crown_cottage',
   farm: 'crown_farm',
+  storehouse: 'crown_storehouse',
+  chapel: 'crown_chapel',
+  barracks: 'crown_barracks',
+  archery_range: 'crown_archery_range',
+  crown_spearman: 'crown_spearman',
+  crown_ox_cart: 'crown_ox_cart',
+  crown_peasant: 'crown_peasant',
+  crown_keep: 'crown_keep',
+  crown_cottage: 'crown_cottage',
+  crown_farm: 'crown_farm',
+  crown_storehouse: 'crown_storehouse',
+  crown_chapel: 'crown_chapel',
+  crown_barracks: 'crown_barracks',
+  crown_archery_range: 'crown_archery_range',
   gold_mine: 'gold_mine',
 };
 
@@ -113,6 +139,12 @@ interface StaticEntityDescriptor {
 interface UnitFrameEntry {
   batch: SpriteBatch;
   frame: AtlasFrame;
+}
+
+interface UnitAnimationData {
+  table: UnitFrameEntry[][];
+  fps: number;
+  isLoop: boolean;
 }
 
 export interface CachedEntityRect extends EntityScreenRect {
@@ -197,9 +229,19 @@ export class Renderer {
     string,
     StaticEntityDescriptor
   >();
+  private readonly buildingConstructDescriptors = new Map<
+    string,
+    StaticEntityDescriptor[]
+  >();
+  private readonly unitAssetAnims = new Map<
+    string,
+    Record<string, UnitAnimationData>
+  >();
+  private readonly unitAnimTables = new Map<string, UnitFrameEntry[][]>();
+  private readonly unitAnimFps = new Map<string, number>();
+  private readonly unitAnimLoop = new Map<string, boolean>();
   private readonly unitWalkTables = new Map<string, UnitFrameEntry[][]>();
   private readonly unitFps = new Map<string, number>();
-
   // Single reusable scratch object to avoid per-entity allocations in the hot render loop
   private readonly scratchSprite: RenderSprite = {
     asset: '',
@@ -216,8 +258,12 @@ export class Renderer {
   private interactionSelectedIds: readonly number[] = [];
   private interactionMarkers: readonly OrderMarker[] = [];
   private interactionBox: SelectionBox | null = null;
+  private interactionPlacement: readonly PlacementPreviewItem[] | undefined =
+    undefined;
   private readonly assetSpriteTopPx = new Map<string, number>();
-  private readonly overlayInput: OverlayFrameInput;
+  private readonly overlayInput: OverlayFrameInput & {
+    placement?: readonly PlacementPreviewItem[];
+  };
   private currentSnapshot: SessionSnapshot | undefined = undefined;
 
   // Cached screen rectangles for entity picking, allocation-free after capacity grows
@@ -285,6 +331,7 @@ export class Renderer {
       box: null,
       timeSeconds: 0,
       getSpriteTopPx: this.getSpriteTopPx,
+      placement: undefined,
     };
     if (typeof window !== 'undefined') {
       window.addEventListener('resize', this.onResize);
@@ -299,10 +346,12 @@ export class Renderer {
     selectedIds: readonly number[],
     markers: readonly OrderMarker[],
     box: SelectionBox | null,
+    placement?: readonly PlacementPreviewItem[],
   ): void {
     this.interactionSelectedIds = selectedIds;
     this.interactionMarkers = markers;
     this.interactionBox = box;
+    this.interactionPlacement = placement;
   }
 
   toggleDebugGrid(): boolean {
@@ -383,9 +432,14 @@ export class Renderer {
 
     // 5. Preload required atlases in parallel with terrain readiness
     const loadAtlasPromises = REQUIRED_ATLASES.map(async (id) => {
-      const loaded = await this.atlasCache!.load(id);
-      this.loadedAtlases.set(id, loaded);
-      return loaded;
+      try {
+        const loaded = await this.atlasCache!.load(id);
+        this.loadedAtlases.set(id, loaded);
+        return loaded;
+      } catch (err) {
+        console.warn(`Failed to load atlas ${id}:`, err);
+        return null;
+      }
     });
 
     await Promise.all([this.terrain.ready, ...loadAtlasPromises]);
@@ -411,6 +465,10 @@ export class Renderer {
         assetId === 'crown_keep' ||
         assetId === 'crown_cottage' ||
         assetId === 'crown_farm' ||
+        assetId === 'crown_storehouse' ||
+        assetId === 'crown_chapel' ||
+        assetId === 'crown_barracks' ||
+        assetId === 'crown_archery_range' ||
         assetId === 'gold_mine';
       for (const [key, frame] of Object.entries(loaded.atlas.frames)) {
         if (isBuilding && !key.startsWith('idle/')) {
@@ -435,6 +493,10 @@ export class Renderer {
       'crown_keep',
       'crown_cottage',
       'crown_farm',
+      'crown_storehouse',
+      'crown_chapel',
+      'crown_barracks',
+      'crown_archery_range',
       'gold_mine',
       'tree_1',
       'tree_2',
@@ -459,41 +521,72 @@ export class Renderer {
       });
     }
 
-    this.unitWalkTables.clear();
-    this.unitFps.clear();
-    const unitAssets = [
-      'crown_peasant',
-      'crown_spearman',
-      'crown_ox_cart',
-    ] as const;
-    for (let u = 0; u < unitAssets.length; u++) {
-      const asset = unitAssets[u];
-      const loaded = this.loadedAtlases.get(asset);
-      if (!loaded) continue;
-      const animMeta = loaded.atlas.anims['walk'] ?? loaded.atlas.anims['idle'];
-      if (!animMeta) continue;
-      const dirs = animMeta.dirs;
-      const frames = animMeta.frames;
-      const fps = loaded.atlas.fps || 12;
-      this.unitFps.set(asset, fps);
-
-      const table: UnitFrameEntry[][] = [];
-      for (let dir = 0; dir < 8; dir++) {
-        const row: UnitFrameEntry[] = [];
-        const dirKey = dirs === 8 ? dir : 0;
-        for (let f = 0; f < frames; f++) {
-          const frameKey = `walk/${dirKey}/${f}`;
-          const frame = loaded.atlas.frames[frameKey];
-          if (frame) {
-            const batch = this.batches.get(`${asset}_${frame.page}`);
-            if (batch) {
-              row.push({ batch, frame });
-            }
+    this.buildingConstructDescriptors.clear();
+    for (const [assetId, loaded] of this.loadedAtlases.entries()) {
+      const constructMeta = loaded.atlas.anims['construct'];
+      if (!constructMeta) continue;
+      const constructFrames: StaticEntityDescriptor[] = [];
+      for (let f = 0; f < constructMeta.frames; f++) {
+        const frameKey = `construct/0/${f}`;
+        const frame = loaded.atlas.frames[frameKey];
+        if (frame) {
+          const batch = this.batches.get(`${assetId}_${frame.page}`);
+          if (batch) {
+            constructFrames.push({ batch, frame });
           }
         }
-        table.push(row);
       }
-      this.unitWalkTables.set(asset, table);
+      if (constructFrames.length > 0) {
+        this.buildingConstructDescriptors.set(assetId, constructFrames);
+      }
+    }
+
+    this.unitAssetAnims.clear();
+    this.unitAnimTables.clear();
+    this.unitAnimFps.clear();
+    this.unitAnimLoop.clear();
+    this.unitWalkTables.clear();
+    this.unitFps.clear();
+
+    for (const [assetId, loaded] of this.loadedAtlases.entries()) {
+      const defaultFps = loaded.atlas.fps || 12;
+      const anims: Record<string, UnitAnimationData> = {};
+      for (const [animName, animMeta] of Object.entries(loaded.atlas.anims)) {
+        const dirs = animMeta.dirs;
+        const frames = animMeta.frames;
+        const fps = defaultFps;
+        const isLoop = animMeta.loop ?? true;
+        const key = `${assetId}_${animName}`;
+
+        this.unitAnimFps.set(key, fps);
+        this.unitAnimLoop.set(key, isLoop);
+
+        const table: UnitFrameEntry[][] = [];
+        for (let dir = 0; dir < 8; dir++) {
+          const row: UnitFrameEntry[] = [];
+          const dirKey = dirs === 8 ? dir : 0;
+          for (let f = 0; f < frames; f++) {
+            const frameKey = `${animName}/${dirKey}/${f}`;
+            const frame = loaded.atlas.frames[frameKey];
+            if (frame) {
+              const batch = this.batches.get(`${assetId}_${frame.page}`);
+              if (batch) {
+                row.push({ batch, frame });
+              }
+            }
+          }
+          table.push(row);
+        }
+        this.unitAnimTables.set(key, table);
+
+        anims[animName] = { table, fps, isLoop };
+
+        if (animName === 'walk') {
+          this.unitWalkTables.set(assetId, table);
+          this.unitFps.set(assetId, fps);
+        }
+      }
+      this.unitAssetAnims.set(assetId, anims);
     }
 
     this.isReady = true;
@@ -598,17 +691,77 @@ export class Renderer {
           shadowCount++;
 
           const asset = getAssetForEntity(ent);
-          const table = this.unitWalkTables.get(asset);
+          const raw = ent.raw;
+          const hasPath =
+            'path' in raw && Array.isArray(raw.path) && raw.path.length > 0;
+
+          // Select animation based on actual sim state
+          const isMoving =
+            Math.abs(ent.x - ent.previousX) > 0.0001 ||
+            Math.abs(ent.z - ent.previousZ) > 0.0001 ||
+            (ent.simX !== undefined &&
+              (Math.abs(ent.simX - ent.previousX) > 0.0001 ||
+                Math.abs(ent.simZ - ent.previousZ) > 0.0001)) ||
+            hasPath;
+
+          const isCartLoading =
+            ent.workAnimation === 'load' || ent.cart?.phase === 'loading';
+
+          const isWorking = ent.workAnimation === 'work';
+
+          const animName = isMoving
+            ? 'walk'
+            : isCartLoading
+              ? 'load'
+              : isWorking
+                ? 'work'
+                : 'idle';
+
+          const assetAnims = this.unitAssetAnims.get(asset);
+          const animData =
+            assetAnims?.[animName] ?? assetAnims?.idle ?? assetAnims?.walk;
+          const table = animData?.table ?? this.unitWalkTables.get(asset);
+
           if (table) {
             const dir = (((ent.facing ?? 0) % 8) + 8) % 8;
-            const dirRow = table[dir];
+            const dirRow = table[dir] ?? table[0];
             if (dirRow && dirRow.length > 0) {
-              const fps = this.unitFps.get(asset) ?? 12;
-              const frameIdx = Math.floor(t * fps) % dirRow.length;
+              const fps = animData?.fps ?? this.unitFps.get(asset) ?? 12;
+              const isLoop = animData?.isLoop ?? animName !== 'load';
+
+              let frameIdx: number;
+              const startTick = ent.workStartedTick;
+              const cartTicks = ent.cart?.ticks;
+
+              if (!isLoop) {
+                // Nonloop clamping: elapsed advances frames, then holds on last frame
+                let elapsed = t;
+                if (startTick !== undefined) {
+                  elapsed = Math.max(
+                    0,
+                    (snapshot.tick - startTick + snapshot.alpha) * 0.05,
+                  );
+                } else if (typeof cartTicks === 'number') {
+                  elapsed = Math.max(0, (cartTicks + snapshot.alpha) * 0.05);
+                }
+                frameIdx = Math.min(
+                  dirRow.length - 1,
+                  Math.max(0, Math.floor(elapsed * fps)),
+                );
+              } else {
+                let elapsed = t;
+                if (startTick !== undefined) {
+                  elapsed = Math.max(
+                    0,
+                    (snapshot.tick - startTick + snapshot.alpha) * 0.05,
+                  );
+                }
+                frameIdx = Math.floor(elapsed * fps) % dirRow.length;
+              }
               const entry = dirRow[frameIdx];
               if (entry) {
                 this.scratchSprite.asset = asset;
-                this.scratchSprite.animation = 'walk';
+                this.scratchSprite.animation = animName;
                 this.scratchSprite.facing = dir;
                 this.scratchSprite.x = anchorX;
                 this.scratchSprite.z = anchorZ;
@@ -637,13 +790,45 @@ export class Renderer {
           }
         } else if (kind === 'building') {
           const asset = getAssetForEntity(ent);
-          const desc = this.staticDescriptors.get(asset);
+          let desc: StaticEntityDescriptor | undefined;
+          let animName = 'idle';
+
+          // Construction progress 0 / .5 / 1
+          if (
+            ent.built === false ||
+            (ent.buildProgress !== undefined &&
+              ent.buildProgress < 1 &&
+              !ent.built)
+          ) {
+            const constructFrames =
+              this.buildingConstructDescriptors.get(asset);
+            if (constructFrames && constructFrames.length > 0) {
+              const progress = Math.max(0, Math.min(1, ent.buildProgress ?? 0));
+              const frameIdx =
+                progress < 0.5
+                  ? 0
+                  : progress < 1.0
+                    ? 1
+                    : Math.min(2, constructFrames.length - 1);
+              desc =
+                constructFrames[Math.min(frameIdx, constructFrames.length - 1)];
+              animName = 'construct';
+            }
+          }
+
+          if (!desc) {
+            desc = this.staticDescriptors.get(asset);
+            if (!desc && asset.startsWith('crown_')) {
+              desc = this.staticDescriptors.get('crown_keep');
+            }
+          }
+
           if (desc) {
             const posX = ent.x + (ent.width ?? 1) * 0.5;
             const posZ = ent.z + (ent.height ?? 1) * 0.5;
 
             this.scratchSprite.asset = asset;
-            this.scratchSprite.animation = 'idle';
+            this.scratchSprite.animation = animName;
             this.scratchSprite.facing = 0;
             this.scratchSprite.x = posX;
             this.scratchSprite.z = posZ;
@@ -735,6 +920,7 @@ export class Renderer {
       this.overlayInput.markers = this.interactionMarkers;
       this.overlayInput.box = this.interactionBox;
       this.overlayInput.timeSeconds = t;
+      this.overlayInput.placement = this.interactionPlacement;
       this.overlays.update(this.overlayInput);
     }
 
@@ -790,6 +976,11 @@ export class Renderer {
     this.batches.clear();
     this.loadedAtlases.clear();
     this.staticDescriptors.clear();
+    this.buildingConstructDescriptors.clear();
+    this.unitAnimTables.clear();
+    this.unitAssetAnims.clear();
+    this.unitAnimFps.clear();
+    this.unitAnimLoop.clear();
     this.unitWalkTables.clear();
     this.unitFps.clear();
     this.assetSpriteTopPx.clear();

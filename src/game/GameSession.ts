@@ -5,7 +5,14 @@ import { parseMap } from '../sim/map';
 import { cloneCommand } from '../sim/commands';
 import type { GameMap } from '../sim/map';
 import type { Command } from '../sim/commands';
-import type { Entity } from '../sim/entity';
+import type {
+  Entity,
+  CartState,
+  TrainingItem,
+  UnitOrder,
+  UnitEntity,
+  BuildingEntity,
+} from '../sim/entity';
 import { InputController } from '../input/InputController';
 import { publishHud, resetHud, setHudStatus } from '../ui/hud';
 
@@ -36,6 +43,12 @@ export interface InterpolatedEntity {
   buildProgress?: number;
   goldRemaining?: number;
   rallyPoint?: { x: number; z: number };
+  workAnimation?: 'work' | 'load';
+  workStartedTick?: number;
+  cart?: CartState;
+  orientation?: 'horizontal' | 'vertical';
+  trainingQueue?: readonly TrainingItem[];
+  order?: UnitOrder;
   raw: Entity;
 }
 
@@ -462,6 +475,16 @@ export class GameSession {
       slot.buildProgress = 'buildProgress' in e ? e.buildProgress : undefined;
       slot.goldRemaining = 'goldRemaining' in e ? e.goldRemaining : undefined;
       slot.rallyPoint = 'rallyPoint' in e ? e.rallyPoint : undefined;
+      slot.workAnimation =
+        'workAnimation' in e ? (e as UnitEntity).workAnimation : undefined;
+      slot.workStartedTick =
+        'workStartedTick' in e ? (e as UnitEntity).workStartedTick : undefined;
+      slot.cart = 'cart' in e ? (e as UnitEntity).cart : undefined;
+      slot.orientation =
+        'orientation' in e ? (e as BuildingEntity).orientation : undefined;
+      slot.trainingQueue =
+        'trainingQueue' in e ? (e as BuildingEntity).trainingQueue : undefined;
+      slot.order = 'order' in e ? (e as UnitEntity).order : undefined;
       count++;
     }
 
@@ -543,6 +566,7 @@ export class GameSession {
         issue: (cmd: Command) => this.issue(cmd),
         stats: () => this.getStats(),
         cheats: this._cheats,
+        showStatus: (message: string) => this.showStatus(message),
       };
     }
   }
@@ -574,6 +598,7 @@ export interface BordevDebugApi {
   issue: (cmd: Command) => void;
   stats: () => SessionStats;
   cheats: GameCheats;
+  showStatus?: (message: string) => void;
 }
 
 declare global {
