@@ -4,6 +4,8 @@ import { screenToGround } from '../render/iso';
 import type { EntityKind } from '../sim/entity';
 import { getUnitData } from '../data/units';
 import { getBuildingData } from '../data/buildings';
+import type { World } from '../sim/world';
+import { getResearchDefinition } from '../sim/systems/research';
 
 export interface HudResources {
   food: number;
@@ -38,6 +40,10 @@ export interface SelectedEntityData {
   trainingProgress?: number;
   trainingQueueCount?: number;
   trainingUnitType?: string;
+  researchUpgradeId?: string;
+  researchName?: string;
+  /** Fraction 0..1 of the active research completed. */
+  researchProgress?: number;
 }
 
 export interface MinimapUnit {
@@ -67,10 +73,19 @@ export interface HudOrders {
   placementBuilding: string | null;
 }
 
+/** Player-wide facts the command card needs to re-render research/unit unlock state. */
+export interface HudProgression {
+  /** Completed upgrade ids, sorted. */
+  upgrades: readonly string[];
+  /** Distinct completed living building types the player owns, sorted. */
+  buildingTypes: readonly string[];
+}
+
 export interface HudState {
   resources: HudResources;
   selection: readonly SelectedEntityData[];
   orders: HudOrders;
+  progression: HudProgression;
   status: string;
   statusTimestamp: number;
   minimap: MinimapData;
@@ -122,10 +137,13 @@ const INITIAL_MINIMAP: MinimapData = {
   viewportCorners: null,
 };
 
+const INITIAL_PROGRESSION: HudProgression = { upgrades: [], buildingTypes: [] };
+
 export const useHudStore = create<HudState>((set) => ({
   resources: INITIAL_RESOURCES,
   selection: [],
   orders: INITIAL_ORDERS,
+  progression: INITIAL_PROGRESSION,
   status: '',
   statusTimestamp: 0,
   minimap: INITIAL_MINIMAP,
@@ -134,6 +152,7 @@ export const useHudStore = create<HudState>((set) => ({
       resources: INITIAL_RESOURCES,
       selection: [],
       orders: INITIAL_ORDERS,
+      progression: INITIAL_PROGRESSION,
       status: '',
       statusTimestamp: 0,
       minimap: INITIAL_MINIMAP,
@@ -207,7 +226,10 @@ function areSelectionsEqual(
       eA.buildProgress !== eB.buildProgress ||
       eA.trainingProgress !== eB.trainingProgress ||
       eA.trainingQueueCount !== eB.trainingQueueCount ||
-      eA.trainingUnitType !== eB.trainingUnitType
+      eA.trainingUnitType !== eB.trainingUnitType ||
+      eA.researchUpgradeId !== eB.researchUpgradeId ||
+      eA.researchName !== eB.researchName ||
+      eA.researchProgress !== eB.researchProgress
     ) {
       return false;
     }
@@ -247,6 +269,45 @@ function areViewportCornersEqual(
     if (a[i].x !== b[i].x || a[i].z !== b[i].z) return false;
   }
   return true;
+}
+
+function areStringListsEqual(
+  a: readonly string[],
+  b: readonly string[],
+): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+function areProgressionsEqual(a: HudProgression, b: HudProgression): boolean {
+  return (
+    areStringListsEqual(a.upgrades, b.upgrades) &&
+    areStringListsEqual(a.buildingTypes, b.buildingTypes)
+  );
+}
+
+function collectProgression(world: World | undefined): HudProgression {
+  const player = world?.players?.[0];
+  if (!world || !player) return INITIAL_PROGRESSION;
+  const upgrades = player.upgrades ? [...player.upgrades].sort() : [];
+  const buildingTypes: string[] = [];
+  for (const ent of world.entities ?? []) {
+    if (
+      ent?.kind === 'building' &&
+      ent.player === 0 &&
+      ent.built &&
+      ent.hp > 0 &&
+      !buildingTypes.includes(ent.type)
+    ) {
+      buildingTypes.push(ent.type);
+    }
+  }
+  buildingTypes.sort();
+  return { upgrades, buildingTypes };
 }
 
 export function publishHud(session: GameSession): void {
@@ -306,6 +367,20 @@ export function publishHud(session: GameSession): void {
       }
     }
 
+    let researchUpgradeId: string | undefined;
+    let researchName: string | undefined;
+    let researchProgress: number | undefined;
+    if (raw.kind === 'building' && raw.research) {
+      researchUpgradeId = raw.research.upgradeId;
+      researchName =
+        getResearchDefinition(raw.faction, researchUpgradeId)?.name ??
+        researchUpgradeId;
+      researchProgress =
+        raw.research.time > 0
+          ? Math.min(1, Math.max(0, raw.research.progress / raw.research.time))
+          : 1;
+    }
+
     const entData: SelectedEntityData = {
       id: raw.id,
       kind: raw.kind,
@@ -327,6 +402,9 @@ export function publishHud(session: GameSession): void {
       trainingProgress,
       trainingQueueCount,
       trainingUnitType,
+      researchUpgradeId,
+      researchName,
+      researchProgress,
     };
     selectedList.push(entData);
   }
@@ -336,6 +414,7 @@ export function publishHud(session: GameSession): void {
     submenu: ordersSubmenu,
     placementBuilding: session.input?.orders?.placementBuilding ?? null,
   };
+  const nextProgression = collectProgression(world);
   const map = session.map;
   const mapSize = map?.size ?? 128;
   const tiles = map?.tiles ?? null;
@@ -402,6 +481,12 @@ export function publishHud(session: GameSession): void {
         ? prev.orders
         : nextOrders;
 
+    const finalProgression = areProgressionsEqual(
+      prev.progression,
+      nextProgression,
+    )
+      ? prev.progression
+      : nextProgression;
     const finalUnits = areMinimapUnitsEqual(prev.minimap.units, minimapUnits)
       ? prev.minimap.units
       : minimapUnits;
@@ -430,6 +515,7 @@ export function publishHud(session: GameSession): void {
       finalSelection === prev.selection &&
       finalOrders === prev.orders &&
       finalMinimap === prev.minimap &&
+      finalProgression === prev.progression &&
       nextStatus === prev.status &&
       nextStatusTimestamp === prev.statusTimestamp
     ) {
@@ -440,6 +526,7 @@ export function publishHud(session: GameSession): void {
       resources: finalResources,
       selection: finalSelection,
       orders: finalOrders,
+      progression: finalProgression,
       status: nextStatus,
       statusTimestamp: nextStatusTimestamp,
       minimap: finalMinimap,

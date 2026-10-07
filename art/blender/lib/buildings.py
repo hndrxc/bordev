@@ -2,7 +2,7 @@
 import math
 import random
 from lib import anim
-from lib.model import root, box, ico, cylinder, cone, beam, roof, flag, mesh
+from lib.model import root, box, ico, cylinder, cone, beam, roof, flag, mesh, wheel
 
 
 def states(name, size):
@@ -438,3 +438,209 @@ def archery_range():
     box("Charred straw bale", (0.10, 0.95, 0.12), (0.35, 0.30, 0.16), "EARTH", parts["rubble"])
     box("Fallen canopy timber", (0.05, -0.75, 0.10), (0.80, 0.07, 0.06), "WOOD", parts["rubble"])
     return parts
+
+
+def _ridge_roof_x(name, center, length, depth, height, mat, parent=None):
+    """Gabled roof whose ridge runs along X; `roof` runs its ridge along Y."""
+    x, y, z = center
+    w, d = length / 2, depth / 2
+    return mesh(name, [(x-w,y-d,z), (x+w,y-d,z), (x+w,y+d,z), (x-w,y+d,z),
+                       (x-w,y,z+height), (x+w,y,z+height)],
+                [(0,3,2,1), (0,1,5,4), (2,3,4,5), (0,4,3), (1,2,5)], mat, parent)
+
+
+def _horse_head(parent, x, coat, blaze=False):
+    """Horse leaning out of a stall door toward -Y (the camera-facing side)."""
+    beam("Horse neck", (x, 0.15, 0.60), (x, 0.01, 0.82), 0.065, coat, parent)
+    ico("Horse head", (x, -0.05, 0.85), (0.07, 0.12, 0.09), coat, parent)
+    box("Horse muzzle", (x, -0.14, 0.79), (0.07, 0.10, 0.07), "LEATHER" if coat == "OX" else coat, parent)
+    box("Horse mane", (x, 0.07, 0.89), (0.028, 0.11, 0.15), "LEATHER", parent)
+    for side in (-1, 1):
+        cone("Horse ear", (x+side*0.045, 0.01, 0.97), 0.022, 0.08, coat, parent, vertices=4)
+        box("Horse eye", (x+side*0.07, -0.05, 0.87), (0.012, 0.03, 0.02), "DARK", parent)
+    if blaze:
+        box("Horse white blaze", (x, -0.115, 0.855), (0.025, 0.14, 0.035), "IVORY", parent)
+
+
+def stable():
+    parts = states("Crown stable", 3)
+    base, walls, top = parts["levels"]
+    # Camera-facing sides are +X and -Y: stalls, paddock gate and farrier yard are placed there.
+    box("Stable yard foundation", (0, 0, 0.06), (2.85, 2.85, 0.12), "EARTH", base, 0.04)
+    box("Stable hall plinth", (-0.10, 0.75, 0.12), (2.62, 1.36, 0.14), "STONE_DARK", base)
+    box("Stall door flagstone apron", (-0.10, 0.02, 0.135), (2.40, 0.20, 0.03), "STONE", base)
+    box("Paddock straw bedding", (-0.35, -0.72, 0.135), (1.40, 0.90, 0.02), "WHEAT", base)
+    box("Farrier hearth footing", (1.20, -0.75, 0.14), (0.42, 0.62, 0.04), "STONE_DARK", base)
+    box("Stable stone course", (-0.10, 0.75, 0.34), (2.52, 1.26, 0.28), "STONE", walls, 0.03)
+    box("Stable plaster hall", (-0.10, 0.75, 0.82), (2.46, 1.20, 0.68), "PLASTER", walls, 0.02)
+    for x in (-1.30, -0.70, -0.10, 0.50, 1.10):
+        box("Stable timber post", (x, 0.145, 0.82), (0.09, 0.05, 0.70), "WOOD", walls)
+    box("Stable wall plate", (-0.10, 0.145, 1.14), (2.52, 0.05, 0.07), "WOOD", walls)
+    box("Stable sill beam", (-0.10, 0.145, 0.49), (2.52, 0.05, 0.05), "WOOD", walls)
+    for x in (-1.0, -0.4, 0.2, 0.8):
+        box("Stall door opening", (x, 0.14, 0.66), (0.40, 0.03, 0.62), "DARK", walls)
+        box("Stall dutch door lower leaf", (x, 0.125, 0.50), (0.40, 0.035, 0.30), "WOOD_LIGHT", walls)
+        box("Stall door iron strap", (x, 0.105, 0.50), (0.38, 0.015, 0.035), "IRON", walls)
+        box("Stall door stone lintel", (x, 0.115, 1.00), (0.50, 0.05, 0.06), "STONE_LIGHT", walls)
+    for x in (-0.4, 0.8):
+        box("Stall team blanket", (x, 0.085, 0.50), (0.28, 0.02, 0.20), "TEAM", walls)
+        box("Blanket gold trim", (x, 0.073, 0.58), (0.28, 0.012, 0.025), "GOLD", walls)
+    for x in (-1.0, 0.2):
+        box("Horseshoe left arm", (x-0.05, 0.095, 1.075), (0.018, 0.012, 0.06), "IRON", walls)
+        box("Horseshoe right arm", (x+0.05, 0.095, 1.075), (0.018, 0.012, 0.06), "IRON", walls)
+        box("Horseshoe crown", (x, 0.095, 1.045), (0.12, 0.012, 0.018), "IRON", walls)
+    for x in (-1.30, -0.78, -0.26, 0.78, 1.30):
+        box("Paddock gate post", (x, -1.32, 0.40), (0.08, 0.08, 0.55), "WOOD", walls)
+    for x0, x1 in ((-1.30, -0.78), (-0.78, -0.26), (0.78, 1.30)):
+        for z in (0.34, 0.55):
+            beam("Paddock front rail", (x0, -1.32, z), (x1, -1.32, z), 0.022, "WOOD_LIGHT", walls)
+    for z in (0.34, 0.55):
+        beam("Paddock open gate leaf", (-0.26, -1.32, z), (-0.20, -0.82, z), 0.022, "WOOD_LIGHT", walls)
+    beam("Paddock gate diagonal brace", (-0.26, -1.32, 0.34), (-0.20, -0.82, 0.55), 0.018, "WOOD", walls)
+    for y in (-0.92, -0.52, -0.12):
+        box("Paddock side post", (-1.32, y, 0.40), (0.08, 0.08, 0.55), "WOOD", walls)
+    for z in (0.34, 0.55):
+        beam("Paddock side rail", (-1.32, -1.32, z), (-1.32, -0.12, z), 0.022, "WOOD_LIGHT", walls)
+    box("Paddock gate banner east", (0.78, -1.355, 0.78), (0.18, 0.02, 0.34), "TEAM", walls)
+    box("Paddock gate banner west", (-0.26, -1.355, 0.78), (0.18, 0.02, 0.34), "TEAM", walls)
+    box("Stable water trough", (0.55, -0.55, 0.22), (0.58, 0.22, 0.18), "WOOD", walls)
+    box("Trough water", (0.55, -0.55, 0.30), (0.50, 0.16, 0.03), "DARK", walls)
+    box("Hay manger", (-0.95, -0.95, 0.25), (0.62, 0.26, 0.20), "WOOD", walls)
+    box("Manger hay", (-0.95, -0.95, 0.40), (0.54, 0.20, 0.14), "THATCH", walls)
+    for x in (-0.35, 0.15):
+        beam("Saddle rack leg", (x, -0.30, 0.13), (x, -0.30, 0.50), 0.022, "WOOD", walls)
+    beam("Saddle rack bar", (-0.35, -0.30, 0.50), (0.15, -0.30, 0.50), 0.026, "WOOD_LIGHT", walls)
+    box("Saddle rack blanket", (-0.10, -0.30, 0.47), (0.34, 0.22, 0.06), "TEAM", walls)
+    box("Riding saddle", (-0.10, -0.30, 0.53), (0.22, 0.15, 0.07), "LEATHER", walls)
+    box("Saddle pommel", (-0.10, -0.38, 0.58), (0.06, 0.03, 0.06), "LEATHER", walls)
+    box("Farrier stump", (1.10, -0.55, 0.26), (0.20, 0.20, 0.24), "WOOD", walls)
+    box("Farrier anvil", (1.10, -0.55, 0.42), (0.26, 0.12, 0.10), "IRON", walls)
+    box("Farrier forge hearth", (1.22, -0.95, 0.30), (0.34, 0.30, 0.26), "STONE", walls)
+    box("Forge coals", (1.22, -0.95, 0.44), (0.24, 0.20, 0.04), "GOLD", walls)
+    box("Forge hood chimney", (1.30, -1.07, 0.60), (0.16, 0.12, 0.52), "STONE_DARK", walls)
+    for i, y in enumerate((0.38, 0.72)):
+        box(f"Hay bale lower {i}", (1.30, y, 0.26), (0.20, 0.30, 0.26), "THATCH", walls)
+        box(f"Hay bale upper {i}", (1.30, y, 0.50), (0.18, 0.28, 0.20), "THATCH", walls)
+    _ridge_roof_x("Stable long slate roof", (-0.10, 0.75, 1.16), 2.70, 1.40, 0.62, "ROOF", top)
+    beam("Stable ridge cap", (-1.45, 0.75, 1.78), (1.25, 0.75, 1.78), 0.05, "WOOD_LIGHT", top)
+    box("Hayloft dormer walls", (-0.10, 0.24, 1.40), (0.62, 0.40, 0.50), "PLASTER", top)
+    box("Hayloft door opening", (-0.10, 0.03, 1.38), (0.30, 0.03, 0.30), "DARK", top)
+    box("Hayloft door header", (-0.10, 0.025, 1.56), (0.40, 0.04, 0.05), "WOOD", top)
+    box("Hayloft door sill", (-0.10, 0.025, 1.21), (0.40, 0.04, 0.04), "WOOD", top)
+    roof("Hayloft hood roof", (-0.10, 0.24, 1.65), 0.74, 0.50, 0.30, "ROOF", top)
+    beam("Hayloft hoist beam", (-0.10, 0.04, 1.62), (-0.10, -0.40, 1.62), 0.028, "WOOD", top)
+    beam("Hayloft hoist brace", (-0.10, 0.04, 1.30), (-0.10, -0.30, 1.62), 0.020, "WOOD", top)
+    beam("Hayloft hoist rope", (-0.10, -0.40, 1.62), (-0.10, -0.40, 1.14), 0.009, "IVORY", top)
+    box("Hoisted hay bale", (-0.10, -0.40, 1.04), (0.28, 0.24, 0.20), "THATCH", top)
+    flag(top, (1.00, 0.75, 1.78), 0.34)
+    box("Stable gable team banner", (1.16, 0.75, 0.92), (0.025, 0.36, 0.50), "TEAM", top)
+    for x, coat, blaze in ((-1.0, "OX", True), (0.2, "WOOD_LIGHT", False)):
+        _horse_head(top, x, coat, blaze)
+    cracks(parts["damage"], 0.07, 0.95, 1.8)
+    beam("Splintered paddock rail", (0.82, -1.32, 0.45), (1.12, -1.20, 0.18), 0.022, "WOOD_LIGHT", parts["damage"])
+    broken_post = box("Snapped paddock post", (0.78, -1.32, 0.30), (0.08, 0.08, 0.32), "WOOD", parts["damage"])
+    broken_post.rotation_euler.y = 0.35
+    ico("Scorched stable stones", (0.30, -0.12, 0.14), (0.22, 0.16, 0.10), "STONE_DARK", parts["damage"])
+    for i, x in enumerate((-0.55, 0.45)):
+        slate = box(f"Slipped roof slate {i}", (x, -0.02, 0.17), (0.30, 0.20, 0.04), "ROOF", parts["damage"])
+        slate.rotation_euler.z = 0.4 + i * 0.5
+    box("Scattered stable straw", (-0.30, -0.45, 0.15), (0.50, 0.30, 0.03), "THATCH", parts["damage"])
+    box("Shattered stall door plank", (-0.40, 0.00, 0.12), (0.34, 0.07, 0.03), "WOOD_LIGHT", parts["rubble"])
+    box("Fallen hoist beam", (0.20, -0.50, 0.12), (0.62, 0.07, 0.06), "WOOD", parts["rubble"])
+    box("Torn stable blanket", (-0.70, -0.60, 0.13), (0.30, 0.22, 0.02), "TEAM", parts["rubble"])
+    box("Collapsed hay bale", (0.90, 0.40, 0.18), (0.30, 0.30, 0.20), "THATCH", parts["rubble"])
+    beam("Bent horseshoe", (-0.15, -0.25, 0.12), (0.10, -0.15, 0.12), 0.02, "IRON", parts["rubble"])
+    return parts
+
+
+def siege_workshop():
+    parts = states("Crown siege workshop", 3)
+    base, walls, top = parts["levels"]
+    box("Siege yard foundation", (0, 0, 0.07), (2.85, 2.85, 0.14), "STONE_DARK", base, 0.04)
+    box("Workshop hall plinth", (-0.68, 0.58, 0.16), (1.52, 1.78, 0.12), "STONE_LIGHT", base)
+    box("Timber yard cobbles", (0.80, -0.65, 0.15), (1.30, 1.30, 0.03), "STONE", base)
+    box("Workshop masonry course", (-0.68, 0.58, 0.32), (1.42, 1.68, 0.36), "STONE", walls, 0.03)
+    box("Workshop plaster and timber upper", (-0.68, 0.58, 0.89), (1.36, 1.62, 0.78), "PLASTER", walls, 0.02)
+    for x in (-1.32, 0.0):
+        for y in (-0.22, 1.38):
+            box("Workshop corner quoin", (x, y, 0.72), (0.15, 0.15, 1.14), "STONE_LIGHT", walls)
+    for x in (-1.02, -0.68, -0.34):
+        box("Workshop front timber post", (x, -0.265, 0.89), (0.08, 0.05, 0.76), "WOOD", walls)
+    for y in (0.20, 0.58, 0.96):
+        box("Workshop bay timber post", (0.04, y, 0.89), (0.05, 0.08, 0.76), "WOOD", walls)
+    box("Workshop front wall plate", (-0.68, -0.265, 1.24), (1.36, 0.05, 0.07), "WOOD", walls)
+    box("Workshop bay wall plate", (0.04, 0.58, 1.24), (0.05, 1.62, 0.07), "WOOD", walls)
+    window(walls, -1.17, -0.265, 0.90)
+    window(walls, -0.14, -0.265, 0.90)
+    box("Workshop great bay opening", (0.045, 0.58, 0.62), (0.04, 0.82, 0.80), "DARK", walls)
+    box("Great bay stone lintel", (0.04, 0.58, 1.06), (0.09, 1.00, 0.09), "STONE_LIGHT", walls)
+    for i, y in enumerate((0.15, 1.01)):
+        box(f"Great bay door leaf {i}", (0.24, y, 0.62), (0.40, 0.04, 0.80), "WOOD_LIGHT", walls)
+        for z in (0.34, 0.86):
+            box(f"Great door iron strap {i}", (0.24, y, z), (0.42, 0.055, 0.045), "IRON", walls)
+    box("Great door team panel south", (0.24, 0.125, 0.64), (0.30, 0.02, 0.30), "TEAM", walls)
+    box("Great door team panel north", (0.24, 0.985, 0.64), (0.30, 0.02, 0.30), "TEAM", walls)
+    mounted = wheel(walls, (0.11, 1.19, 0.80), 0.20)
+    mounted.name = "Wall mounted spare wheel"
+    box("Workshop front team banner", (-0.68, -0.29, 0.88), (0.38, 0.025, 0.80), "TEAM", walls)
+    box("Banner gold bar", (-0.68, -0.305, 1.10), (0.30, 0.015, 0.05), "GOLD", walls)
+    # Camera-facing yard: skids and A-frames show the siege engine half-assembled at 50 %.
+    for y in (-0.95, -0.35):
+        beam("Trebuchet skid", (0.15, y, 0.22), (1.35, y, 0.22), 0.045, "WOOD", walls)
+        beam("Trebuchet A-frame fore leg", (0.60, y, 0.22), (0.75, y, 1.15), 0.035, "WOOD_LIGHT", walls)
+        beam("Trebuchet A-frame aft leg", (0.90, y, 0.22), (0.75, y, 1.15), 0.035, "WOOD_LIGHT", walls)
+        beam("Trebuchet A-frame tie", (0.65, y, 0.52), (0.85, y, 0.52), 0.022, "WOOD", walls)
+    for x in (0.30, 1.20):
+        beam("Trebuchet cross sill", (x, -0.95, 0.22), (x, -0.35, 0.22), 0.04, "WOOD", walls)
+    for i, x in enumerate((0.60, 0.90)):
+        beam(f"Trebuchet diagonal brace {i}", (x, -0.95, 0.22), (x, -0.35, 0.60), 0.02, "WOOD", walls)
+    beam("Trebuchet iron axle", (0.75, -1.05, 1.15), (0.75, -0.25, 1.15), 0.035, "IRON", top)
+    beam("Trebuchet throwing arm", (0.52, -0.65, 0.88), (1.22, -0.65, 1.70), 0.040, "WOOD_LIGHT", top)
+    box("Arm iron collar", (0.75, -0.65, 1.15), (0.10, 0.12, 0.10), "IRON", top)
+    box("Counterweight stone block", (0.52, -0.65, 0.66), (0.30, 0.46, 0.34), "STONE", top)
+    box("Counterweight iron band south", (0.52, -0.885, 0.66), (0.32, 0.02, 0.36), "IRON", top)
+    box("Counterweight team panel south", (0.52, -0.90, 0.66), (0.22, 0.02, 0.20), "TEAM", top)
+    box("Counterweight team panel east", (0.685, -0.65, 0.66), (0.02, 0.36, 0.20), "TEAM", top)
+    beam("Counterweight hanger left", (0.52, -0.65, 0.88), (0.44, -0.65, 0.83), 0.014, "IRON", top)
+    beam("Counterweight hanger right", (0.52, -0.65, 0.88), (0.60, -0.65, 0.83), 0.014, "IRON", top)
+    beam("Trebuchet sling rope", (1.22, -0.65, 1.70), (1.30, -0.65, 1.30), 0.009, "IVORY", top)
+    box("Trebuchet sling pouch", (1.30, -0.65, 1.27), (0.15, 0.12, 0.07), "LEATHER", top)
+    ico("Trebuchet stone shot", (1.30, -0.65, 1.34), (0.07, 0.07, 0.07), "STONE_LIGHT", top)
+    _siege_logs(walls)
+    for x, y in ((-0.55, -1.20), (-0.20, -1.20)):
+        box("Spare counterweight block", (x, y, 0.28), (0.30, 0.30, 0.26), "STONE_LIGHT", walls)
+        box("Spare block iron band", (x, y-0.155, 0.28), (0.32, 0.02, 0.05), "IRON", walls)
+    box("Stacked counterweight block", (-0.38, -1.20, 0.52), (0.30, 0.30, 0.24), "STONE", walls)
+    box("Siege anvil stump", (-1.05, -0.85, 0.26), (0.22, 0.22, 0.24), "WOOD", walls)
+    box("Siege anvil", (-1.05, -0.85, 0.42), (0.14, 0.28, 0.10), "IRON", walls)
+    spare = wheel(walls, (-0.45, -0.70, 0.32), 0.24)
+    spare.name = "Spare siege wheel"
+    roof("Siege workshop slate roof", (-0.68, 0.58, 1.28), 1.62, 1.90, 0.70, "ROOF", top)
+    beam("Workshop ridge cap", (-0.68, -0.37, 1.98), (-0.68, 1.53, 1.98), 0.055, "WOOD_LIGHT", top)
+    box("Forge stone chimney", (-1.15, 1.12, 1.68), (0.36, 0.38, 0.92), "STONE", top)
+    box("Forge chimney cap", (-1.15, 1.12, 2.16), (0.44, 0.46, 0.08), "STONE_DARK", top)
+    beam("Gable hoist beam", (-0.68, -0.34, 1.72), (-0.68, -0.80, 1.72), 0.030, "WOOD", top)
+    beam("Gable hoist brace", (-0.68, -0.34, 1.36), (-0.68, -0.70, 1.72), 0.020, "WOOD", top)
+    beam("Gable hoist rope", (-0.68, -0.80, 1.72), (-0.68, -0.80, 1.20), 0.009, "IVORY", top)
+    box("Hoisted stone shot crate", (-0.68, -0.80, 1.10), (0.24, 0.24, 0.22), "WOOD_LIGHT", top)
+    flag(top, (-0.68, 0.58, 1.98), 0.44)
+    cracks(parts["damage"], -0.30, 1.00, 1.3)
+    beam("Snapped trebuchet arm", (0.95, -0.60, 0.20), (1.38, -0.18, 0.34), 0.040, "WOOD_LIGHT", parts["damage"])
+    ico("Scorched siege stones", (0.10, -0.55, 0.17), (0.20, 0.16, 0.12), "STONE_DARK", parts["damage"])
+    slipped = box("Slipped counterweight corner", (0.58, -1.05, 0.22), (0.20, 0.22, 0.14), "STONE", parts["damage"])
+    slipped.rotation_euler.z = 0.5
+    box("Burnt workshop timber", (-0.40, -0.55, 0.16), (0.70, 0.08, 0.07), "DARK", parts["damage"])
+    beam("Broken trebuchet arm", (0.60, -0.70, 0.18), (1.20, -0.40, 0.24), 0.040, "WOOD_LIGHT", parts["rubble"])
+    box("Split counterweight rubble", (0.40, -1.05, 0.18), (0.34, 0.28, 0.14), "STONE", parts["rubble"])
+    box("Torn siege team banner", (-0.50, -0.55, 0.13), (0.34, 0.24, 0.02), "TEAM", parts["rubble"])
+    box("Scattered siege logs", (0.90, 0.80, 0.16), (0.70, 0.20, 0.10), "WOOD", parts["rubble"])
+    box("Collapsed hall masonry", (-0.95, 0.35, 0.18), (0.50, 0.40, 0.18), "STONE", parts["rubble"])
+    return parts
+
+
+def _siege_logs(parent):
+    rows = ((0.22, (0.62, 0.82, 1.02, 1.22)), (0.38, (0.72, 0.92, 1.12)), (0.54, (0.82, 1.02)))
+    for z, xs in rows:
+        for x in xs:
+            log = cylinder("Seasoned siege timber", (x, 0.92, z), 0.09, 0.88, "WOOD_LIGHT", parent, 8)
+            log.rotation_euler.x = math.pi / 2

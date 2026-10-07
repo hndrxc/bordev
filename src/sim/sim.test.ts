@@ -402,20 +402,6 @@ describe('Sim Core Consumer Regressions', () => {
     expect(keep.rallyPoint).toEqual({ x: 12, z: 14 });
   });
 
-  it('rejects unsupported command kinds with not-implemented error', () => {
-    const map = makeTestMap(32);
-    const sim = new Sim(map, 1);
-
-    expect(() => {
-      sim.issue({
-        kind: 'research',
-        player: 0,
-        buildingId: 1,
-        upgradeId: 'iron_working',
-      });
-    }).toThrow(/not implemented yet/);
-  });
-
   it('every M5 command works next-tick through Sim.issue', () => {
     const map = makeTestMap(32);
     const sim = new Sim(map, 1);
@@ -592,6 +578,44 @@ describe('Sim Core Consumer Regressions', () => {
     });
     sim.step();
     expect(sim.world.entities[cottageId]).toBeUndefined();
+  });
+
+  it('research and cancelResearch apply next tick through Sim.issue and refund fully', () => {
+    const sim = new Sim(makeTestMap(48), 1);
+    const world = sim.world;
+    const player = world.players[0];
+    const keep = world.entities.find(
+      (entity): entity is BuildingEntity =>
+        entity?.kind === 'building' &&
+        entity.player === 0 &&
+        entity.type === 'keep',
+    )!;
+    world.spawnBuilding(0, 'barracks', 16, 16, true);
+    world.spawnBuilding(0, 'storehouse', 22, 16, true);
+    player.food = 1000;
+    player.gold = 1000;
+
+    sim.issue({
+      kind: 'research',
+      player: 0,
+      buildingId: keep.id,
+      upgradeId: 'age_2',
+    });
+    // Commands apply at the start of the next tick, never at issue time.
+    expect(keep.research).toBeUndefined();
+    expect(player.food).toBe(1000);
+    sim.step();
+    expect(keep.research?.upgradeId).toBe('age_2');
+    expect(player.food).toBe(500);
+    expect(player.gold).toBe(800);
+
+    sim.issue({ kind: 'cancelResearch', player: 0, buildingId: keep.id });
+    expect(keep.research).toBeDefined();
+    sim.step();
+    expect(keep.research).toBeUndefined();
+    expect(player.food).toBe(1000);
+    expect(player.gold).toBe(1000);
+    expect(player.age).toBe(1);
   });
 
   it('work approach locomotion does not advance a construction job on arrival', () => {

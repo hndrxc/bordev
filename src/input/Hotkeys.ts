@@ -11,6 +11,7 @@ export interface KeyboardEventLike {
   readonly altKey?: boolean;
   readonly shiftKey?: boolean;
   readonly target?: EventTarget | null;
+  readonly timeStamp: number;
   preventDefault?: () => void;
 }
 
@@ -100,7 +101,7 @@ export class Hotkeys {
         }
       } else if (!e.altKey) {
         if (!e.repeat) {
-          this.input.selection.selectGroup(digit);
+          this.input.selection.selectGroup(digit, e.timeStamp);
           e.preventDefault?.();
         }
       }
@@ -190,6 +191,7 @@ export class Hotkeys {
   };
 
   private getLiveSelectedEntities(): {
+    id: number;
     kind: string;
     type: string;
     player?: number;
@@ -197,11 +199,17 @@ export class Hotkeys {
     const sim = this.session.sim;
     if (!sim) return [];
     const ids = this.input.selection.ids;
-    const result: { kind: string; type: string; player?: number }[] = [];
+    const result: {
+      id: number;
+      kind: string;
+      type: string;
+      player?: number;
+    }[] = [];
     for (let i = 0; i < ids.length; i++) {
       const ent = sim.world.getEntity(ids[i]);
       if (ent && (!('hp' in ent) || typeof ent.hp !== 'number' || ent.hp > 0)) {
         result.push({
+          id: ids[i],
           kind: ent.kind,
           type:
             'type' in ent && typeof ent.type === 'string' ? ent.type : ent.kind,

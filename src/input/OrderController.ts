@@ -87,7 +87,9 @@ export class OrderController {
     if (slot.action === 'train' && slot.unitType) {
       const sim = this.session.sim;
       if (!sim) return;
-      const ids = this.selection.ids;
+      // The slot already resolved the building that can take the order; selection scan is the fallback.
+      const ids =
+        slot.buildingId !== undefined ? [slot.buildingId] : this.selection.ids;
       for (let i = 0; i < ids.length; i++) {
         const ent = sim.world.getEntity(ids[i]);
         if (
@@ -106,6 +108,37 @@ export class OrderController {
           });
           break;
         }
+      }
+      return;
+    }
+
+    if (
+      (slot.action === 'research' || slot.action === 'cancelResearch') &&
+      slot.buildingId !== undefined
+    ) {
+      const ent = this.session.sim?.world.getEntity(slot.buildingId);
+      if (
+        !ent ||
+        ent.kind !== 'building' ||
+        ent.player !== 0 ||
+        ent.hp <= 0 ||
+        !this.selection.ids.includes(ent.id)
+      ) {
+        return;
+      }
+      if (slot.action === 'research' && slot.upgradeId) {
+        this.session.issue({
+          kind: 'research',
+          player: 0,
+          buildingId: ent.id,
+          upgradeId: slot.upgradeId,
+        });
+      } else if (slot.action === 'cancelResearch') {
+        this.session.issue({
+          kind: 'cancelResearch',
+          player: 0,
+          buildingId: ent.id,
+        });
       }
       return;
     }
@@ -307,6 +340,13 @@ export class OrderController {
       const prodBuildings = ownBuildings.filter((b) =>
         isProductionType(b.type),
       );
+      const pickedEntity =
+        targetId !== undefined ? sim.world.getEntity(targetId) : undefined;
+      const rallyTarget =
+        pickedEntity &&
+        (pickedEntity.kind === 'unit' || pickedEntity.kind === 'building')
+          ? pickedEntity.id
+          : undefined;
       for (let i = 0; i < prodBuildings.length; i++) {
         this.session.issue({
           kind: 'setRally',
@@ -314,6 +354,9 @@ export class OrderController {
           buildingId: prodBuildings[i].id,
           x: targetX,
           z: targetZ,
+          ...(rallyTarget !== undefined && rallyTarget !== prodBuildings[i].id
+            ? { targetId: rallyTarget }
+            : {}),
         });
       }
       return;

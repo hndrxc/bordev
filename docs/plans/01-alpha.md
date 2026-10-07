@@ -157,7 +157,7 @@ Fixes applied following the M4 review (baseline 762ff4e):
 
 - Placement `Escape` and `R` are dispatched centrally in `Hotkeys`, taking priority over card slots only during active placement. Right-click cancels, Shift repeats placement, and selection changes clear it.
 - Placement ghosts, wire outlines and drag tiles live in the `Overlays` structure and reuse pre-sized thin-instance pools.
-- M5 generic unit training uses the validated ground `setRally` command. M6 retains advanced unit/building rally targets alongside research, ages, upgrades and remaining unit art.
+- M5 generic unit training uses the validated ground `setRally` command. M6 implements advanced unit/building rally targets, research, ages and upgrades; its remaining unit-art/browser verification is pending.
 
 ### M5 — Economy and construction
 
@@ -199,8 +199,18 @@ Phases:
 
 Goalposts:
 
-- [ ] Vitest: Age II research is unavailable until 2 qualifying buildings are complete; completes in 40 s (800 ticks) normally and 80 s in Low Faith.
-- [ ] E2E (with cheats): train one of each of the 10 Crown units; all appear at the rally point.
+- [x] Vitest: Age II research is unavailable until 2 qualifying buildings are complete; completes in 40 s (800 ticks) normally and 80 s in Low Faith.
+- [x] E2E (with cheats): train one of each of the 10 Crown units; all appear at the rally point.
+
+M6 implementation and verification notes:
+
+- Age II requires two distinct completed qualifying building types; Age III requires a completed stable and one qualifying type. Research takes 40/60 s normally or 80/120 s in Low Faith. A producer cannot train and research simultaneously; cancellation refunds the full paid cost.
+- Heavy Plough adds 20 % of the base farm rate, raising output from 0.5 to 0.6 food/s for existing and future farms. Farm-rate modifiers stack additively; other upgrades remain in Beta.
+- Live, identity-checked unit/building rallies resolve when a trained unit spawns, using the target's current position or a reachable building perimeter. Stale targets fall back to the stored ground rally.
+- Generated and registered all seven remaining Crown unit atlases plus Stable and Siege Workshop. All new raw body/mask/shadow passes have nonempty alpha and unclipped bounds; every unit animation/facing changes frames and retains TEAM coverage. The atlas/schema suite passes.
+- Typecheck, lint, production build and all 314 Vitest tests pass. The full Chromium suite passes all 15 specs, including both M6 scenarios: requirements/research/cancellation/Heavy Plough, and actual command-card training of all ten Crown types with mouse-set ground rallies. Spawn-event coordinates lie outside the arrival radius, proving movement rather than merely spawning near the destination.
+- The complete `art:build && art:pack` pipeline passed. An unchanged rerun skipped all 28 assets, terrain and every atlas pack in 4.46 s. A production browser loaded all 28 atlases; a separate runtime smoke trained all ten Crown types to within 1.41 tiles of one rally point. The 300-unit simulation benchmark measured 3.430 ms average (limit 4 ms).
+- Full-suite verification also corrected two legacy M4 paths: the Farm smoke selects a valid explored footprint, and control-group double taps use input-event timestamps rather than handling time, retaining the 300 ms threshold.
 
 ### M7 — Combat, towers, walls and gates
 

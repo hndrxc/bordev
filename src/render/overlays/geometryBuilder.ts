@@ -344,11 +344,12 @@ export class OverlayGeometryBuilder {
           }
         } else if (ent.raw.kind === 'building') {
           const bld = ent.raw;
-          if (bld.rallyPoint) {
+          // Snapshot rally is already resolved to the live target (or stale ground coords)
+          if (ent.rallyPoint) {
             const bx = ent.x + (bld.width ?? 4) * 0.5;
             const bz = ent.z + (bld.height ?? 4) * 0.5;
-            const rx = bld.rallyPoint.x;
-            const rz = bld.rallyPoint.z;
+            const rx = ent.rallyPoint.x;
+            const rz = ent.rallyPoint.z;
 
             this.addSegment(bx, yLine, bz, rx, yLine, rz, COLOR_LINE_YELLOW);
 

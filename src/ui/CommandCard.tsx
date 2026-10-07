@@ -13,7 +13,10 @@ export interface CommandCardProps {
 export function CommandCard({ session }: CommandCardProps) {
   const selection = useHudStore((state) => state.selection);
   const orders = useHudStore((state) => state.orders);
-
+  // Slot enablement reads the live world; these subscriptions re-render the card when
+  // resources, age, completed buildings or upgrades change.
+  useHudStore((state) => state.resources);
+  useHudStore((state) => state.progression);
   const slots = getCommandSlots(
     selection,
     orders.submenu,

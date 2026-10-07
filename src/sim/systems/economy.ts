@@ -374,8 +374,9 @@ export function updateEconomy(world: World): void {
         if (unit.workStartedTick === undefined) {
           unit.workStartedTick = world.tick;
         }
-        const foodGain = FARM_FOOD_RATE * SIM_DT;
         const player = world.players[unit.player];
+        const foodGain =
+          FARM_FOOD_RATE * (player?.farmFoodRateMultiplier ?? 1) * SIM_DT;
         if (player) {
           player.food += foodGain;
           player.foodCollected += foodGain;

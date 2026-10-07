@@ -69,6 +69,13 @@ export const REQUIRED_ATLASES = [
   'crown_keep',
   'crown_peasant',
   'crown_spearman',
+  'crown_man_at_arms',
+  'crown_halberdier',
+  'crown_longbowman',
+  'crown_crossbowman',
+  'crown_sergeant',
+  'crown_knight',
+  'crown_trebuchet',
   'crown_ox_cart',
   'crown_cottage',
   'crown_farm',
@@ -76,6 +83,8 @@ export const REQUIRED_ATLASES = [
   'crown_chapel',
   'crown_barracks',
   'crown_archery_range',
+  'crown_stable',
+  'crown_siege_workshop',
   'gold_mine',
   'tree_1',
   'tree_2',
@@ -102,6 +111,15 @@ const TYPE_TO_ASSET: Record<string, string> = {
   chapel: 'crown_chapel',
   barracks: 'crown_barracks',
   archery_range: 'crown_archery_range',
+  stable: 'crown_stable',
+  siege_workshop: 'crown_siege_workshop',
+  man_at_arms: 'crown_man_at_arms',
+  halberdier: 'crown_halberdier',
+  longbowman: 'crown_longbowman',
+  crossbowman: 'crown_crossbowman',
+  sergeant: 'crown_sergeant',
+  knight: 'crown_knight',
+  trebuchet: 'crown_trebuchet',
   crown_spearman: 'crown_spearman',
   crown_ox_cart: 'crown_ox_cart',
   crown_peasant: 'crown_peasant',
@@ -112,6 +130,15 @@ const TYPE_TO_ASSET: Record<string, string> = {
   crown_chapel: 'crown_chapel',
   crown_barracks: 'crown_barracks',
   crown_archery_range: 'crown_archery_range',
+  crown_stable: 'crown_stable',
+  crown_siege_workshop: 'crown_siege_workshop',
+  crown_man_at_arms: 'crown_man_at_arms',
+  crown_halberdier: 'crown_halberdier',
+  crown_longbowman: 'crown_longbowman',
+  crown_crossbowman: 'crown_crossbowman',
+  crown_sergeant: 'crown_sergeant',
+  crown_knight: 'crown_knight',
+  crown_trebuchet: 'crown_trebuchet',
   gold_mine: 'gold_mine',
 };
 
@@ -469,6 +496,8 @@ export class Renderer {
         assetId === 'crown_chapel' ||
         assetId === 'crown_barracks' ||
         assetId === 'crown_archery_range' ||
+        assetId === 'crown_stable' ||
+        assetId === 'crown_siege_workshop' ||
         assetId === 'gold_mine';
       for (const [key, frame] of Object.entries(loaded.atlas.frames)) {
         if (isBuilding && !key.startsWith('idle/')) {
@@ -497,6 +526,8 @@ export class Renderer {
       'crown_chapel',
       'crown_barracks',
       'crown_archery_range',
+      'crown_stable',
+      'crown_siege_workshop',
       'gold_mine',
       'tree_1',
       'tree_2',

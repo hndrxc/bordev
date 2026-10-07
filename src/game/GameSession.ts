@@ -15,6 +15,8 @@ import type {
 } from '../sim/entity';
 import { InputController } from '../input/InputController';
 import { publishHud, resetHud, setHudStatus } from '../ui/hud';
+import { resolveRallyTarget } from '../sim/systems/rally';
+import type { World } from '../sim/world';
 
 export { SIM_DT };
 export const DEFAULT_MAP_URL = '/maps/alpha_test.json';
@@ -87,6 +89,30 @@ export interface GameCheats {
 
 interface PassableGrid {
   isPassable(x: number, z: number, player: number): boolean;
+}
+
+/**
+ * Render-time rally endpoint: the live (identity-checked) target's interpolated
+ * position, else the stored ground coordinates. Never exposes the raw rally
+ * record, so snapshot consumers cannot hold a stale target reference.
+ */
+function resolveSnapshotRally(
+  world: World,
+  rally: NonNullable<BuildingEntity['rallyPoint']>,
+  alpha: number,
+): { x: number; z: number } {
+  const target = resolveRallyTarget(world, rally);
+  if (!target) return { x: rally.x, z: rally.z };
+  if (target.kind === 'unit') {
+    return {
+      x: target.previousX + (target.x - target.previousX) * alpha,
+      z: target.previousZ + (target.z - target.previousZ) * alpha,
+    };
+  }
+  return {
+    x: target.x + target.width * 0.5,
+    z: target.z + target.height * 0.5,
+  };
 }
 
 function findNearbyPassablePoints(
@@ -474,7 +500,10 @@ export class GameSession {
       slot.built = 'built' in e ? e.built : undefined;
       slot.buildProgress = 'buildProgress' in e ? e.buildProgress : undefined;
       slot.goldRemaining = 'goldRemaining' in e ? e.goldRemaining : undefined;
-      slot.rallyPoint = 'rallyPoint' in e ? e.rallyPoint : undefined;
+      slot.rallyPoint =
+        'rallyPoint' in e && e.rallyPoint
+          ? resolveSnapshotRally(this._sim.world, e.rallyPoint, alpha)
+          : undefined;
       slot.workAnimation =
         'workAnimation' in e ? (e as UnitEntity).workAnimation : undefined;
       slot.workStartedTick =

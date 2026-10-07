@@ -31,6 +31,8 @@ export interface PlayerState {
   popCap: number;
   eliminated: boolean;
   explored: Uint8Array;
+  upgrades: Set<string>;
+  farmFoodRateMultiplier: number;
 }
 
 export class World {
@@ -427,6 +429,8 @@ export class World {
         popCap: 0,
         eliminated: false,
         explored,
+        upgrades: new Set<string>(),
+        farmFoodRateMultiplier: 1,
       });
     }
   }

@@ -114,6 +114,7 @@ export interface SetRallyCommand {
   buildingId: number;
   x: number;
   z: number;
+  targetId?: number;
 }
 
 export type Command =
@@ -146,6 +147,8 @@ export const SUPPORTED_COMMAND_KINDS = [
   'pinMine',
   'train',
   'cancelTrain',
+  'research',
+  'cancelResearch',
 ] as const;
 
 export type SupportedCommandKind = (typeof SUPPORTED_COMMAND_KINDS)[number];
@@ -165,7 +168,9 @@ export function isSupportedCommandKind(
     kind === 'farm' ||
     kind === 'pinMine' ||
     kind === 'train' ||
-    kind === 'cancelTrain'
+    kind === 'cancelTrain' ||
+    kind === 'research' ||
+    kind === 'cancelResearch'
   );
 }
 

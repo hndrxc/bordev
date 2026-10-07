@@ -154,7 +154,7 @@ export class SelectionController {
     }
   }
 
-  public selectGroup(groupNum: number): void {
+  public selectGroup(groupNum: number, timeStamp: number): void {
     if (groupNum < 0 || groupNum > 9) return;
     const sim = this.session.sim;
     if (!sim) return;
@@ -168,10 +168,11 @@ export class SelectionController {
     }
     this.set(validIds);
 
-    const now = performance.now();
+    const delta = timeStamp - this.lastGroupTime;
     if (
       this.lastGroupNum === groupNum &&
-      now - this.lastGroupTime < 300 &&
+      delta >= 0 &&
+      delta < 300 &&
       group.length > 0
     ) {
       // Double tap: center camera on group
@@ -193,7 +194,7 @@ export class SelectionController {
       this.lastGroupNum = -1;
     } else {
       this.lastGroupNum = groupNum;
-      this.lastGroupTime = now;
+      this.lastGroupTime = timeStamp;
     }
   }
 

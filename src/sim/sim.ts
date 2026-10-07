@@ -1,5 +1,4 @@
 import type { Faction } from '../data/types.js';
-import { isProductionType } from '../data/roles.js';
 import type { GameMap } from './map.js';
 import { World } from './world.js';
 import type { PathQueue } from './path/pathQueue.js';
@@ -27,8 +26,15 @@ import { updateFaith } from './systems/faith.js';
 import {
   applyCancelTrainCommand,
   applyTrainCommand,
+  setRally,
   updateProduction,
 } from './systems/production.js';
+import {
+  cancelResearch,
+  issueResearch,
+  refundResearch,
+  stepResearch,
+} from './systems/research.js';
 
 export const SIM_DT = 0.05;
 
@@ -88,6 +94,7 @@ export class Sim {
     updateConstruction(this.world);
     updateEconomy(this.world);
     updateFaith(this.world);
+    stepResearch(this.world);
     updateProduction(this.world);
     this.world.tick++;
   }
@@ -114,7 +121,7 @@ export class Sim {
         this.applyDeleteCommand(cmd);
         break;
       case 'setRally':
-        this.applySetRallyCommand(cmd);
+        setRally(this.world, cmd);
         break;
       case 'build':
         applyBuildCommand(this.world, cmd);
@@ -134,29 +141,14 @@ export class Sim {
       case 'cancelTrain':
         applyCancelTrainCommand(this.world, cmd);
         break;
+      case 'research':
+        issueResearch(this.world, cmd);
+        break;
+      case 'cancelResearch':
+        cancelResearch(this.world, cmd);
+        break;
       default:
         throw new Error(`Unsupported command: ${(cmd as Command).kind}`);
-    }
-  }
-
-  private applySetRallyCommand(
-    cmd: Extract<Command, { kind: 'setRally' }>,
-  ): void {
-    if (!Number.isFinite(cmd.x) || !Number.isFinite(cmd.z)) {
-      return;
-    }
-    const ent = this.world.entities[cmd.buildingId];
-    if (
-      ent &&
-      ent.kind === 'building' &&
-      ent.player === cmd.player &&
-      isProductionType(ent.type)
-    ) {
-      const size = this.world.map.size;
-      ent.rallyPoint = {
-        x: Math.max(0, Math.min(size, cmd.x)),
-        z: Math.max(0, Math.min(size, cmd.z)),
-      };
     }
   }
 
@@ -340,6 +332,7 @@ export class Sim {
               }
               ent.trainingQueue.length = 0;
             }
+            refundResearch(this.world, ent);
           }
         }
         this.world.removeEntity(ent.id);

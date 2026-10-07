@@ -44,6 +44,14 @@ export interface TrainingItem {
   gold: number;
 }
 
+export interface ResearchItem {
+  upgradeId: string;
+  progress: number;
+  food: number;
+  gold: number;
+  time: number;
+}
+
 export interface UnitEntity {
   id: number;
   kind: 'unit';
@@ -115,9 +123,15 @@ export interface BuildingEntity {
   isTownCenter?: boolean;
   isDropOff?: boolean;
   isGate?: boolean;
-  rallyPoint?: { x: number; z: number };
+  rallyPoint?: {
+    x: number;
+    z: number;
+    targetId?: number;
+    targetRef?: UnitEntity | BuildingEntity;
+  };
   orientation?: 'horizontal' | 'vertical';
   trainingQueue: TrainingItem[];
+  research?: ResearchItem;
 }
 
 export interface MineEntity {

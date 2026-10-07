@@ -1,7 +1,17 @@
 import type { World } from '../world.js';
 import type { BuildingEntity } from '../entity.js';
-import type { TrainCommand, CancelTrainCommand } from '../commands.js';
+import type {
+  TrainCommand,
+  CancelTrainCommand,
+  SetRallyCommand,
+} from '../commands.js';
 import { getUnitData } from '../../data/units.js';
+import { isProductionType } from '../../data/roles.js';
+import {
+  applyRallyOrder,
+  resolveRallyPoint,
+  type RallyPoint,
+} from './rally.js';
 
 export const SIM_DT = 0.05;
 
@@ -59,8 +69,11 @@ export function findSpawnPosition(
   unitRadius: number,
 ): { x: number; z: number } | undefined {
   const mapSize = world.map.size;
-  const targetX = building.rallyPoint?.x ?? building.x + building.width * 0.5;
-  const targetZ = building.rallyPoint?.z ?? building.z + building.height + 0.5;
+  const rallyPos = building.rallyPoint
+    ? resolveRallyPoint(world, building.rallyPoint)
+    : undefined;
+  const targetX = rallyPos?.x ?? building.x + building.width * 0.5;
+  const targetZ = rallyPos?.z ?? building.z + building.height + 0.5;
 
   let fallbackPassable: { x: number; z: number; distSq: number } | undefined;
 
@@ -142,6 +155,11 @@ export function applyTrainCommand(world: World, cmd: TrainCommand): boolean {
     !building.built ||
     building.hp <= 0
   ) {
+    return false;
+  }
+
+  // Training and research are mutually exclusive per building
+  if (building.research) {
     return false;
   }
 
@@ -256,7 +274,8 @@ export function updateProduction(world: World): void {
       !building.built ||
       building.hp <= 0 ||
       !building.trainingQueue ||
-      building.trainingQueue.length === 0
+      building.trainingQueue.length === 0 ||
+      building.research
     ) {
       continue;
     }
@@ -303,21 +322,54 @@ export function updateProduction(world: World): void {
         building.faction,
       );
 
-      // Apply ground rally if set
-      if (building.rallyPoint) {
-        const rx = building.rallyPoint.x;
-        const rz = building.rallyPoint.z;
-        unit.order = { kind: 'move', x: rx, z: rz };
-        unit.orders = [];
-        unit.orderGeneration++;
-        unit.formationSlotX = undefined;
-        unit.formationSlotZ = undefined;
-        unit.path = undefined;
-        unit.pathTarget = undefined;
-        world.pathQueue.cancel(unit.id);
-        world.pathQueue.request(unit.id, unit.x, unit.z, rx, rz, unit.player);
-        unit.pathPending = true;
-      }
+      // Apply rally (ground, live-unit, or live-building target) if set
+      applyRallyOrder(world, building, unit);
     }
   }
+}
+
+/**
+ * Validates and stores a building rally point.
+ *
+ * Requires a finite ground coordinate (clamped to the map) and an owned
+ * production building. When `targetId` names a live unit or building, the
+ * rally also follows that entity by identity; the ground coordinate is kept as
+ * the fallback if the target later dies or its ID is recycled. A missing or
+ * invalid target stores a plain ground rally, clearing any previous target.
+ */
+export function setRally(world: World, cmd: SetRallyCommand): boolean {
+  if (!Number.isFinite(cmd.x) || !Number.isFinite(cmd.z)) {
+    return false;
+  }
+
+  const building = world.getEntity(cmd.buildingId);
+  if (
+    !building ||
+    building.kind !== 'building' ||
+    building.player !== cmd.player ||
+    !isProductionType(building.type)
+  ) {
+    return false;
+  }
+
+  const size = world.map.size;
+  const rally: RallyPoint = {
+    x: Math.max(0, Math.min(size, cmd.x)),
+    z: Math.max(0, Math.min(size, cmd.z)),
+  };
+
+  if (cmd.targetId !== undefined && Number.isInteger(cmd.targetId)) {
+    const target = world.getEntity(cmd.targetId);
+    if (
+      target &&
+      (target.kind === 'unit' || target.kind === 'building') &&
+      target.hp > 0
+    ) {
+      rally.targetId = target.id;
+      rally.targetRef = target;
+    }
+  }
+
+  building.rallyPoint = rally;
+  return true;
 }

@@ -117,6 +117,16 @@ export function SelectionPanel({ session }: SelectionPanelProps) {
                 {ent.trainingQueueCount ?? 1})
               </div>
             ) : null}
+            {ent.researchUpgradeId !== undefined ? (
+              <div
+                className="stat-badge selection-research-badge"
+                title={`Researching ${ent.researchName ?? ent.researchUpgradeId}: ${Math.round((ent.researchProgress ?? 0) * 100)}%`}
+                data-testid="selection-research"
+              >
+                📜 {ent.researchName ?? ent.researchUpgradeId}{' '}
+                {Math.round((ent.researchProgress ?? 0) * 100)}%
+              </div>
+            ) : null}
           </div>
         </div>
       </div>

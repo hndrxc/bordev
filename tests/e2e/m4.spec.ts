@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import {
   setupM4Session,
   worldToScreen,
@@ -6,6 +6,37 @@ import {
   playfield,
   pickablePoint,
 } from './fixtures/m4';
+
+/**
+ * Delivers a physical Digit1 double tap through the browser input pipeline (CDP
+ * Input.dispatchKeyEvent). Each event carries an explicit epoch timestamp, so its
+ * DOM `event.timeStamp` models the physical creation time and stays 50 ms apart
+ * no matter how long the page's render/event queue delays handling under load.
+ */
+async function trustedDigit1DoubleTap(page: Page): Promise<void> {
+  const session = await page.context().newCDPSession(page);
+  try {
+    const startSeconds = Date.now() / 1000;
+    const events = [
+      { type: 'keyDown', text: '1', unmodifiedText: '1' },
+      { type: 'keyUp' },
+      { type: 'keyDown', text: '1', unmodifiedText: '1' },
+      { type: 'keyUp' },
+    ] as const;
+    for (const [index, event] of events.entries()) {
+      await session.send('Input.dispatchKeyEvent', {
+        ...event,
+        key: '1',
+        code: 'Digit1',
+        windowsVirtualKeyCode: 49,
+        nativeVirtualKeyCode: 49,
+        timestamp: startSeconds + index * 0.05,
+      });
+    }
+  } finally {
+    await session.detach();
+  }
+}
 
 test('1. required goalposts: 5 peasants box select, arrival within 20s sim time, control groups, W stop, and resource cheats', async ({
   page,
@@ -477,8 +508,16 @@ test('3. camera, minimap, and HUD: group double-tap centering, HUD isolation, mi
   // Verify HUD shell elements are mounted
   const topbar = page.getByTestId('hud-topbar');
   await expect(topbar).toBeVisible();
+  const bottombar = page.getByTestId('hud-bottom-bar');
+  await expect(bottombar).toBeVisible();
   const minimap = page.getByTestId('minimap');
   await expect(minimap).toBeVisible();
+
+  // Wait for stable actual geometry and viewport insets before sampling playfield
+  await page.waitForFunction(() => {
+    const cam = window.__bordev?.session.input?.camera;
+    return cam && cam.viewportInsets.top > 0 && cam.viewportInsets.bottom > 0;
+  });
 
   const doubleTapField = await playfield(page);
   const doubleTapCenterX = (doubleTapField.left + doubleTapField.right) * 0.5;
@@ -492,10 +531,17 @@ test('3. camera, minimap, and HUD: group double-tap centering, HUD isolation, mi
     input.camera.centerOn(45, 45);
   });
 
-  // Double-tap 'Digit1' to center camera on group 1
-  await page.keyboard.press('Digit1');
-  await page.waitForTimeout(60);
-  await page.keyboard.press('Digit1');
+  await page.waitForFunction(() => {
+    const cam = window.__bordev?.session.renderer?.camera;
+    return (
+      cam &&
+      Math.abs(cam.view.targetX - 45) < 3 &&
+      Math.abs(cam.view.targetZ - 45) < 3
+    );
+  });
+
+  // Double-tap 'Digit1' to center camera on group 1 via trusted CDP input with 50 ms physical spacing
+  await trustedDigit1DoubleTap(page);
 
   // Assert group average projects via worldToScreen to the centre of playfield(page) within ~2 px (contract §3)
   await page.waitForFunction(
@@ -648,10 +694,8 @@ test('3. camera, minimap, and HUD: group double-tap centering, HUD isolation, mi
     { timeout: 10_000 },
   );
 
-  // Re-center on peasants with double-tap Digit1
-  await page.keyboard.press('Digit1');
-  await page.waitForTimeout(60);
-  await page.keyboard.press('Digit1');
+  // Re-center on peasants with a trusted 50 ms physical double-tap of Digit1
+  await trustedDigit1DoubleTap(page);
 
   // Camera cursor zoom (wheel in and out)
   const initialZoom = await page.evaluate(() => {
@@ -969,12 +1013,129 @@ test('4. hotkey submenus, queued orders, delete slot, and enemy ownership isolat
   expect(moveAfterW?.orderGeneration).toBe(moveBeforeW?.orderGeneration);
   expect(moveAfterW?.ordersCount).toBe(moveBeforeW?.ordersCount);
 
-  const farmBuildPt = await worldToScreen(page, 58.5, 58.5);
+  // Dynamically select a deterministic valid, free, explored, in-bounds, reachable, visible 2x2 footprint for Farm
+  const farmSite = await page.evaluate(() => {
+    const bordev = window.__bordev;
+    const sim = bordev?.sim;
+    if (!sim) throw new Error('Simulation not available');
+    const world = sim.world;
+    const pState = world.players[0];
+    if (!pState) throw new Error('Player 0 not available');
+    const explored = pState.explored;
+    const grid = world.grid;
+    const gridSize = grid.size;
+    const gridFlags = grid.flags;
+    const blockedMask = 7; // FLAG_TERRAIN (1) | FLAG_BUILDING (2) | FLAG_GATE (4)
+    const cam = bordev.session?.renderer?.camera;
+
+    function isSiteValid(x: number, z: number): boolean {
+      if (!Number.isInteger(x) || !Number.isInteger(z)) return false;
+      if (x < 0 || z < 0 || x + 2 > gridSize || z + 2 > gridSize) return false;
+      // Exclude cottage placement area at (62, 58)
+      if (x < 64 && x + 2 > 62 && z < 60 && z + 2 > 58) return false;
+
+      for (let dz = 0; dz < 2; dz++) {
+        const tz = z + dz;
+        const rowOffset = tz * gridSize;
+        for (let dx = 0; dx < 2; dx++) {
+          const tx = x + dx;
+          const idx = rowOffset + tx;
+          if (explored && explored[idx] === 0) return false;
+          if ((gridFlags[idx] & blockedMask) !== 0) return false;
+        }
+      }
+
+      // Ensure at least one adjacent tile is passable for worker to reach and build
+      let hasPassableAdjacent = false;
+      for (let dz = -1; dz <= 2; dz++) {
+        for (let dx = -1; dx <= 2; dx++) {
+          if (dx >= 0 && dx < 2 && dz >= 0 && dz < 2) continue;
+          const ax = x + dx;
+          const az = z + dz;
+          if (ax >= 0 && az >= 0 && ax < gridSize && az < gridSize) {
+            if (grid.isPassable(ax, az, 0)) {
+              hasPassableAdjacent = true;
+              break;
+            }
+          }
+        }
+        if (hasPassableAdjacent) break;
+      }
+      if (!hasPassableAdjacent) return false;
+
+      if (cam) {
+        const canvas = document.querySelector('canvas[aria-label="Game view"]');
+        const rect = canvas?.getBoundingClientRect();
+        const topBar =
+          document.querySelector('[data-testid="hud-topbar"]') ??
+          document.querySelector('.hud-topbar');
+        const bottomBar =
+          document.querySelector('[data-testid="hud-bottom-bar"]') ??
+          document.querySelector('.hud-bottom-bar');
+        const topRect = topBar?.getBoundingClientRect();
+        const bottomRect = bottomBar?.getBoundingClientRect();
+        const topBound = topRect ? topRect.bottom : 0;
+        const bottomBound = bottomRect ? bottomRect.top : window.innerHeight;
+        const leftBound = rect ? rect.left : 0;
+        const rightBound = rect ? rect.right : window.innerWidth;
+
+        const offsetX = rect?.left ?? 0;
+        const offsetY = rect?.top ?? 0;
+        const cdx = x + 0.5 - cam.view.targetX;
+        const cdz = z + 0.5 - cam.view.targetZ;
+        const screenX =
+          offsetX + cam.view.width * 0.5 + (cdx - cdz) * 48 * cam.view.zoom;
+        const screenY =
+          offsetY + cam.view.height * 0.5 + (cdx + cdz) * 24 * cam.view.zoom;
+
+        if (
+          screenY < topBound ||
+          screenY > bottomBound ||
+          screenX < leftBound ||
+          screenX > rightBound
+        ) {
+          return false;
+        }
+      }
+
+      return true;
+    }
+
+    // Deterministic search in expanding rings around camera / peasant center (60, 60)
+    for (let r = 1; r <= 15; r++) {
+      for (let dx = -r; dx <= r; dx++) {
+        for (let dz = -r; dz <= r; dz++) {
+          if (Math.abs(dx) !== r && Math.abs(dz) !== r) continue;
+          const candX = 60 + dx;
+          const candZ = 60 + dz;
+          if (isSiteValid(candX, candZ)) {
+            return { x: candX, z: candZ };
+          }
+        }
+      }
+    }
+    throw new Error('No valid 2x2 farm site found');
+  });
+
+  const farmBuildPt = await worldToScreen(
+    page,
+    farmSite.x + 0.5,
+    farmSite.z + 0.5,
+  );
   expect(farmBuildPt.y).toBeGreaterThanOrEqual(field.top);
   expect(farmBuildPt.y).toBeLessThanOrEqual(field.bottom);
+  await page.mouse.move(farmBuildPt.x, farmBuildPt.y);
+  await page.waitForFunction(
+    ({ x, z }) =>
+      window.__bordev?.session.input.placement.preview.some(
+        (preview) => preview.x === x && preview.z === z && preview.valid,
+      ),
+    farmSite,
+    { timeout: 5_000 },
+  );
   await page.mouse.click(farmBuildPt.x, farmBuildPt.y, { button: 'left' });
   await page.waitForFunction(
-    (id) => {
+    ({ id, expectedX, expectedZ }) => {
       const world = window.__bordev?.sim?.world;
       const unit = world?.entities[id];
       if (!world || !unit || unit.kind !== 'unit') return false;
@@ -986,27 +1147,27 @@ test('4. hotkey submenus, queued orders, delete slot, and enemy ownership isolat
         target?.kind === 'building' &&
         target.type === 'farm' &&
         target.player === 0 &&
-        target.x === 58 &&
-        target.z === 58 &&
+        target.x === expectedX &&
+        target.z === expectedZ &&
         !target.built
       );
     },
-    peasantId,
+    { id: peasantId, expectedX: farmSite.x, expectedZ: farmSite.z },
     { timeout: 10_000 },
   );
   await page.waitForFunction(
-    () => {
+    ({ expectedX, expectedZ }) => {
       const world = window.__bordev?.sim?.world;
       return world?.entities.some(
         (entity) =>
           entity?.kind === 'building' &&
           entity.type === 'farm' &&
-          entity.x === 58 &&
-          entity.z === 58 &&
+          entity.x === expectedX &&
+          entity.z === expectedZ &&
           entity.buildProgress > 0,
       );
     },
-    undefined,
+    { expectedX: farmSite.x, expectedZ: farmSite.z },
     { timeout: 10_000 },
   );
 
