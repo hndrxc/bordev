@@ -1,8 +1,7 @@
 """Crown cavalry: a rigged horse and a seated rider; sergeant and knight differ in coat, armour and weapon."""
 import math
 from mathutils import Matrix, Vector
-from lib import anim
-from lib.materials import material
+from lib import anim, characters
 from lib.model import root, box, ico, cylinder, cone, beam, mesh
 
 # Right arm couches the weapon, left arm carries the shield; both rest bent forward over the saddle.
@@ -104,9 +103,9 @@ def _rider(parts, heavy):
     torso = root("Rider torso", parent=rider)
     rider_legs = root("Rider legs", parent=rider)
     parts.update(rider=rider, torso=torso)
-    box("Belt", (0, 0, 0), (0.30, 0.20, 0.075), "LEATHER", torso)
-    cone("Team tunic", (0, 0, 0.16), 0.22, 0.32, "TEAM", torso, 0.17, 6)
-    cylinder("Neck", (0, 0, 0.38), 0.065, 0.10, "SKIN", torso)
+    characters.belt(torso, z_offset=-0.53)
+    characters.tunic(torso, z_offset=-0.53)
+    characters.head(torso, z_offset=-0.53, face=not heavy)
     if heavy:
         box("Gold buckle", (0, -0.105, 0.0), (0.07, 0.02, 0.06), "GOLD", torso)
         box("Steel breastplate", (0, -0.165, 0.20), (0.27, 0.07, 0.24), "STEEL", torso)
@@ -125,10 +124,6 @@ def _rider(parts, heavy):
         for sign in (-1, 1):
             ico("Steel pauldron", (sign * 0.225, 0, 0.30), (0.11, 0.12, 0.085), "STEEL", torso)
     else:
-        ico("Head", (0, -0.018, 0.505), (0.135, 0.115, 0.17), "SKIN", torso, 2)
-        ico("Nose", (0, -0.13, 0.505), (0.036, 0.047, 0.038), "SKIN", torso)
-        for x in (-0.058, 0.058):
-            ico("Eye", (x, -0.119, 0.55), (0.012, 0.012, 0.012), "DARK", torso)
         cone("Steel helmet", (0, 0, 0.625), 0.15, 0.17, "STEEL", torso, 0.06)
         cylinder("Helmet brim", (0, 0, 0.565), 0.175, 0.038, "IRON", torso)
         box("Nasal guard", (0, -0.151, 0.516), (0.027, 0.025, 0.14), "STEEL", torso)
@@ -136,21 +131,11 @@ def _rider(parts, heavy):
         cylinder("Team scarf", (0, 0, 0.36), 0.105, 0.06, "TEAM", torso)
         box("Padded breastplate", (0, -0.16, 0.20), (0.25, 0.065, 0.20), "IRON", torso)
         _tilt(box("Team riding cloak", (0, 0.135, 0.12), (0.30, 0.03, 0.42), "TEAM", torso), 0.12)
-    for side, sign in (("left", -1), ("right", 1)):
-        arm = root(side + " shoulder", SHOULDER[side], torso)
-        ico("Sleeve", (sign * 0.025, 0, -0.09), (0.085, 0.10, 0.16), "STEEL" if heavy else "TEAM", arm)
-        beam("Forearm", (sign * 0.025, 0, -0.18), (sign * 0.025, -0.055, -0.32), 0.048,
-             "STEEL" if heavy else "SKIN", arm)
-        ico("Hand", (sign * 0.025, -0.055, -0.33), (0.055, 0.055, 0.065), "IRON" if heavy else "SKIN", arm)
-        arm.rotation_euler.x = REST[side]
-        parts[side + "_arm"] = arm
-    for sign in (-1, 1):
-        beam("Thigh", (sign * 0.11, 0.02, -0.03), (sign * 0.25, -0.07, -0.20), 0.075,
-             "STEEL" if heavy else "CLOTH", rider_legs)
-        beam("Shin", (sign * 0.25, -0.07, -0.20), (sign * 0.27, -0.05, -0.46), 0.058,
-             "STEEL" if heavy else "LEATHER", rider_legs)
-        box("Boot", (sign * 0.27, -0.09, -0.50), (0.10, 0.20, 0.09), "IRON" if heavy else "LEATHER", rider_legs)
-        beam("Stirrup leather", (sign * 0.285, -0.09, -0.06), (sign * 0.285, -0.09, -0.45), 0.012, "LEATHER", rider_legs)
+    for side in ("left", "right"):
+        characters.arm(parts, side, z_offset=-0.53, sleeve="STEEL" if heavy else "TEAM",
+                       forearm="STEEL" if heavy else "SKIN", glove="IRON" if heavy else "SKIN",
+                       rest_x=REST[side], parent=torso)
+    characters.rider_legs(rider_legs, heavy=heavy)
     right, left = parts["right_arm"], parts["left_arm"]
     if heavy:
         hand, direction, tip = _haft(right, "right", (0, -0.985, -0.17), 0.5, 1.0, 0.026, "WOOD_LIGHT")
@@ -178,8 +163,6 @@ def build(kind):
     if kind not in ("sergeant", "knight"):
         raise ValueError(f"Unknown Crown mounted unit {kind!r}")
     heavy = kind == "knight"
-    material("HORSE_BAY", (0.36, 0.17, 0.07))
-    material("HORSE_GREY", (0.50, 0.50, 0.47))
     parent = root("Crown knight" if heavy else "Crown mounted sergeant")
     parent.rotation_euler.z = math.pi / 4
     mount = root("Mount motion", parent=parent)
@@ -190,23 +173,23 @@ def build(kind):
     return parts
 
 
-# Per-frame attack tables; impact is frame index 4 (frame five of eight) for both riders.
+# Per-frame attack tables; impact is frame index 5 (MELEE_HIT_FRAME=5) for both riders.
 ATTACKS = {
     False: {  # sergeant: couched spear lunge with a short surge
-        "arm": (0.0, -0.10, -0.20, -0.12, 0.30, 0.24, 0.10, 0.03),
-        "push": (0.0, 0.04, 0.12, 0.0, -0.40, -0.32, -0.12, -0.02),
-        "lean": (0.0, -0.04, -0.10, 0.0, 0.22, 0.18, 0.08, 0.02),
-        "surge": (0.0, 0.02, 0.05, 0.0, -0.22, -0.18, -0.08, 0.0),
-        "pitch": (0.0, -0.05, -0.16, -0.12, 0.03, 0.02, 0.0, 0.0),
-        "head": (0.0, -0.10, -0.25, -0.15, 0.20, 0.15, 0.05, 0.0),
+        "arm": (0.0, 0.0, -0.10, -0.20, -0.12, 0.30, 0.24, 0.10),
+        "push": (0.0, 0.0, 0.04, 0.12, 0.0, -0.40, -0.32, -0.12),
+        "lean": (0.0, 0.0, -0.04, -0.10, 0.0, 0.22, 0.18, 0.08),
+        "surge": (0.0, 0.0, 0.02, 0.05, 0.0, -0.22, -0.18, -0.08),
+        "pitch": (0.0, 0.0, -0.05, -0.16, -0.12, 0.03, 0.02, 0.0),
+        "head": (0.0, 0.0, -0.10, -0.25, -0.15, 0.20, 0.15, 0.05),
     },
     True: {  # knight: destrier rears, then crashes forward behind the lance
-        "arm": (0.0, -0.08, -0.20, -0.12, 0.25, 0.20, 0.08, 0.0),
-        "push": (0.0, 0.05, 0.14, 0.04, -0.55, -0.42, -0.15, -0.02),
-        "lean": (0.0, -0.06, -0.14, -0.08, 0.28, 0.20, 0.10, 0.02),
-        "surge": (0.0, 0.02, 0.06, 0.04, -0.30, -0.24, -0.10, 0.0),
-        "pitch": (0.0, -0.08, -0.16, -0.22, -0.02, 0.04, 0.02, 0.0),
-        "head": (0.0, -0.12, -0.28, -0.35, 0.22, 0.15, 0.05, 0.0),
+        "arm": (0.0, 0.0, -0.08, -0.20, -0.12, 0.25, 0.20, 0.08),
+        "push": (0.0, 0.0, 0.05, 0.14, 0.04, -0.55, -0.42, -0.15),
+        "lean": (0.0, 0.0, -0.06, -0.14, -0.08, 0.28, 0.20, 0.10),
+        "surge": (0.0, 0.0, 0.02, 0.06, 0.04, -0.30, -0.24, -0.10),
+        "pitch": (0.0, 0.0, -0.08, -0.16, -0.22, -0.02, 0.04, 0.02),
+        "head": (0.0, 0.0, -0.12, -0.28, -0.35, 0.22, 0.15, 0.05),
     },
 }
 
@@ -220,77 +203,68 @@ def _gait(parts, phase, amount):
 
 
 def clips(parts):
-    reset = anim.resetter(parts["root"])
     heavy = parts["heavy"]
 
-    def clip(name):
-        descriptor = anim.UNIT_ANIMS[name]
-        count = descriptor["frames"]
+    def pose(name, frame, count):
+        mount, horse, rider = parts["mount"], parts["horse"], parts["rider"]
+        torso, head, tail = parts["torso"], parts["head"], parts["tail"]
+        right, left = parts["right_arm"], parts["left_arm"]
+        if name == "idle":
+            phase = 2 * math.pi * frame / count
+            anim.bob(mount, frame, count, 0.008, 0.008)
+            head.rotation_euler.x = 0.08 * math.sin(phase)
+            tail.rotation_euler.z = 0.20 * math.sin(phase + 1.0)
+            torso.rotation_euler.x = 0.015 * math.sin(phase)
+            paw = max(0.0, math.sin(phase - 0.5))
+            parts["legs"][0].rotation_euler.x = -0.35 * paw
+            parts["knees"][0].rotation_euler.x = 0.7 * paw
+        elif name == "walk":
+            phase = 2 * math.pi * frame / count
+            _gait(parts, phase, 0.42 if heavy else 0.5)
+            anim.bob(mount, frame * 2, count, 0.026 if heavy else 0.032, 0.03)
+            head.rotation_euler.x = 0.10 * math.sin(phase + 0.6)
+            tail.rotation_euler.z = 0.18 * math.sin(phase + 1.2)
+            torso.rotation_euler.x = 0.05 + 0.03 * math.sin(2 * phase)
+            rider.rotation_euler.y = 0.03 * math.sin(phase)
+            right.rotation_euler.x += 0.04 * math.sin(2 * phase)
+            left.rotation_euler.x += 0.06 * math.sin(phase + 0.5)
+        elif name == "attack":
+            table = ATTACKS[heavy]
+            pitch = table["pitch"][frame]
+            rise = max(0.0, -pitch) / 0.16
+            mount.rotation_euler.x = pitch
+            mount.location.y = table["surge"][frame]
+            mount.location.z = 0.3 * math.sin(abs(pitch)) if pitch < 0 else 0.0
+            head.rotation_euler.x = table["head"][frame]
+            tail.rotation_euler.x = -0.35 * rise
+            for index, (leg, knee) in enumerate(zip(parts["legs"], parts["knees"])):
+                if index < 2:
+                    leg.rotation_euler.x = -0.55 * rise
+                    knee.rotation_euler.x = 1.1 * rise
+                else:
+                    leg.rotation_euler.x = 0.12 * rise
+            right.rotation_euler.x += table["arm"][frame]
+            right.location.y += table["push"][frame]
+            left.rotation_euler.x += table["arm"][frame] * 0.4
+            torso.rotation_euler.x = table["lean"][frame]
+        else:
+            progress = frame / (count - 1)
+            eased = anim.smoothstep(progress)
+            horse.rotation_euler.y = 1.48 * eased
+            horse.location.z = 0.15 * eased
+            for index, (leg, knee) in enumerate(zip(parts["legs"], parts["knees"])):
+                flail = 0.6 * math.sin(frame * 1.3 + index * 1.7) * (1 - eased)
+                leg.rotation_euler.x = flail + (-0.45 if index < 2 else 0.35) * eased
+                knee.rotation_euler.x = 0.5 * eased + 0.25 * (1 - eased) * abs(math.sin(frame + index))
+            head.rotation_euler.x = -0.2 * eased
+            tail.rotation_euler.x = -0.4 * eased
+            # The rider is thrown clear on the side away from the falling horse and lies along Y.
+            rider.location.x -= 0.55 * eased
+            rider.location.y += 0.08 * eased
+            rider.location.z -= 0.77 * eased
+            rider.rotation_euler.x = -1.45 * eased
+            rider.rotation_euler.z = 0.35 * eased
+            right.rotation_euler.x -= 1.3 * eased
+            left.rotation_euler.x -= 1.0 * eased
 
-        def apply(frame):
-            reset()
-            mount, horse, rider = parts["mount"], parts["horse"], parts["rider"]
-            torso, head, tail = parts["torso"], parts["head"], parts["tail"]
-            right, left = parts["right_arm"], parts["left_arm"]
-            if name == "idle":
-                phase = 2 * math.pi * frame / count
-                anim.bob(mount, frame, count, 0.008, 0.008)
-                head.rotation_euler.x = 0.08 * math.sin(phase)
-                tail.rotation_euler.z = 0.20 * math.sin(phase + 1.0)
-                torso.rotation_euler.x = 0.015 * math.sin(phase)
-                paw = max(0.0, math.sin(phase - 0.5))
-                parts["legs"][0].rotation_euler.x = -0.35 * paw
-                parts["knees"][0].rotation_euler.x = 0.7 * paw
-            elif name == "walk":
-                phase = 2 * math.pi * frame / count
-                _gait(parts, phase, 0.42 if heavy else 0.5)
-                anim.bob(mount, frame * 2, count, 0.026 if heavy else 0.032, 0.03)
-                head.rotation_euler.x = 0.10 * math.sin(phase + 0.6)
-                tail.rotation_euler.z = 0.18 * math.sin(phase + 1.2)
-                torso.rotation_euler.x = 0.05 + 0.03 * math.sin(2 * phase)
-                rider.rotation_euler.y = 0.03 * math.sin(phase)
-                right.rotation_euler.x += 0.04 * math.sin(2 * phase)
-                left.rotation_euler.x += 0.06 * math.sin(phase + 0.5)
-            elif name == "attack":
-                table = ATTACKS[heavy]
-                pitch = table["pitch"][frame]
-                rise = max(0.0, -pitch) / 0.16
-                mount.rotation_euler.x = pitch
-                mount.location.y = table["surge"][frame]
-                mount.location.z = 0.3 * math.sin(abs(pitch)) if pitch < 0 else 0.0
-                head.rotation_euler.x = table["head"][frame]
-                tail.rotation_euler.x = -0.35 * rise
-                for index, (leg, knee) in enumerate(zip(parts["legs"], parts["knees"])):
-                    if index < 2:
-                        leg.rotation_euler.x = -0.55 * rise
-                        knee.rotation_euler.x = 1.1 * rise
-                    else:
-                        leg.rotation_euler.x = 0.12 * rise
-                right.rotation_euler.x += table["arm"][frame]
-                right.location.y += table["push"][frame]
-                left.rotation_euler.x += table["arm"][frame] * 0.4
-                torso.rotation_euler.x = table["lean"][frame]
-            else:
-                progress = frame / (count - 1)
-                eased = progress * progress * (3 - 2 * progress)
-                horse.rotation_euler.y = 1.48 * eased
-                horse.location.z = 0.15 * eased
-                for index, (leg, knee) in enumerate(zip(parts["legs"], parts["knees"])):
-                    flail = 0.6 * math.sin(frame * 1.3 + index * 1.7) * (1 - eased)
-                    leg.rotation_euler.x = flail + (-0.45 if index < 2 else 0.35) * eased
-                    knee.rotation_euler.x = 0.5 * eased + 0.25 * (1 - eased) * abs(math.sin(frame + index))
-                head.rotation_euler.x = -0.2 * eased
-                tail.rotation_euler.x = -0.4 * eased
-                # The rider is thrown clear on the side away from the falling horse and lies along Y.
-                rider.location.x -= 0.55 * eased
-                rider.location.y += 0.08 * eased
-                rider.location.z -= 0.77 * eased
-                rider.rotation_euler.x = -1.45 * eased
-                rider.rotation_euler.z = 0.35 * eased
-                right.rotation_euler.x -= 1.3 * eased
-                left.rotation_euler.x -= 1.0 * eased
-        apply.descriptor = descriptor
-        apply.frames = count
-        apply.loop = descriptor["loop"]
-        return apply
-    return {name: clip(name) for name in anim.UNIT_ANIMS}
+    return anim.clip_set(parts["root"], anim.UNIT_ANIMS, pose)

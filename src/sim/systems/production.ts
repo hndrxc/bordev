@@ -70,7 +70,7 @@ export function findSpawnPosition(
 ): { x: number; z: number } | undefined {
   const mapSize = world.map.size;
   const rallyPos = building.rallyPoint
-    ? resolveRallyPoint(world, building.rallyPoint)
+    ? resolveRallyPoint(world, building.rallyPoint, building.player)
     : undefined;
   const targetX = rallyPos?.x ?? building.x + building.width * 0.5;
   const targetZ = rallyPos?.z ?? building.z + building.height + 0.5;
@@ -131,46 +131,55 @@ export function findSpawnPosition(
   return undefined;
 }
 
+export interface TrainAvailability {
+  allowed: boolean;
+  reason?: string;
+}
 /**
- * Validates and queues a unit training command.
+ * Checks whether `playerId` may queue training of `unitType` at `buildingId` right now.
  *
  * Enforces:
  * - Completed living building owned by player
+ * - Mutually exclusive with active research on the same building
  * - Max queue capacity of 5
- * - Unit data table matches faction, age, building type ('from')
+ * - Unit data table matches faction, age, and building type ('from')
  * - Player has sufficient food and gold
- * - Deducts cost immediately upon queueing
  */
-export function applyTrainCommand(world: World, cmd: TrainCommand): boolean {
-  const player = world.players[cmd.player];
+export function getTrainAvailability(
+  world: World,
+  playerId: number,
+  buildingId: number,
+  unitType: string,
+): TrainAvailability {
+  const player = world.players[playerId];
   if (!player || player.eliminated) {
-    return false;
+    return { allowed: false, reason: 'Player unavailable' };
   }
 
-  const building = world.getEntity(cmd.buildingId);
+  const building = world.getEntity(buildingId);
   if (
     !building ||
     building.kind !== 'building' ||
-    building.player !== cmd.player ||
+    building.player !== playerId ||
     !building.built ||
     building.hp <= 0
   ) {
-    return false;
+    return { allowed: false, reason: 'Building unavailable' };
   }
 
   // Training and research are mutually exclusive per building
   if (building.research) {
-    return false;
+    return { allowed: false, reason: 'Research in progress' };
   }
 
-  building.trainingQueue = building.trainingQueue ?? [];
-  if (building.trainingQueue.length >= 5) {
-    return false;
+  const queue = building.trainingQueue ?? [];
+  if (queue.length >= 5) {
+    return { allowed: false, reason: 'Queue is full' };
   }
 
-  const unitData = getUnitData(cmd.unitType, building.faction);
+  const unitData = getUnitData(unitType, building.faction);
   if (!unitData) {
-    return false;
+    return { allowed: false, reason: 'Unknown unit' };
   }
 
   // Faction validation
@@ -178,29 +187,58 @@ export function applyTrainCommand(world: World, cmd: TrainCommand): boolean {
     unitData.faction !== player.faction ||
     unitData.faction !== building.faction
   ) {
-    return false;
+    return { allowed: false, reason: 'Faction mismatch' };
   }
 
   // Age validation
   if (unitData.age > player.age) {
-    return false;
+    return { allowed: false, reason: `Requires Age ${unitData.age}` };
   }
 
   // Building validation: unitData.from must match building type
   if (unitData.from !== building.type) {
-    return false;
+    return { allowed: false, reason: `Trained at ${unitData.from}` };
   }
 
   // Resource validation
-  if (player.food < unitData.food || player.gold < unitData.gold) {
+  const lacksFood = player.food < unitData.food;
+  const lacksGold = player.gold < unitData.gold;
+  if (lacksFood || lacksGold) {
+    return {
+      allowed: false,
+      reason: `Not enough ${lacksFood && lacksGold ? 'food and gold' : lacksFood ? 'food' : 'gold'}`,
+    };
+  }
+
+  return { allowed: true };
+}
+
+/**
+ * Validates and queues a unit training command.
+ *
+ * Deducts cost immediately upon queueing.
+ */
+export function applyTrainCommand(world: World, cmd: TrainCommand): boolean {
+  const availability = getTrainAvailability(
+    world,
+    cmd.player,
+    cmd.buildingId,
+    cmd.unitType,
+  );
+  if (!availability.allowed) {
     return false;
   }
+
+  const player = world.players[cmd.player];
+  const building = world.getEntity(cmd.buildingId) as BuildingEntity;
+  const unitData = getUnitData(cmd.unitType, building.faction)!;
 
   // Deduct resources
   player.food -= unitData.food;
   player.gold -= unitData.gold;
 
   // Add to training queue
+  building.trainingQueue = building.trainingQueue ?? [];
   building.trainingQueue.push({
     unitType: cmd.unitType,
     progress: 0,
@@ -363,7 +401,8 @@ export function setRally(world: World, cmd: SetRallyCommand): boolean {
     if (
       target &&
       (target.kind === 'unit' || target.kind === 'building') &&
-      target.hp > 0
+      target.hp > 0 &&
+      target.player === building.player
     ) {
       rally.targetId = target.id;
       rally.targetRef = target;

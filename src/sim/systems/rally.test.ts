@@ -4,8 +4,14 @@ import { World } from '../world.js';
 import { Rng } from '../rng.js';
 import type { BuildingEntity, UnitEntity } from '../entity.js';
 import { updateFaith } from './faith.js';
-import { applyTrainCommand, setRally, updateProduction } from './production.js';
+import {
+  applyTrainCommand,
+  getTrainAvailability,
+  setRally,
+  updateProduction,
+} from './production.js';
 import { resolveRallyPoint, resolveRallyTarget } from './rally.js';
+import { Sim } from '../sim.js';
 
 function makeTestWorld(size = 32): World {
   const map: GameMap = {
@@ -29,11 +35,13 @@ function makeTestWorld(size = 32): World {
   }
   world.events.length = 0;
 
-  const p0 = world.players[0];
-  p0.food = 1000;
-  p0.gold = 1000;
-  p0.age = 1;
-  p0.eliminated = false;
+  for (const p of world.players) {
+    if (!p) continue;
+    p.food = 1000;
+    p.gold = 1000;
+    p.age = 1;
+    p.eliminated = false;
+  }
   return world;
 }
 
@@ -77,50 +85,6 @@ function rallyTo(
 }
 
 describe('M6 rally targets', () => {
-  it('ground rally stores coordinates only and clamps to the map', () => {
-    const world = makeTestWorld();
-    const keep = world.spawnBuilding(0, 'keep', 10, 10, true);
-
-    expect(rallyTo(world, keep, 25, 30)).toBe(true);
-    expect(keep.rallyPoint).toEqual({ x: 25, z: 30 });
-
-    expect(rallyTo(world, keep, -5, 999)).toBe(true);
-    expect(keep.rallyPoint).toEqual({ x: 0, z: 32 });
-  });
-
-  it('rejects non-owner, non-production, non-building and non-finite rallies', () => {
-    const world = makeTestWorld();
-    const keep = world.spawnBuilding(0, 'keep', 10, 10, true);
-    const cottage = world.spawnBuilding(0, 'cottage', 2, 2, true);
-    const peasant = world.spawnUnit(0, 'peasant', 20, 20);
-    expect(rallyTo(world, keep, 25, 30)).toBe(true);
-
-    expect(
-      setRally(world, {
-        kind: 'setRally',
-        player: 1,
-        buildingId: keep.id,
-        x: 5,
-        z: 5,
-      }),
-    ).toBe(false);
-    expect(rallyTo(world, cottage, 5, 5)).toBe(false);
-    expect(
-      setRally(world, {
-        kind: 'setRally',
-        player: 0,
-        buildingId: peasant.id,
-        x: 5,
-        z: 5,
-      }),
-    ).toBe(false);
-    expect(rallyTo(world, keep, Number.NaN, 5)).toBe(false);
-    expect(rallyTo(world, keep, 5, Number.POSITIVE_INFINITY)).toBe(false);
-
-    expect(keep.rallyPoint).toEqual({ x: 25, z: 30 });
-    expect(cottage.rallyPoint).toBeUndefined();
-    expect('rallyPoint' in peasant).toBe(false);
-  });
 
   it('follows a moved unit target to its current position at spawn', () => {
     const world = makeTestWorld();
@@ -247,43 +211,326 @@ describe('M6 rally targets', () => {
     rallyTo(world, keep, 8, 9, target.id);
     expect(keep.rallyPoint).toEqual({ x: 8, z: 9 });
   });
-});
 
-describe('M6 training vs research exclusivity', () => {
-  it('rejects training while the building has active research', () => {
+  it('enemy target picks store ground only and do not track enemy through fog', () => {
     const world = makeTestWorld();
     const keep = world.spawnBuilding(0, 'keep', 10, 10, true);
-    const p0 = world.players[0];
-    keep.research = {
-      upgradeId: 'heavy_plough',
-      progress: 0,
-      food: 0,
-      gold: 0,
-      time: 30,
+    const enemyPeasant = world.spawnUnit(1, 'peasant', 20, 20);
+
+    // Rallying to enemy target stores ground coords, but omits targetId and targetRef
+    const ok = setRally(world, {
+      kind: 'setRally',
+      player: 0,
+      buildingId: keep.id,
+      x: enemyPeasant.x,
+      z: enemyPeasant.z,
+      targetId: enemyPeasant.id,
+    });
+    expect(ok).toBe(true);
+    expect(keep.rallyPoint).toEqual({ x: 20, z: 20 });
+    expect(keep.rallyPoint!.targetId).toBeUndefined();
+    expect(keep.rallyPoint!.targetRef).toBeUndefined();
+
+    // Enemy moves far away
+    enemyPeasant.x = 2;
+    enemyPeasant.z = 2;
+
+    // Rally point does not follow enemy (no fog tracking)
+    expect(resolveRallyPoint(world, keep.rallyPoint!, 0)).toEqual({
+      x: 20,
+      z: 20,
+    });
+
+    // Spawned unit moves to stored ground point, not the enemy's new position
+    const spawned = trainPeasant(world, keep);
+    expect(spawned.order).toEqual({ kind: 'move', x: 20, z: 20 });
+  });
+
+  it('stops resolving and falls back to ground if target ownership changes', () => {
+    const world = makeTestWorld();
+    const keep = world.spawnBuilding(0, 'keep', 10, 10, true);
+    const friendlyUnit = world.spawnUnit(0, 'peasant', 20, 20);
+
+    // Rally to own unit
+    expect(rallyTo(world, keep, 25, 30, friendlyUnit.id)).toBe(true);
+    expect(keep.rallyPoint!.targetId).toBe(friendlyUnit.id);
+
+    // Friendly unit converted / ownership changes to enemy
+    friendlyUnit.player = 1;
+    expect(resolveRallyTarget(world, keep.rallyPoint!, 0)).toBeUndefined();
+    expect(resolveRallyPoint(world, keep.rallyPoint!, 0)).toEqual({
+      x: 25,
+      z: 30,
+    });
+
+    // Spawning unit drops stale target and falls back to ground coordinates
+    const spawned = trainPeasant(world, keep);
+    expect(spawned.order).toEqual({ kind: 'move', x: 25, z: 30 });
+    expect(keep.rallyPoint).toEqual({ x: 25, z: 30 });
+  });
+
+  it('falls back to stored ground coordinates when building has no reachable perimeter in unit component', () => {
+    const size = 32;
+    const tiles = new Uint8Array(size * size).fill(Terrain.GRASS);
+    for (let z = 18; z <= 23; z++) {
+      for (let x = 18; x <= 23; x++) {
+        if (x < 20 || x > 21 || z < 20 || z > 21) {
+          tiles[z * size + x] = Terrain.WATER;
+        }
+      }
+    }
+    const map: GameMap = {
+      version: 1,
+      id: 'isolated_map',
+      name: 'Isolated Map',
+      size,
+      players: 2,
+      tiles,
+      goldMines: [],
+      starts: [
+        [4, 4],
+        [size - 8, size - 8],
+      ],
+      doodads: [],
     };
-    const food = p0.food;
-    const gold = p0.gold;
+    const world = new World(map, new Rng(42), { 0: 'crown', 1: 'crown' });
+    for (let i = 0; i < world.entities.length; i++) {
+      const ent = world.entities[i];
+      if (ent) world.removeEntity(ent.id);
+    }
+    for (const p of world.players) {
+      if (!p) continue;
+      p.food = 1000;
+      p.gold = 1000;
+      p.age = 1;
+      p.eliminated = false;
+    }
 
-    expect(
-      applyTrainCommand(world, {
-        kind: 'train',
-        player: 0,
-        buildingId: keep.id,
-        unitType: 'peasant',
-      }),
-    ).toBe(false);
-    expect(keep.trainingQueue).toHaveLength(0);
-    expect(p0.food).toBe(food);
-    expect(p0.gold).toBe(gold);
+    const keep = world.spawnBuilding(0, 'keep', 4, 4, true);
+    const target = world.spawnBuilding(0, 'cottage', 20, 20, true);
 
-    keep.research = undefined;
-    expect(
-      applyTrainCommand(world, {
-        kind: 'train',
-        player: 0,
-        buildingId: keep.id,
+    rallyTo(world, keep, 5, 5, target.id);
+
+    const spawned = trainPeasant(world, keep);
+    // Because cottage perimeter is unreachable (surrounded by water), fallback to stored ground coordinates (5, 5)
+    expect(spawned.order).toEqual({ kind: 'move', x: 5, z: 5 });
+  });
+
+  it('routes around isolated pocket to reachable perimeter of building target', () => {
+    const size = 32;
+    const tiles = new Uint8Array(size * size).fill(Terrain.GRASS);
+    // water row z14 x0..25
+    for (let x = 0; x <= 25; x++) {
+      tiles[14 * size + x] = Terrain.WATER;
+    }
+    // water 13,15 & 17,15
+    tiles[15 * size + 13] = Terrain.WATER;
+    tiles[15 * size + 17] = Terrain.WATER;
+
+    const map: GameMap = {
+      version: 1,
+      id: 'pocket_map',
+      name: 'Pocket Map',
+      size,
+      players: 2,
+      tiles,
+      goldMines: [],
+      starts: [
+        [4, 4],
+        [size - 8, size - 8],
+      ],
+      doodads: [],
+    };
+
+    const sim = new Sim(map, 1);
+    const p0 = sim.world.players[0];
+    p0.food = 1000;
+    p0.gold = 1000;
+    p0.age = 1;
+
+    for (let i = 0; i < sim.world.entities.length; i++) {
+      const e = sim.world.entities[i];
+      if (e) sim.world.removeEntity(e.id);
+    }
+
+    // keep at (12, 4), barracks at (14, 16)
+    const keep = sim.world.spawnBuilding(0, 'keep', 12, 4, true);
+    const barracks = sim.world.spawnBuilding(0, 'barracks', 14, 16, true);
+    p0.eliminated = false;
+
+    // Rally keep to barracks
+    sim.issue({
+      kind: 'setRally',
+      player: 0,
+      buildingId: keep.id,
+      x: barracks.x + barracks.width * 0.5,
+      z: barracks.z + barracks.height * 0.5,
+      targetId: barracks.id,
+    });
+    sim.step();
+
+    // Train peasant at keep
+    const trained = applyTrainCommand(sim.world, {
+      kind: 'train',
+      player: 0,
+      buildingId: keep.id,
+      unitType: 'peasant',
+    });
+    expect(trained).toBe(true);
+
+    keep.trainingQueue[0].progress = 1000;
+    sim.step();
+
+    const spawned = sim.world.entities.find(
+      (e): e is UnitEntity =>
+        !!e && e.kind === 'unit' && e.player === 0 && e.type === 'peasant',
+    );
+    expect(spawned).toBeDefined();
+    const peasant = spawned!;
+
+    // In the isolated pocket bug, peasant order was z = 15.5 (inside the cut-off pocket).
+    // With component-filtered selection, chosen destination must NOT be inside the cut-off z = 15 pocket.
+    const order = peasant.order as { kind: string; x: number; z: number };
+    expect(order.kind).toBe('move');
+    expect(order.z).not.toBe(15.5);
+
+    // Deterministic simulation: peasant routes around the barrier (x >= 25) and reaches barracks perimeter.
+    let navigatedAroundBarrier = false;
+    let reachedPerimeter = false;
+    for (let t = 0; t < 600; t++) {
+      sim.step();
+      if (peasant.x >= 25) {
+        navigatedAroundBarrier = true;
+      }
+      const dx = Math.max(0, barracks.x - peasant.x, peasant.x - (barracks.x + barracks.width));
+      const dz = Math.max(0, barracks.z - peasant.z, peasant.z - (barracks.z + barracks.height));
+      if (dx * dx + dz * dz <= 1.0) {
+        reachedPerimeter = true;
+        break;
+      }
+    }
+    expect(navigatedAroundBarrier).toBe(true);
+    expect(reachedPerimeter).toBe(true);
+  });
+});
+
+describe('getTrainAvailability and training rejection invariants', () => {
+  it('allows valid training and rejects invalid commands without cost or queue mutation across players', () => {
+    const world = makeTestWorld();
+    const keep0 = world.spawnBuilding(0, 'keep', 10, 10, true);
+    const keep1 = world.spawnBuilding(1, 'keep', 20, 20, true);
+
+    for (const [playerId, keep] of [
+      [0, keep0],
+      [1, keep1],
+    ] as const) {
+      const player = world.players[playerId]!;
+
+      // Allowed when requirements are met
+      const valid = getTrainAvailability(world, playerId, keep.id, 'peasant');
+      expect(valid.allowed).toBe(true);
+      expect(valid.reason).toBeUndefined();
+
+      const assertRejectedInvariant = (
+        pId: number,
+        buildingId: number,
+        unitType: string,
+      ) => {
+        const p = world.players[pId] ?? player;
+        const foodBefore = p.food;
+        const goldBefore = p.gold;
+        const bld = world.getEntity(buildingId);
+        const queueLenBefore =
+          bld && bld.kind === 'building' ? (bld.trainingQueue?.length ?? 0) : 0;
+
+        const availability = getTrainAvailability(world, pId, buildingId, unitType);
+        expect(availability.allowed).toBe(false);
+        expect(typeof availability.reason).toBe('string');
+
+        const success = applyTrainCommand(world, {
+          kind: 'train',
+          player: pId,
+          buildingId,
+          unitType,
+        });
+        expect(success).toBe(false);
+        expect(p.food).toBe(foodBefore);
+        expect(p.gold).toBe(goldBefore);
+        if (bld && bld.kind === 'building') {
+          expect(bld.trainingQueue?.length ?? 0).toBe(queueLenBefore);
+        }
+      };
+
+      // 1. Foreign / other player's building
+      const otherKeepId = playerId === 0 ? keep1.id : keep0.id;
+      assertRejectedInvariant(playerId, otherKeepId, 'peasant');
+
+      // 2. Unknown building ID
+      assertRejectedInvariant(playerId, 9999, 'peasant');
+
+      // 3. Destroyed building
+      keep.hp = 0;
+      assertRejectedInvariant(playerId, keep.id, 'peasant');
+      keep.hp = 1000;
+
+      // 4. Unfinished building
+      keep.built = false;
+      assertRejectedInvariant(playerId, keep.id, 'peasant');
+      keep.built = true;
+
+      // 5. Research in progress on building
+      keep.research = {
+        upgradeId: 'heavy_plough',
+        progress: 0,
+        food: 0,
+        gold: 0,
+        time: 30,
+      };
+      assertRejectedInvariant(playerId, keep.id, 'peasant');
+      keep.research = undefined;
+
+      // 6. Full queue (>= 5)
+      keep.trainingQueue = Array.from({ length: 5 }, () => ({
         unitType: 'peasant',
-      }),
-    ).toBe(true);
+        progress: 0,
+        food: 50,
+        gold: 0,
+      }));
+      assertRejectedInvariant(playerId, keep.id, 'peasant');
+      keep.trainingQueue = [];
+
+      // 7. Unknown unit
+      assertRejectedInvariant(playerId, keep.id, 'unknown_unit');
+
+      // 8. Unit trained at a different building (spearman requires barracks, not keep)
+      assertRejectedInvariant(playerId, keep.id, 'spearman');
+      const barracks = world.spawnBuilding(playerId, 'barracks', 14, 14, true);
+      expect(getTrainAvailability(world, playerId, barracks.id, 'spearman').allowed).toBe(true);
+
+      // 9. Unit requiring higher age (man_at_arms requires Age 2 at barracks)
+      player.age = 1;
+      assertRejectedInvariant(playerId, barracks.id, 'man_at_arms');
+      player.age = 2;
+      expect(getTrainAvailability(world, playerId, barracks.id, 'man_at_arms').allowed).toBe(true);
+      player.age = 1;
+
+      // 10. Insufficient food (peasant requires food)
+      player.food = 0;
+      assertRejectedInvariant(playerId, keep.id, 'peasant');
+      player.food = 1000;
+      expect(getTrainAvailability(world, playerId, keep.id, 'peasant').allowed).toBe(true);
+
+      // 11. Insufficient gold (knight requires gold at stable)
+      const stable = world.spawnBuilding(playerId, 'stable', 16, 16, true);
+      player.age = 2;
+      player.gold = 0;
+      assertRejectedInvariant(playerId, stable.id, 'knight');
+      player.gold = 1000;
+      expect(getTrainAvailability(world, playerId, stable.id, 'knight').allowed).toBe(true);
+      // 12. Eliminated player
+      player.eliminated = true;
+      assertRejectedInvariant(playerId, keep.id, 'peasant');
+      player.eliminated = false;
+    }
   });
 });

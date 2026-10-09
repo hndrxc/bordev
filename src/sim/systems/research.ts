@@ -11,9 +11,8 @@ import type {
 import type { CancelResearchCommand, ResearchCommand } from '../commands.js';
 import type { BuildingEntity } from '../entity.js';
 import type { World } from '../world.js';
+import { SIM_DT } from '../sim.js';
 import { completeUpgrade, isUpgradeEnabled } from './upgrades.js';
-
-const SIM_DT = 0.05;
 
 /** Command ids for Town Center age research. */
 export const AGE_RESEARCH_IDS = ['age_2', 'age_3'] as const;

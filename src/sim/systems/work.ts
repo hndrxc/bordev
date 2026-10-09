@@ -4,6 +4,7 @@ import type {
   UnitEntity,
   UnitOrder,
 } from '../entity.js';
+import type { Grid } from '../grid.js';
 import { ComponentManager, findStartComponent } from '../path/components.js';
 import type { World } from '../world.js';
 import { advanceUnitOrder } from './movement.js';
@@ -88,6 +89,140 @@ export function finishWorkOrder(world: World, unit: UnitEntity): void {
   advanceUnitOrder(world, unit);
 }
 
+export type OccupancyPolicy = 'require-empty' | 'prefer-empty';
+
+export interface TargetBounds {
+  x: number;
+  z: number;
+  width: number;
+  height: number;
+}
+
+function getComponentLabels(world: World, player: number): Int32Array {
+  let components = componentManagers.get(world);
+  if (!components) {
+    components = new ComponentManager();
+    componentManagers.set(world, components);
+  }
+  return components.getLabels(world.grid, player);
+}
+
+function resolveStartComponent(
+  grid: Grid,
+  labels: Int32Array,
+  x: number,
+  z: number,
+  player: number,
+): number {
+  const size = grid.size;
+  const startTx = Math.max(0, Math.min(size - 1, Math.floor(x)));
+  const startTz = Math.max(0, Math.min(size - 1, Math.floor(z)));
+  let comp = labels[startTz * size + startTx];
+  if (comp === 0) {
+    comp = findStartComponent(grid, labels, x, z, player).compId;
+  }
+  return comp;
+}
+
+/**
+ * Selects the nearest passable tile centre on the one-tile ring around `target`
+ * that belongs to the same connected component as `unit`.
+ * Breaks distance ties using row-major order.
+ */
+export function findReachablePerimeterDestination(
+  world: World,
+  target: TargetBounds,
+  unit: UnitEntity,
+  occupancy: OccupancyPolicy,
+  startComponent?: number,
+  labels?: Int32Array,
+): { x: number; z: number } | undefined {
+  const grid = world.grid;
+  const size = grid.size;
+  const unitLabels = labels ?? getComponentLabels(world, unit.player);
+  const comp =
+    startComponent ??
+    resolveStartComponent(grid, unitLabels, unit.x, unit.z, unit.player);
+
+  if (comp === 0) {
+    return undefined;
+  }
+
+  let bestX = unit.x;
+  let bestZ = unit.z;
+  let bestDistSq = Infinity;
+
+  let fallbackOccupiedX = unit.x;
+  let fallbackOccupiedZ = unit.z;
+  let fallbackOccupiedDistSq = Infinity;
+
+  // Row-major perimeter traversal gives a stable tile-index tie-break.
+  for (let tz = target.z - 1; tz <= target.z + target.height; tz++) {
+    for (let tx = target.x - 1; tx <= target.x + target.width; tx++) {
+      if (
+        tx >= target.x &&
+        tx < target.x + target.width &&
+        tz >= target.z &&
+        tz < target.z + target.height
+      ) {
+        continue;
+      }
+      if (tx < 0 || tx >= size || tz < 0 || tz >= size) continue;
+      // PathQueue snaps unreachable requests; filter first so the chosen endpoint stays adjacent.
+      if (unitLabels[tz * size + tx] !== comp) continue;
+      const cx = tx + 0.5;
+      const cz = tz + 0.5;
+      if (!grid.canOccupy(cx, cz, unit.radius, unit.player)) continue;
+      const distanceSq =
+        (unit.x - cx) * (unit.x - cx) + (unit.z - cz) * (unit.z - cz);
+
+      // Restore M5 distance prune BEFORE entities occupancy scan
+      if (distanceSq >= bestDistSq) continue;
+
+      let occupied = false;
+      for (let otherId = 0; otherId < world.entities.length; otherId++) {
+        const other = world.entities[otherId];
+        if (
+          !other ||
+          other.kind !== 'unit' ||
+          other === unit ||
+          other.hp <= 0
+        ) {
+          continue;
+        }
+        const radius = unit.radius + other.radius;
+        const ox = other.x - cx;
+        const oz = other.z - cz;
+        if (ox * ox + oz * oz < radius * radius) {
+          occupied = true;
+          break;
+        }
+      }
+
+      if (occupied) {
+        if (occupancy === 'prefer-empty' && distanceSq < fallbackOccupiedDistSq) {
+          fallbackOccupiedDistSq = distanceSq;
+          fallbackOccupiedX = cx;
+          fallbackOccupiedZ = cz;
+        }
+        continue;
+      }
+
+      bestDistSq = distanceSq;
+      bestX = cx;
+      bestZ = cz;
+    }
+  }
+
+  if (bestDistSq !== Infinity) {
+    return { x: bestX, z: bestZ };
+  }
+  if (occupancy === 'prefer-empty' && fallbackOccupiedDistSq !== Infinity) {
+    return { x: fallbackOccupiedX, z: fallbackOccupiedZ };
+  }
+  return undefined;
+}
+
 export function approachTarget(
   world: World,
   unit: UnitEntity,
@@ -118,26 +253,15 @@ export function approachTarget(
     return true;
   }
 
-  // ComponentManager caches by player/revision, so keep each cache scoped to its World.
-  let components = componentManagers.get(world);
-  if (!components) {
-    components = new ComponentManager();
-    componentManagers.set(world, components);
-  }
-  const labels = components.getLabels(grid, unit.player);
+  const labels = getComponentLabels(world, unit.player);
+  const startComponent = resolveStartComponent(
+    grid,
+    labels,
+    unit.x,
+    unit.z,
+    unit.player,
+  );
   const size = grid.size;
-  const startTx = Math.max(0, Math.min(size - 1, Math.floor(unit.x)));
-  const startTz = Math.max(0, Math.min(size - 1, Math.floor(unit.z)));
-  let startComponent = labels[startTz * size + startTx];
-  if (startComponent === 0) {
-    startComponent = findStartComponent(
-      grid,
-      labels,
-      unit.x,
-      unit.z,
-      unit.player,
-    ).compId;
-  }
 
   // Do not replace a pending or active route every construction/economy tick.
   if (
@@ -159,55 +283,17 @@ export function approachTarget(
     }
   }
 
-  let bestX = unit.x;
-  let bestZ = unit.z;
-  let bestDistSq = Infinity;
-
-  // Row-major perimeter traversal gives a stable tile-index tie-break.
-  for (let tz = target.z - 1; tz <= target.z + target.height; tz++) {
-    for (let tx = target.x - 1; tx <= target.x + target.width; tx++) {
-      if (
-        tx >= target.x &&
-        tx < target.x + target.width &&
-        tz >= target.z &&
-        tz < target.z + target.height
-      )
-        continue;
-      if (tx < 0 || tx >= size || tz < 0 || tz >= size) continue;
-      // PathQueue snaps unreachable requests; filter first so the chosen endpoint stays adjacent.
-      if (startComponent === 0 || labels[tz * size + tx] !== startComponent)
-        continue;
-      const cx = tx + 0.5;
-      const cz = tz + 0.5;
-      if (!grid.canOccupy(cx, cz, unit.radius, unit.player)) continue;
-      const distanceSq =
-        (unit.x - cx) * (unit.x - cx) + (unit.z - cz) * (unit.z - cz);
-      if (distanceSq >= bestDistSq) continue;
-
-      let occupied = false;
-      // The hash is a pre-movement snapshot; use current coordinates for exact clearance.
-      for (let otherId = 0; otherId < world.entities.length; otherId++) {
-        const other = world.entities[otherId];
-        if (!other || other.kind !== 'unit' || other === unit || other.hp <= 0)
-          continue;
-        const radius = unit.radius + other.radius;
-        const ox = other.x - cx;
-        const oz = other.z - cz;
-        if (ox * ox + oz * oz < radius * radius) {
-          occupied = true;
-          break;
-        }
-      }
-      if (occupied) continue;
-
-      bestDistSq = distanceSq;
-      bestX = cx;
-      bestZ = cz;
-    }
-  }
+  const destination = findReachablePerimeterDestination(
+    world,
+    target,
+    unit,
+    'require-empty',
+    startComponent,
+    labels,
+  );
 
   unit.path = undefined;
-  if (bestDistSq === Infinity) {
+  if (!destination) {
     if (unit.pathPending) world.pathQueue.cancel(unit.id);
     unit.pathPending = false;
     unit.pathTarget = undefined;
@@ -217,6 +303,9 @@ export function approachTarget(
     }
     return false;
   }
+
+  const bestX = destination.x;
+  const bestZ = destination.z;
 
   if (unit.order) {
     unit.order.x = bestX;

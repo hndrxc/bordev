@@ -191,3 +191,40 @@ export async function pickablePoint(
     );
   }, id);
 }
+
+/**
+ * Delivers a physical Digit1 double tap through the browser input pipeline (CDP
+ * Input.dispatchKeyEvent). Each event carries an explicit epoch timestamp, so its
+ * DOM `event.timeStamp` models the physical creation time and stays 50 ms apart
+ * no matter how long the page's render/event queue delays handling under load.
+ */
+export async function trustedDigit1DoubleTap(
+  page: Page,
+  digit: number = 1,
+): Promise<void> {
+  const session = await page.context().newCDPSession(page);
+  try {
+    const startSeconds = Date.now() / 1000;
+    const char = String(digit);
+    const code = `Digit${digit}`;
+    const keyCode = 48 + digit;
+    const events = [
+      { type: 'keyDown', text: char, unmodifiedText: char },
+      { type: 'keyUp' },
+      { type: 'keyDown', text: char, unmodifiedText: char },
+      { type: 'keyUp' },
+    ] as const;
+    for (const [index, event] of events.entries()) {
+      await session.send('Input.dispatchKeyEvent', {
+        ...event,
+        key: char,
+        code,
+        windowsVirtualKeyCode: keyCode,
+        nativeVirtualKeyCode: keyCode,
+        timestamp: startSeconds + index * 0.05,
+      });
+    }
+  } finally {
+    await session.detach();
+  }
+}

@@ -9,7 +9,7 @@ drawing hand is aimed at the string each frame.
 import math
 import bpy
 from mathutils import Euler, Vector
-from lib import anim
+from lib import anim, characters
 from lib.model import root, box, ico, cylinder, cone, beam, mesh
 
 
@@ -20,12 +20,18 @@ def _plate(name, outline, axis, at, thickness, mat, parent):
     """Flat prism. `outline` is (a, z) in the plane normal to `axis`: 'x' -> (y, z), 'y' -> (x, z)."""
     n = len(outline)
     h = thickness / 2
+    area = sum(outline[i][0] * outline[(i + 1) % n][1] - outline[(i + 1) % n][0] * outline[i][1] for i in range(n))
+    forward = (axis == "y") == (area > 0)
 
     def point(a, z, side):
         return (at + side, a, z) if axis == "x" else (a, at + side, z)
     verts = [point(a, z, -h) for a, z in outline] + [point(a, z, h) for a, z in outline]
-    faces = [tuple(range(n)), tuple(range(2 * n - 1, n - 1, -1))]
-    faces += [(i, (i + 1) % n, n + (i + 1) % n, n + i) for i in range(n)]
+    if forward:
+        faces = [tuple(range(n)), tuple(range(2 * n - 1, n - 1, -1))]
+        faces += [(i, n + i, n + (i + 1) % n, (i + 1) % n) for i in range(n)]
+    else:
+        faces = [tuple(range(n - 1, -1, -1)), tuple(range(n, 2 * n))]
+        faces += [(i, (i + 1) % n, n + (i + 1) % n, n + i) for i in range(n)]
     return mesh(name, verts, faces, mat, parent)
 
 
@@ -47,41 +53,6 @@ def _figure(title, kind):
     body = root("Body motion", parent=parent)
     return {"root": parent, "body": body, "kind": kind}
 
-
-def _head(body, face=True):
-    cylinder("Neck", (0, 0, 0.91), 0.065, 0.10, "SKIN", body)
-    if face:
-        ico("Head", (0, -0.018, 1.035), (0.135, 0.115, 0.17), "SKIN", body, 2)
-        ico("Nose", (0, -0.13, 1.035), (0.036, 0.047, 0.038), "SKIN", body)
-        for x in (-0.058, 0.058):
-            ico("Eye", (x, -0.119, 1.08), (0.012, 0.012, 0.012), "DARK", body)
-
-
-def _legs(parts, upper="CLOTH", boot="LEATHER", width=0.115):
-    for side, sign in (("left", -1), ("right", 1)):
-        leg = root(side + " leg", (sign * 0.09, 0, 0.51), parts["body"])
-        box("Leg", (0, 0, -0.16), (width, 0.135, 0.29), upper, leg)
-        box("Boot", (0, -0.045, -0.41), (0.135, 0.21, 0.15), boot, leg)
-        parts[side + "_leg"] = leg
-
-
-def _arm(parts, side, hand=None, elbow=None, sleeve="TEAM", forearm="SKIN", glove="SKIN", bracer=None):
-    """Two-segment rigid arm; `hand`/`elbow` are offsets from the shoulder pivot."""
-    sign = -1 if side == "left" else 1
-    pivot = root(side + " shoulder", (sign * 0.205, 0, 0.82), parts["body"])
-    hand = Vector(hand if hand is not None else (sign * 0.025, -0.055, -0.33))
-    elbow = Vector(elbow if elbow is not None else (sign * 0.025, 0, -0.17))
-    ico("Shoulder", (0, 0, -0.02), (0.09, 0.095, 0.095), sleeve, pivot)
-    beam("Upper arm", (0, 0, -0.02), elbow, 0.058, sleeve, pivot)
-    beam("Forearm", elbow, hand, 0.047, forearm, pivot)
-    if bracer:
-        beam("Bracer", elbow.lerp(hand, 0.3), elbow.lerp(hand, 0.9), 0.053, bracer, pivot)
-    ico("Hand", hand, (0.055, 0.055, 0.065), glove, pivot)
-    parts[side + "_arm"] = pivot
-    parts[side + "_hand"] = root(side + " grip", hand, pivot)
-    return pivot
-
-
 def _segment(obj, a, b):
     """Stretch a unit-length cylinder between two parent-space points."""
     a, b = Vector(a), Vector(b)
@@ -95,7 +66,7 @@ def _segment(obj, a, b):
 def man_at_arms():
     p = _figure("Crown man-at-arms", "man_at_arms")
     body = p["body"]
-    box("Belt", (0, 0, 0.53), (0.34, 0.23, 0.08), "LEATHER", body)
+    characters.belt(body, size=(0.34, 0.23, 0.08))
     box("Belt buckle", (0, -0.122, 0.53), (0.06, 0.02, 0.06), "GOLD", body)
     cone("Plate cuirass", (0, 0, 0.72), 0.26, 0.30, "STEEL", body, 0.20, 8)
     box("Cuirass ridge", (0, -0.235, 0.78), (0.04, 0.035, 0.20), "IRON", body)
@@ -104,18 +75,18 @@ def man_at_arms():
         box("Team tabard", (0, y * 0.26, 0.60), (0.22, 0.03, 0.18), "TEAM", body)
         box("Team tabard skirt", (0, y * 0.29, 0.38), (0.22, 0.03, 0.26), "TEAM", body)
     cylinder("Mail gorget", (0, 0, 0.90), 0.14, 0.07, "IRON", body)
-    _head(body, face=False)
+    characters.head(body, face=False)
     cylinder("Great helm", (0, 0, 1.05), 0.145, 0.26, "STEEL", body, 10)
     cone("Helm crown", (0, 0, 1.23), 0.145, 0.10, "STEEL", body, 0.06, 10)
     box("Visor slit", (0, -0.146, 1.07), (0.17, 0.02, 0.03), "DARK", body)
     box("Visor breaths", (0, -0.15, 0.99), (0.035, 0.02, 0.14), "IRON", body)
     box("Team plume", (0, 0.0, 1.30), (0.05, 0.26, 0.10), "TEAM", body)
     box("Team plume tail", (0, 0.15, 1.23), (0.045, 0.09, 0.17), "TEAM", body)
-    _legs(p, upper="IRON", boot="STEEL")
+    characters.legs(p, upper="IRON", boot="STEEL", name="Leg")
     for side in ("left", "right"):
         ico("Knee cop", (0, -0.075, -0.27), (0.07, 0.05, 0.06), "STEEL", p[side + "_leg"])
     for side, sign in (("left", -1), ("right", 1)):
-        arm = _arm(p, side, forearm="STEEL", glove="STEEL")
+        arm = characters.arm(p, side, forearm="STEEL", glove="STEEL", segmented=True)
         ico("Pauldron", (sign * 0.03, 0, 0.03), (0.125, 0.12, 0.085), "STEEL", arm, 1)
         ico("Pauldron lame", (sign * 0.03, 0, -0.03), (0.11, 0.105, 0.05), "IRON", arm, 1)
     sword = p["right_arm"]
@@ -137,19 +108,19 @@ def man_at_arms():
 def halberdier():
     p = _figure("Crown halberdier", "halberdier")
     body = p["body"]
-    box("Belt", (0, 0, 0.53), (0.30, 0.20, 0.075), "LEATHER", body)
-    cone("Team tunic", (0, 0, 0.69), 0.22, 0.32, "TEAM", body, 0.17, 6)
-    box("Tunic collar", (0, -0.115, 0.82), (0.15, 0.025, 0.06), "IVORY", body)
+    characters.belt(body)
+    characters.tunic(body)
+    characters.tunic_collar(body)
     for z in (0.78, 0.65):
         box("Brigandine plate", (0, -0.195, z), (0.23, 0.03, 0.10), "IRON", body)
     cylinder("Steel gorget", (0, 0, 0.90), 0.12, 0.06, "STEEL", body)
-    _head(body)
+    characters.head(body)
     ico("Beard", (0, -0.095, 0.965), (0.095, 0.06, 0.075), "HAIR", body)
     cylinder("Kettle hat brim", (0, 0, 1.12), 0.25, 0.028, "IRON", body, 10)
     cone("Kettle hat crown", (0, 0, 1.19), 0.15, 0.13, "STEEL", body, 0.07, 10)
-    _legs(p)
-    _arm(p, "right", hand=(-0.105, -0.20, -0.22), elbow=(-0.03, 0.04, -0.17), glove="LEATHER")
-    _arm(p, "left", hand=(0.305, -0.20, 0.11), elbow=(0.12, -0.20, -0.10), glove="LEATHER")
+    characters.legs(p, name="Leg")
+    characters.arm(p, "right", hand=(-0.105, -0.20, -0.22), elbow=(-0.03, 0.04, -0.17), glove="LEATHER")
+    characters.arm(p, "left", hand=(0.305, -0.20, 0.11), elbow=(0.12, -0.20, -0.10), glove="LEATHER")
     weapon = root("Halberd", (0, 0, 0.82), body)
     p["weapon"] = weapon
     x, y0 = 0.10, -0.20
@@ -169,11 +140,11 @@ def halberdier():
 def longbowman():
     p = _figure("Crown longbowman", "longbowman")
     body = p["body"]
-    box("Belt", (0, 0, 0.53), (0.28, 0.19, 0.07), "LEATHER", body)
-    cone("Team tunic", (0, 0, 0.69), 0.215, 0.34, "TEAM", body, 0.165, 6)
-    box("Tunic collar", (0, -0.115, 0.83), (0.15, 0.025, 0.06), "IVORY", body)
+    characters.belt(body, size=(0.28, 0.19, 0.07))
+    characters.tunic(body, r1=0.215, height=0.34, r2=0.165)
+    characters.tunic_collar(body, z=0.83)
     beam("Quiver strap", (-0.14, -0.13, 0.87), (0.16, -0.12, 0.56), 0.02, "LEATHER", body)
-    _head(body)
+    characters.head(body)
     ico("Hood cap", (0, 0.01, 1.125), (0.155, 0.145, 0.115), "LEAF", body, 2)
     cylinder("Hood band", (0, -0.005, 1.075), 0.152, 0.03, "LEATHER", body, 10)
     cone("Hood tail", (0, 0.15, 1.11), 0.085, 0.24, "LEAF", body, 0.0, 6).rotation_euler.x = -0.8
@@ -183,10 +154,10 @@ def longbowman():
         beam("Quiver arrow", (0.12 + dx, 0.20, 0.95), (0.12 + dx * 2, 0.215, 1.12 + dz), 0.01, "WOOD_LIGHT", body)
         ico("Quiver fletching", (0.12 + dx * 2, 0.215, 1.12 + dz), (0.028, 0.028, 0.04), "IVORY", body)
     box("Hip dagger", (-0.17, 0.04, 0.45), (0.035, 0.035, 0.22), "STEEL", body)
-    _legs(p)
+    characters.legs(p, name="Leg")
     for side, sign in (("left", -1), ("right", 1)):
-        _arm(p, side, hand=(sign * 0.03, -0.07, -0.37), elbow=(sign * 0.03, 0.0, -0.19),
-             bracer="LEATHER", glove="LEATHER")
+        characters.arm(p, side, hand=(sign * 0.03, -0.07, -0.37), elbow=(sign * 0.03, 0.0, -0.19),
+                       bracer="LEATHER", glove="LEATHER")
     bow = root("Longbow", (-0.23, -0.22, 0.52), body)
     p["bow"] = bow
     box("Bow grip", (0, 0, 0), (0.05, 0.07, 0.17), "LEATHER", bow)
@@ -212,12 +183,12 @@ def longbowman():
 def crossbowman():
     p = _figure("Crown crossbowman", "crossbowman")
     body = p["body"]
-    box("Belt", (0, 0, 0.53), (0.30, 0.20, 0.075), "LEATHER", body)
-    cone("Team gambeson", (0, 0, 0.69), 0.23, 0.34, "TEAM", body, 0.175, 6)
-    box("Tunic collar", (0, -0.12, 0.84), (0.15, 0.025, 0.06), "IVORY", body)
+    characters.belt(body)
+    characters.tunic(body, r1=0.23, height=0.34, r2=0.175, name="Team gambeson")
+    characters.tunic_collar(body, y=-0.12, z=0.84)
     box("Breast harness", (0, -0.185, 0.76), (0.20, 0.03, 0.13), "IRON", body)
     beam("Harness strap", (-0.13, -0.19, 0.84), (0.12, -0.19, 0.60), 0.018, "LEATHER", body)
-    _head(body)
+    characters.head(body)
     ico("Sallet dome", (0, 0.01, 1.10), (0.155, 0.15, 0.135), "IRON", body, 2)
     box("Sallet visor", (0, -0.135, 1.075), (0.17, 0.03, 0.065), "STEEL", body)
     box("Sallet tail", (0, 0.17, 1.04), (0.17, 0.12, 0.045), "IRON", body)
@@ -232,9 +203,9 @@ def crossbowman():
     for dx in (-0.02, 0.02):
         beam("Case bolt", (-0.20 + dx, 0.0, 0.48), (-0.20 + dx, 0.0, 0.60), 0.011, "WOOD_LIGHT", body)
         cone("Case bolt head", (-0.20 + dx, 0.0, 0.62), 0.02, 0.05, "STEEL", body, 0.0, 4)
-    _legs(p)
-    _arm(p, "right", hand=(-0.205, -0.26, -0.12), elbow=(-0.06, 0.06, -0.24), glove="LEATHER")
-    _arm(p, "left", hand=(0.205, -0.44, -0.11), elbow=(0.10, -0.20, -0.20), glove="LEATHER")
+    characters.legs(p, name="Leg")
+    characters.arm(p, "right", hand=(-0.205, -0.26, -0.12), elbow=(-0.06, 0.06, -0.24), glove="LEATHER")
+    characters.arm(p, "left", hand=(0.205, -0.44, -0.11), elbow=(0.10, -0.20, -0.20), glove="LEATHER")
     weapon = root("Crossbow", (0, 0, 0.82), body)
     p["weapon"] = weapon
     box("Crossbow stock", (0, -0.44, -0.05), (0.055, 0.52, 0.07), "WOOD_LIGHT", weapon)
@@ -262,26 +233,6 @@ def crossbowman():
 
 # --- posing helpers ----------------------------------------------------------------------------
 
-def _smooth(t):
-    t = max(0.0, min(1.0, t))
-    return t * t * (3 - 2 * t)
-
-
-def _osc(obj, frame, count, amount, base=0.0, phase=0.0, axis=0):
-    obj.rotation_euler[axis] = base + amount * math.sin(2 * math.pi * frame / count + phase)
-
-
-def _breathe(p, frame, count):
-    anim.bob(p["body"], frame, count, 0.012)
-
-
-def _gait(p, frame, count, lean=0.07):
-    anim.bob(p["body"], frame * 2, count, 0.025)
-    _osc(p["left_leg"], frame, count, 0.6)
-    _osc(p["right_leg"], frame, count, 0.6, phase=math.pi)
-    anim.lean(p["body"], lean)
-
-
 def _step(p, frame, forward):
     """Lunge: `forward` is the left leg's swing, the right leg counters it."""
     p["left_leg"].rotation_euler.x = forward[frame]
@@ -290,11 +241,10 @@ def _step(p, frame, forward):
 
 def _topple(body, t, direction, dip=0.0, twist=0.0, axis=0):
     """Fall about the ground origin; direction -1 backward / +1 forward on axis 0, +1 to the right on axis 1."""
-    e = _smooth(t)
+    e = anim.smoothstep(t)
     body.rotation_euler[axis] = direction * 1.52 * e
     body.rotation_euler[2] = twist * e
     body.location.z = 0.13 * e - dip * math.sin(math.pi * t)
-
 
 def _hold(p, angle):
     """Rigid two-handed weapon: arms and weapon share the shoulder-line axis."""
@@ -325,13 +275,13 @@ def _bow_to_hand(p, rotation):
 def _man_at_arms_pose(p, name, frame, count):
     body, left, right = p["body"], p["left_arm"], p["right_arm"]
     if name == "idle":
-        _breathe(p, frame, count)
-        _osc(right, frame, count, 0.04, base=-0.5)
-        _osc(left, frame, count, 0.03, base=-0.3, phase=math.pi)
+        anim.breathe(body, frame, count)
+        anim.swing(right, frame, count, 0.04, base=-0.5)
+        anim.swing(left, frame, count, 0.03, phase=math.pi, base=-0.3)
     elif name == "walk":
-        _gait(p, frame, count, 0.06)
-        _osc(right, frame, count, 0.2, base=-0.5, phase=math.pi)
-        _osc(left, frame, count, 0.15, base=-0.3)
+        anim.human_gait(p, frame, count, lean_angle=0.06)
+        anim.swing(right, frame, count, 0.2, phase=math.pi, base=-0.5)
+        anim.swing(left, frame, count, 0.15, base=-0.3)
     elif name == "attack":
         # Overhead cut: raise to frame 4, impact on frame 5, recover.
         right.rotation_euler.x = (-0.5, -1.2, -2.0, -2.65, -2.8, -1.1, -0.9, -0.65)[frame]
@@ -341,7 +291,7 @@ def _man_at_arms_pose(p, name, frame, count):
         _step(p, frame, (0, 0, 0.05, 0.1, 0.1, -0.35, -0.2, -0.05))
     else:
         t = frame / (count - 1)
-        e = _smooth(t)
+        e = anim.smoothstep(t)
         k = math.sin(math.pi * t)
         _topple(body, t, -1, dip=0.10, twist=0.35)
         p["left_leg"].rotation_euler.x = -0.5 * k
@@ -355,10 +305,10 @@ def _man_at_arms_pose(p, name, frame, count):
 def _halberdier_pose(p, name, frame, count):
     body = p["body"]
     if name == "idle":
-        _breathe(p, frame, count)
+        anim.breathe(body, frame, count)
         _hold(p, -0.05 + 0.025 * math.sin(2 * math.pi * frame / count))
     elif name == "walk":
-        _gait(p, frame, count, 0.05)
+        anim.human_gait(p, frame, count, lean_angle=0.05)
         _hold(p, -0.12 + 0.05 * math.sin(4 * math.pi * frame / count))
     elif name == "attack":
         # Chop: pole top swings back to frame 4, then forward and down on frame 5.
@@ -368,7 +318,7 @@ def _halberdier_pose(p, name, frame, count):
         _step(p, frame, (0, 0, 0.05, 0.1, 0.1, -0.35, -0.2, -0.05))
     else:
         t = frame / (count - 1)
-        e = _smooth(t)
+        e = anim.smoothstep(t)
         k = math.sin(math.pi * t)
         _topple(body, t, 1, dip=0.08, twist=-0.3, axis=1)
         _hold(p, -0.05 + 1.0 * e)
@@ -390,13 +340,13 @@ def _longbowman_pose(p, name, frame, count):
     body, bow, left, right = p["body"], p["bow"], p["left_arm"], p["right_arm"]
     rotation = _CARRY
     if name == "idle":
-        _breathe(p, frame, count)
-        _osc(left, frame, count, 0.03, base=-0.45)
-        _osc(right, frame, count, 0.05)
+        anim.breathe(body, frame, count)
+        anim.swing(left, frame, count, 0.03, base=-0.45)
+        anim.swing(right, frame, count, 0.05)
     elif name == "walk":
-        _gait(p, frame, count, 0.06)
-        _osc(left, frame, count, 0.08, base=-0.45, phase=math.pi)
-        _osc(right, frame, count, 0.4)
+        anim.human_gait(p, frame, count, lean_angle=0.06)
+        anim.swing(left, frame, count, 0.08, phase=math.pi, base=-0.45)
+        anim.swing(right, frame, count, 0.4)
     elif name == "attack":
         raise_ = _RAISE[frame]
         anim.lean(body, (0.0, -0.02, -0.04, -0.05, -0.05, -0.08, -0.03, 0.0)[frame])
@@ -423,7 +373,7 @@ def _longbowman_pose(p, name, frame, count):
         return
     else:
         t = frame / (count - 1)
-        e = _smooth(t)
+        e = anim.smoothstep(t)
         k = math.sin(math.pi * t)
         _topple(body, t, -1, dip=0.06, twist=-0.25)
         p["left_leg"].rotation_euler.x = -0.4 * k
@@ -445,10 +395,10 @@ _XBOW_LOADED = (True, True, True, True, True, False, False, True)
 def _crossbowman_pose(p, name, frame, count):
     body, weapon = p["body"], p["weapon"]
     if name == "idle":
-        _breathe(p, frame, count)
+        anim.breathe(body, frame, count)
         _hold(p, 0.45 + 0.02 * math.sin(2 * math.pi * frame / count))
     elif name == "walk":
-        _gait(p, frame, count, 0.05)
+        anim.human_gait(p, frame, count, lean_angle=0.05)
         _hold(p, 0.45 + 0.04 * math.sin(4 * math.pi * frame / count))
     elif name == "attack":
         # Raise, aim, release on frame 5 (string slack, bolt gone), recock on frame 7.
@@ -462,7 +412,7 @@ def _crossbowman_pose(p, name, frame, count):
         anim.visibility(p["string_slack"], not loaded)
     else:
         t = frame / (count - 1)
-        e = _smooth(t)
+        e = anim.smoothstep(t)
         k = math.sin(math.pi * t)
         _topple(body, t, 1, dip=0.2, twist=0.25)
         _hold(p, 0.45 + 1.0 * e)
@@ -475,18 +425,6 @@ _POSES = {"man_at_arms": _man_at_arms_pose, "halberdier": _halberdier_pose,
 
 
 def clips(parts):
-    reset = anim.resetter(parts["root"])
     pose = _POSES[parts["kind"]]
-
-    def clip(name):
-        descriptor = anim.UNIT_ANIMS[name]
-        count = descriptor["frames"]
-
-        def apply(frame):
-            reset()
-            pose(parts, name, frame, count)
-        apply.descriptor = descriptor
-        apply.frames = count
-        apply.loop = descriptor["loop"]
-        return apply
-    return {name: clip(name) for name in anim.UNIT_ANIMS}
+    return anim.clip_set(parts["root"], anim.UNIT_ANIMS,
+                         lambda name, frame, count: pose(parts, name, frame, count))

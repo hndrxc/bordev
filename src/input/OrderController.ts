@@ -344,7 +344,8 @@ export class OrderController {
         targetId !== undefined ? sim.world.getEntity(targetId) : undefined;
       const rallyTarget =
         pickedEntity &&
-        (pickedEntity.kind === 'unit' || pickedEntity.kind === 'building')
+        (pickedEntity.kind === 'unit' || pickedEntity.kind === 'building') &&
+        pickedEntity.player === 0
           ? pickedEntity.id
           : undefined;
       for (let i = 0; i < prodBuildings.length; i++) {

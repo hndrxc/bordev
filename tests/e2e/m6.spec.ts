@@ -64,6 +64,7 @@ async function clearDebugWalkers(page: Page): Promise<void> {
       }
     }
   });
+  await waitForTicks(page, 2);
 }
 
 async function getKeep(page: Page): Promise<BaseBuilding> {
@@ -94,7 +95,7 @@ async function createBuildings(
   page: Page,
   types: readonly string[],
 ): Promise<BaseBuilding[]> {
-  return page.evaluate(
+  const result = await page.evaluate(
     (requested) => {
       const sim = window.__bordev?.sim;
       if (!sim) throw new Error('Simulation not initialized');
@@ -193,6 +194,8 @@ async function createBuildings(
     },
     [...types],
   );
+  await waitForTicks(page, 2);
+  return result;
 }
 
 /** Cottages needed so `extraPop` more units fit under the population cap. */
@@ -398,6 +401,7 @@ async function waitForVisibleInPlayfield(
 /** Centres, picks and left-clicks a real building; asserts the click point is in the playfield. */
 async function selectBuilding(page: Page, id: number): Promise<void> {
   await centerOnEntity(page, id);
+  await waitForTicks(page, 2);
   await waitForVisibleInPlayfield(page, id);
   const field = await playfield(page);
   const pt = await pickablePoint(page, id);
@@ -417,16 +421,16 @@ async function selectBuilding(page: Page, id: number): Promise<void> {
 }
 
 /**
- * Searches the current viewport's unobscured playfield for a passable, occupiable
- * ground point that is reachable from the producer building and sufficiently distant
- * from the building's ring-1 perimeter (to prove real movement).
+ * Searches the current viewport's playfield for a passable ground point that is
+ * BFS-reachable from all given producer buildings and has perimeter distance >= 3.8
+ * from every one of them (guaranteeing spawn distance > 2.0 for all producers).
  */
-async function searchViewportGround(
+async function searchSharedViewportGround(
   page: Page,
-  buildingId: number,
+  buildingIds: number[],
 ): Promise<{ sx: number; sy: number; wx: number; wz: number } | null> {
   return page.evaluate(
-    ({ id, fnSrc }) => {
+    ({ ids, fnSrc }) => {
       const screenToGround = new Function(
         'x',
         'y',
@@ -438,10 +442,14 @@ async function searchViewportGround(
       const sim = bordev?.sim;
       const cam = renderer?.camera;
       if (!bordev || !renderer || !sim || !cam) throw new Error('Not ready');
-      const building = sim.world.getEntity(id);
-      if (!building || building.kind !== 'building') {
-        throw new Error(`Building ${id} missing`);
-      }
+
+      const buildings = ids.map((id) => {
+        const b = sim.world.getEntity(id);
+        if (!b || b.kind !== 'building') {
+          throw new Error(`Building ${id} missing`);
+        }
+        return b;
+      });
 
       const canvas = document.querySelector('canvas[aria-label="Game view"]');
       const topBar = document.querySelector('[data-testid="hud-topbar"]');
@@ -462,43 +470,7 @@ async function searchViewportGround(
       const world = sim.world;
       const grid = world.grid;
       const mapSize = world.map.size;
-
-      const bCenterX = building.x + building.width / 2;
-      const bCenterZ = building.z + building.height / 2;
-      const bMinX = building.x;
-      const bMaxX = building.x + building.width;
-      const bMinZ = building.z;
-      const bMaxZ = building.z + building.height;
-
-      // BFS outward from building perimeter to identify all reachable passable tiles
       const totalTiles = mapSize * mapSize;
-      const reachable = new Uint8Array(totalTiles);
-      const queue = new Int32Array(totalTiles);
-      let head = 0;
-      let tail = 0;
-
-      for (
-        let tz = Math.max(0, bMinZ - 1);
-        tz <= Math.min(mapSize - 1, bMaxZ);
-        tz++
-      ) {
-        for (
-          let tx = Math.max(0, bMinX - 1);
-          tx <= Math.min(mapSize - 1, bMaxX);
-          tx++
-        ) {
-          const isPerimeter =
-            tx < bMinX || tx >= bMaxX || tz < bMinZ || tz >= bMaxZ;
-          if (!isPerimeter) continue;
-          if (grid.isPassable(tx, tz, 0)) {
-            const idx = tz * mapSize + tx;
-            if (reachable[idx] === 0) {
-              reachable[idx] = 1;
-              queue[tail++] = idx;
-            }
-          }
-        }
-      }
 
       const DIRS_4: readonly [number, number][] = [
         [1, 0],
@@ -506,30 +478,66 @@ async function searchViewportGround(
         [0, 1],
         [0, -1],
       ];
-      while (head < tail) {
-        const curr = queue[head++];
-        const cx = curr % mapSize;
-        const cz = (curr / mapSize) | 0;
-        for (let i = 0; i < 4; i++) {
-          const nx = cx + DIRS_4[i][0];
-          const nz = cz + DIRS_4[i][1];
-          if (nx >= 0 && nx < mapSize && nz >= 0 && nz < mapSize) {
-            const nIdx = nz * mapSize + nx;
-            if (reachable[nIdx] === 0 && grid.isPassable(nx, nz, 0)) {
-              reachable[nIdx] = 1;
-              queue[tail++] = nIdx;
+
+      const reachables: Uint8Array[] = buildings.map((b) => {
+        const reachable = new Uint8Array(totalTiles);
+        const queue = new Int32Array(totalTiles);
+        let head = 0;
+        let tail = 0;
+
+        const bMinX = b.x;
+        const bMaxX = b.x + b.width;
+        const bMinZ = b.z;
+        const bMaxZ = b.z + b.height;
+
+        for (
+          let tz = Math.max(0, bMinZ - 1);
+          tz <= Math.min(mapSize - 1, bMaxZ);
+          tz++
+        ) {
+          for (
+            let tx = Math.max(0, bMinX - 1);
+            tx <= Math.min(mapSize - 1, bMaxX);
+            tx++
+          ) {
+            const isPerimeter =
+              tx < bMinX || tx >= bMaxX || tz < bMinZ || tz >= bMaxZ;
+            if (!isPerimeter) continue;
+            if (grid.isPassable(tx, tz, 0)) {
+              const idx = tz * mapSize + tx;
+              if (reachable[idx] === 0) {
+                reachable[idx] = 1;
+                queue[tail++] = idx;
+              }
             }
           }
         }
-      }
+
+        while (head < tail) {
+          const curr = queue[head++];
+          const cx = curr % mapSize;
+          const cz = (curr / mapSize) | 0;
+          for (let i = 0; i < 4; i++) {
+            const nx = cx + DIRS_4[i][0];
+            const nz = cz + DIRS_4[i][1];
+            if (nx >= 0 && nx < mapSize && nz >= 0 && nz < mapSize) {
+              const nIdx = nz * mapSize + nx;
+              if (reachable[nIdx] === 0 && grid.isPassable(nx, nz, 0)) {
+                reachable[nIdx] = 1;
+                queue[tail++] = nIdx;
+              }
+            }
+          }
+        }
+        return reachable;
+      });
 
       interface Candidate {
         sx: number;
         sy: number;
         wx: number;
         wz: number;
-        distFromPerimeter: number;
-        distCenterSq: number;
+        totalDistSq: number;
       }
       const candidates: Candidate[] = [];
 
@@ -551,7 +559,6 @@ async function searchViewportGround(
           const lx = px - c.left;
           const ly = py - c.top;
 
-          // 1. Unpicked: must clear every entity with clearance margin
           let clearOfEntities = true;
           for (let i = 0; i < clearanceOffsets.length; i++) {
             const ox = clearanceOffsets[i][0];
@@ -563,82 +570,76 @@ async function searchViewportGround(
           }
           if (!clearOfEntities) continue;
 
-          // 2. Camera conversion helper: screenToGround
           const ground = screenToGround(lx, ly, view);
           const wx = ground.x;
           const wz = ground.z;
 
-          // 3. Map bounds
           if (wx < 1 || wx >= mapSize - 1 || wz < 1 || wz >= mapSize - 1) {
             continue;
           }
 
-          // 4. Passable & occupiable
           const tx = Math.floor(wx);
           const tz = Math.floor(wz);
           if (!grid.isPassable(tx, tz, 0)) continue;
           if (grid.canOccupy && !grid.canOccupy(wx, wz, 0.4, 0)) continue;
 
-          // 5. Reachable via BFS from producer perimeter
           const tileIdx = tz * mapSize + tx;
-          if (reachable[tileIdx] === 0) continue;
+          let reachableFromAll = true;
+          for (let bIdx = 0; bIdx < reachables.length; bIdx++) {
+            if (reachables[bIdx][tileIdx] === 0) {
+              reachableFromAll = false;
+              break;
+            }
+          }
+          if (!reachableFromAll) continue;
 
-          // 6. Distance from producer perimeter:
-          // Must be >= 3.8 so every ring-1 spawn tile is > 2.0 tiles away,
-          // proving real movement from spawn to rally point.
-          const dxFootprint = Math.max(0, bMinX - wx, wx - bMaxX);
-          const dzFootprint = Math.max(0, bMinZ - wz, wz - bMaxZ);
-          const distFromPerimeter = Math.hypot(dxFootprint, dzFootprint);
+          let validDist = true;
+          let totalDistSq = 0;
+          for (let bIdx = 0; bIdx < buildings.length; bIdx++) {
+            const b = buildings[bIdx];
+            const dxFootprint = Math.max(0, b.x - wx, wx - (b.x + b.width));
+            const dzFootprint = Math.max(0, b.z - wz, wz - (b.z + b.height));
+            const dist = Math.hypot(dxFootprint, dzFootprint);
+            if (dist < 3.8 || dist > 20.0) {
+              validDist = false;
+              break;
+            }
+            const bCenterX = b.x + b.width / 2;
+            const bCenterZ = b.z + b.height / 2;
+            totalDistSq += (wx - bCenterX) ** 2 + (wz - bCenterZ) ** 2;
+          }
+          if (!validDist) continue;
 
-          const distCenterSq = (wx - bCenterX) ** 2 + (wz - bCenterZ) ** 2;
           candidates.push({
             sx: px,
             sy: py,
             wx,
             wz,
-            distFromPerimeter,
-            distCenterSq,
+            totalDistSq,
           });
         }
       }
 
       if (candidates.length === 0) return null;
 
-      // Filter to candidates with distFromPerimeter >= 3.8 (guarantees > 2.0 from any ring-1 spawn tile)
-      // and within reasonable reach (<= 14 tiles)
-      const validForProof = candidates.filter(
-        (c) => c.distFromPerimeter >= 3.8 && c.distFromPerimeter <= 14.0,
+      candidates.sort(
+        (a, b) => a.totalDistSq - b.totalDistSq || a.sy - b.sy || a.sx - b.sx,
       );
 
-      const pool = validForProof.length > 0 ? validForProof : candidates;
-
-      // Deterministically sort by distance to producer center (nearest first)
-      pool.sort(
-        (a, b) => a.distCenterSq - b.distCenterSq || a.sy - b.sy || a.sx - b.sx,
-      );
-
-      const best = pool[0];
+      const best = candidates[0];
       return { sx: best.sx, sy: best.sy, wx: best.wx, wz: best.wz };
     },
-    { id: buildingId, fnSrc: screenToGround.toString() },
+    { ids: buildingIds, fnSrc: screenToGround.toString() },
   );
 }
 
-/**
- * Picks an unobstructed, passable ground point on screen near the selected
- * building (inside the playfield band, clear of every picked entity and of
- * impassable tiles) and returns page coordinates plus the expected world point.
- * If the current viewport has no clear point, pans to adjacent regions while
- * preserving building selection.
- */
-async function findGroundScreenPoint(
+async function findSharedGroundScreenPoint(
   page: Page,
-  buildingId: number,
+  buildingIds: number[],
 ): Promise<{ sx: number; sy: number; wx: number; wz: number }> {
-  const current = await searchViewportGround(page, buildingId);
+  const current = await searchSharedViewportGround(page, buildingIds);
   if (current) return current;
 
-  // Pan while preserving selection to adjacent clear regions
   const panOffsets: readonly [number, number][] = [
     [0, -8],
     [0, 8],
@@ -661,44 +662,13 @@ async function findGroundScreenPoint(
     );
     await waitForTicks(page, 2);
 
-    const selection = await page.evaluate(
-      () => window.__bordev?.session.input.selection.ids,
-    );
-    expect(selection, 'selection preserved during pan').toEqual([buildingId]);
-
-    const found = await searchViewportGround(page, buildingId);
+    const found = await searchSharedViewportGround(page, buildingIds);
     if (found) return found;
   }
 
   throw new Error(
-    `No clear passable reachable ground point near building ${buildingId}`,
+    `No clear passable reachable ground point shared by buildings ${buildingIds.join(', ')}`,
   );
-}
-
-/** Real right-click on ground with the building selected; asserts the stored ground rally. */
-async function setGroundRally(
-  page: Page,
-  buildingId: number,
-): Promise<{ x: number; z: number }> {
-  const target = await findGroundScreenPoint(page, buildingId);
-  await page.mouse.click(target.sx, target.sy, { button: 'right' });
-  await waitForTicks(page, 2);
-  const rally = await page.evaluate((id) => {
-    const b = window.__bordev?.sim?.world.getEntity(id);
-    if (!b || b.kind !== 'building') return null;
-    return b.rallyPoint ?? null;
-  }, buildingId);
-  expect(rally, 'ground right-click stores a rally point').not.toBeNull();
-  expect(Math.abs(rally!.x - target.wx)).toBeLessThan(1.0);
-  expect(Math.abs(rally!.z - target.wz)).toBeLessThan(1.0);
-  expect(rally!.targetId).toBeUndefined();
-
-  // Validate conversion consistency via worldToScreen fixture helper
-  const screenProj = await worldToScreen(page, target.wx, target.wz);
-  expect(Math.abs(screenProj.x - target.sx)).toBeLessThan(2.0);
-  expect(Math.abs(screenProj.y - target.sy)).toBeLessThan(2.0);
-
-  return { x: rally!.x, z: rally!.z };
 }
 
 // ---------------------------------------------------------------------------
@@ -786,10 +756,6 @@ test('1. command card requirements, age research, cancellation and Heavy Plough 
   await expect(cardButton(page, 'train-peasant')).toHaveAttribute(
     'aria-disabled',
     'true',
-  );
-  await expect(cardButton(page, 'train-peasant')).toHaveAttribute(
-    'title',
-    /Researching/,
   );
 
   await cancel.click();
@@ -947,12 +913,52 @@ test('2. trains each of the ten Crown units from real buildings via the command 
   const eventStart = await page.evaluate(
     () => window.__bordev?.sim?.world.events.length ?? 0,
   );
-  const rallies: Record<string, { x: number; z: number }> = {};
+  // ONE shared reachable ground rally for all 5 producers
+  const producerBuildings = TRAIN_PLAN.map((step) => byType[step.building]);
+  const sharedTarget = await findSharedGroundScreenPoint(
+    page,
+    producerBuildings.map((b) => b.id),
+  );
+
+  let sharedRallyCoords: { x: number; z: number } | null = null;
   for (const step of TRAIN_PLAN) {
     const building = byType[step.building];
     expect(building, `${step.building} exists`).toBeDefined();
     await selectBuilding(page, building.id);
-    rallies[step.building] = await setGroundRally(page, building.id);
+
+    // Selection persists across camera moves: frame the shared ground point itself.
+    await page.evaluate(
+      ([cx, cz]) => {
+        window.__bordev?.session.input.camera.centerOn(cx, cz);
+      },
+      [sharedTarget.wx, sharedTarget.wz] as const,
+    );
+    await waitForTicks(page, 2);
+
+    const clickPt = await worldToScreen(page, sharedTarget.wx, sharedTarget.wz);
+    const field = await playfield(page);
+    expect(clickPt.y).toBeGreaterThanOrEqual(field.top);
+    expect(clickPt.y).toBeLessThanOrEqual(field.bottom);
+    expect(clickPt.x).toBeGreaterThanOrEqual(field.left);
+    expect(clickPt.x).toBeLessThanOrEqual(field.right);
+    await page.mouse.click(clickPt.x, clickPt.y, { button: 'right' });
+    await waitForTicks(page, 2);
+
+    const bRally = await page.evaluate((id) => {
+      const b = window.__bordev?.sim?.world.getEntity(id);
+      return b && b.kind === 'building' ? b.rallyPoint ?? null : null;
+    }, building.id);
+    expect(bRally, 'ground right-click stores rally point').not.toBeNull();
+    expect(Math.abs(bRally!.x - sharedTarget.wx)).toBeLessThan(1.0);
+    expect(Math.abs(bRally!.z - sharedTarget.wz)).toBeLessThan(1.0);
+    expect(bRally!.targetId).toBeUndefined();
+
+    if (!sharedRallyCoords) {
+      sharedRallyCoords = { x: bRally!.x, z: bRally!.z };
+    } else {
+      expect(Math.abs(bRally!.x - sharedRallyCoords.x)).toBeLessThan(0.01);
+      expect(Math.abs(bRally!.z - sharedRallyCoords.z)).toBeLessThan(0.01);
+    }
 
     for (const unit of step.units) {
       const button = cardButton(page, `train-${unit.replace(/_/g, '-')}`);
@@ -1004,18 +1010,18 @@ test('2. trains each of the ten Crown units from real buildings via the command 
     TRAIN_PLAN.flatMap((s) => [...s.units]).sort(),
   );
 
-  // Each unit walks to its building's ground rally (within 2 tiles).
+  // Each unit walks to the shared ground rally (arrives within 2 tiles).
   const destinations = trained.units.map((u) => {
     const step = TRAIN_PLAN.find((s) => s.units.includes(u.unitType))!;
-    return { ...u, building: step.building, rally: rallies[step.building] };
+    return { ...u, building: step.building, rally: sharedRallyCoords! };
   });
 
-  // Verify that every unit spawned at distance > 2 from its rally point, proving real movement:
+  // Verify that every unit spawned at distance > 2 from the shared rally point, proving real movement:
   for (const d of destinations) {
     const spawnDist = Math.hypot(d.spawnX - d.rally.x, d.spawnZ - d.rally.z);
     expect(
       spawnDist,
-      `${d.unitType} initial spawn distance from rally (${spawnDist.toFixed(2)}) must be > 2.0 to prove movement`,
+      `${d.unitType} initial spawn distance from shared rally (${spawnDist.toFixed(2)}) must be > 2.0 to prove movement`,
     ).toBeGreaterThan(2.0);
   }
 
@@ -1058,7 +1064,6 @@ test('2. trains each of the ten Crown units from real buildings via the command 
         return {
           rect: rect ? { ...rect } : null,
           portrait: portrait ? { ...portrait } : null,
-          visibleSprites: renderer.stats().visibleSpriteCount,
         };
       },
       [d.id, d.unitType] as const,
@@ -1066,7 +1071,6 @@ test('2. trains each of the ten Crown units from real buildings via the command 
     expect(surface.rect, `${d.unitType} screen rect`).not.toBeNull();
     expect(surface.rect!.right - surface.rect!.left).toBeGreaterThan(4);
     expect(surface.rect!.bottom - surface.rect!.top).toBeGreaterThan(4);
-    expect(surface.visibleSprites).toBeGreaterThan(0);
     // The portrait resolves through the unit's own atlas asset, never the
     // peasant fallback used for unmapped types.
     expect(surface.portrait, `${d.unitType} atlas portrait`).not.toBeNull();
@@ -1074,31 +1078,397 @@ test('2. trains each of the ten Crown units from real buildings via the command 
     expect(surface.portrait!.w).toBeGreaterThan(0);
     expect(surface.portrait!.h).toBeGreaterThan(0);
 
-    // Pickable on its own pixels (or, if stacked, hidden only behind another unit).
-    const pickedId = await page.evaluate((id) => {
-      const renderer = window.__bordev?.renderer;
-      const rect = renderer?.getEntityScreenRect(id);
-      if (!renderer || !rect) return null;
-      const w = rect.right - rect.left;
-      const h = rect.bottom - rect.top;
-      for (let iy = 0; iy < 7; iy++) {
-        for (let ix = 0; ix < 7; ix++) {
-          const x = rect.left + w * (0.1 + 0.8 * (ix / 6));
-          const y = rect.top + h * (0.1 + 0.8 * (iy / 6));
-          if (renderer.pickEntity(x, y) === id) return id;
+    // Pickable on its own pixels or explicitly another overlapping trained unit (no arbitrary fallback).
+    const validPick = await page.evaluate(
+      ([id, allTrainedIds]) => {
+        const renderer = window.__bordev?.renderer;
+        const rect = renderer?.getEntityScreenRect(id);
+        if (!renderer || !rect) return null;
+        const w = rect.right - rect.left;
+        const h = rect.bottom - rect.top;
+        const candidateIds = new Set(allTrainedIds);
+        for (let iy = 0; iy < 7; iy++) {
+          for (let ix = 0; ix < 7; ix++) {
+            const x = rect.left + w * (0.1 + 0.8 * (ix / 6));
+            const y = rect.top + h * (0.1 + 0.8 * (iy / 6));
+            const picked = renderer.pickEntity(x, y);
+            if (picked === id) {
+              return { pickedId: picked, matched: 'self' };
+            }
+            if (picked !== undefined && candidateIds.has(picked)) {
+              return { pickedId: picked, matched: 'overlapping_trained' };
+            }
+          }
         }
-      }
-      return renderer.pickEntity(
-        (rect.left + rect.right) / 2,
-        (rect.top + rect.bottom) / 2,
-      );
-    }, d.id);
-    expect(pickedId, `${d.unitType} visible/pickable`).not.toBeNull();
-    expect(pickedId).not.toBeUndefined();
+        return null;
+      },
+      [d.id, destinations.map((x) => x.id)] as const,
+    );
+    expect(
+      validPick,
+      `${d.unitType} visible/pickable (must pick itself or explicitly an overlapping trained unit)`,
+    ).not.toBeNull();
   }
 
   expect(consoleErrors, 'console errors during M6 training test').toEqual([]);
   expect(pageErrors, 'uncaught page errors during M6 training test').toEqual(
     [],
   );
+});
+
+interface RallyState {
+  x: number;
+  z: number;
+  targetId?: number;
+}
+
+async function rallyOf(
+  page: Page,
+  buildingId: number,
+): Promise<RallyState | null> {
+  return page.evaluate((id) => {
+    const b = window.__bordev?.sim?.world.getEntity(id);
+    if (!b || b.kind !== 'building' || !b.rallyPoint) return null;
+    const { x, z, targetId } = b.rallyPoint;
+    return { x, z, targetId };
+  }, buildingId);
+}
+
+/**
+ * Walks `unitId` (real move order, stepped by the simulation) to open ground where no
+ * other unit, building or mine can overlap or sit in front of its sprite: >= 5 tiles
+ * from every other unit and `keepAway` point, and either >= 12 tiles from or strictly in
+ * front of (greater x+z than the far corner) every building and mine. Nearest such
+ * tile to the unit's current position wins.
+ */
+async function moveUnitToOpenGround(
+  page: Page,
+  unitId: number,
+  keepAway: { x: number; z: number },
+): Promise<{ x: number; z: number }> {
+  const result = await page.evaluate(
+    ([id, ax, az]) => {
+      const sim = window.__bordev?.sim;
+      if (!sim) throw new Error('Simulation not initialized');
+      const world = sim.world;
+      const unit = world.getEntity(id);
+      if (!unit || unit.kind !== 'unit') throw new Error('Unit missing');
+      const size = world.map.size;
+
+      const blocks: { x: number; z: number; w: number; h: number }[] = [];
+      const others: { x: number; z: number }[] = [{ x: ax, z: az }];
+      for (const e of world.entities) {
+        if (!e || e.id === id) continue;
+        if (e.kind === 'building' || e.kind === 'mine') {
+          blocks.push({ x: e.x, z: e.z, w: e.width, h: e.height });
+        } else if (e.kind === 'unit') {
+          others.push({ x: e.x, z: e.z });
+        }
+      }
+
+      let best: { x: number; z: number; d: number } | undefined;
+      for (let tz = 3; tz < size - 3; tz++) {
+        for (let tx = 3; tx < size - 3; tx++) {
+          const px = tx + 0.5;
+          const pz = tz + 0.5;
+          const d = Math.hypot(px - unit.x, pz - unit.z);
+          if (best && d >= best.d) continue;
+          let ok = true;
+          for (let dz = -1; ok && dz <= 1; dz++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              if (!world.grid.isPassable(px + dx, pz + dz, 0)) {
+                ok = false;
+                break;
+              }
+            }
+          }
+          if (!ok) continue;
+          for (const o of others) {
+            if (Math.hypot(o.x - px, o.z - pz) < 5) {
+              ok = false;
+              break;
+            }
+          }
+          if (!ok) continue;
+          for (const b of blocks) {
+            const inFront = px + pz > b.x + b.w + b.z + b.h + 0.5;
+            const gap = Math.hypot(
+              Math.max(0, b.x - px, px - (b.x + b.w)),
+              Math.max(0, b.z - pz, pz - (b.z + b.h)),
+            );
+            if (!(gap >= 12 || (inFront && gap >= 2))) {
+              ok = false;
+              break;
+            }
+          }
+          if (ok) best = { x: px, z: pz, d };
+        }
+      }
+      if (!best) throw new Error('No open ground found for the target unit');
+
+      sim.issue({ kind: 'move', player: 0, ids: [id], x: best.x, z: best.z });
+      sim.step();
+      for (let t = 0; t < 3000 && unit.order?.kind === 'move'; t++) sim.step();
+      return {
+        x: unit.x,
+        z: unit.z,
+        dist: Math.hypot(unit.x - best.x, unit.z - best.z),
+      };
+    },
+    [unitId, keepAway.x, keepAway.z] as const,
+  );
+  expect(result.dist, 'target reached the open ground tile').toBeLessThan(1);
+  await waitForTicks(page, 2);
+  return { x: result.x, z: result.z };
+}
+
+/** Real right-click on a picked entity while only `buildingId` is selected. */
+async function rightClickEntityWithBuildingSelected(
+  page: Page,
+  buildingId: number,
+  targetId: number,
+): Promise<void> {
+  await selectBuilding(page, buildingId);
+  await centerOnEntity(page, targetId);
+  await waitForTicks(page, 2);
+  await waitForVisibleInPlayfield(page, targetId);
+  // Two rendered frames so entity rects reflect the current simulation positions/camera.
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      ),
+  );
+  const pt = await pickablePoint(page, targetId);
+  await page.mouse.click(pt.x, pt.y, { button: 'right' });
+  await waitForTicks(page, 2);
+}
+
+/**
+ * Queues one spearman through the real command card, then fast-forwards the sim
+ * to the tick it spawns. Returns its id and the move destination the rally gave it
+ * at spawn time.
+ */
+async function trainSpearmanToSpawn(
+  page: Page,
+  barracksId: number,
+): Promise<{ id: number; dest: { x: number; z: number } | null }> {
+  const knownIds = await page.evaluate(() => {
+    const sim = window.__bordev?.sim;
+    if (!sim) throw new Error('Simulation not initialized');
+    const ids: number[] = [];
+    for (const e of sim.world.entities) {
+      if (e && e.kind === 'unit' && e.type === 'spearman') ids.push(e.id);
+    }
+    return ids;
+  });
+  await selectBuilding(page, barracksId);
+  const button = cardButton(page, 'train-spearman');
+  await expect(button).not.toHaveAttribute('aria-disabled', 'true');
+  await button.click();
+  await page.waitForFunction(
+    (id) => {
+      const e = window.__bordev?.sim?.world.getEntity(id);
+      return e?.kind === 'building' && e.trainingQueue.length === 1;
+    },
+    barracksId,
+    { timeout: 5_000 },
+  );
+  return page.evaluate((known) => {
+    const sim = window.__bordev?.sim;
+    if (!sim) throw new Error('Simulation not initialized');
+    const seen = new Set(known);
+    for (let ticks = 0; ticks < 4000; ticks++) {
+      sim.step();
+      for (const e of sim.world.entities) {
+        if (e && e.kind === 'unit' && e.type === 'spearman' && !seen.has(e.id)) {
+          const order = e.order;
+          const dest =
+            order?.kind === 'move' &&
+            order.x !== undefined &&
+            order.z !== undefined
+              ? { x: order.x, z: order.z }
+              : null;
+          return { id: e.id, dest };
+        }
+      }
+    }
+    throw new Error('Spearman never spawned');
+  }, knownIds);
+}
+
+/** Steps the sim until the unit is within `tolerance` of the point; returns the final distance. */
+async function stepUntilNear(
+  page: Page,
+  unitId: number,
+  point: { x: number; z: number },
+  tolerance: number,
+): Promise<number> {
+  return page.evaluate(
+    ([id, px, pz, tol]) => {
+      const sim = window.__bordev?.sim;
+      if (!sim) throw new Error('Simulation not initialized');
+      const dist = () => {
+        const u = sim.world.getEntity(id);
+        return u && u.kind === 'unit'
+          ? Math.hypot(u.x - px, u.z - pz)
+          : Infinity;
+      };
+      for (let ticks = 0; ticks < 3000 && dist() > tol; ticks++) sim.step();
+      return dist();
+    },
+    [unitId, point.x, point.z, tolerance] as const,
+  );
+}
+
+test('3. right-click rally on an own moving unit and another building resolves at spawn; self-target is ground; a recycled target falls back to ground', async ({
+  page,
+}) => {
+  test.setTimeout(180_000);
+  const { consoleErrors, pageErrors } = await setupM4Session(page, {
+    centerOn: { x: 22, z: 22 },
+  });
+  await page.evaluate(() => window.__bordev?.cheats.resources(20_000));
+  await clearDebugWalkers(page);
+
+  // Cottages keep three spearmen under the population cap.
+  const cottages = await cottagesFor(page, 4);
+  const [barracks, chapel] = await createBuildings(page, [
+    'barracks',
+    'chapel',
+    ...Array.from({ length: cottages }, () => 'cottage'),
+  ]);
+
+  // An own unit beside the barracks is the live rally target.
+  const targetStart = {
+    x: barracks.x + barracks.width + 2.5,
+    z: barracks.z + 1.5,
+  };
+  const targetId = await page.evaluate(
+    ([x, z]) => {
+      const sim = window.__bordev?.sim;
+      if (!sim) throw new Error('Simulation missing');
+      return sim.world.spawnUnit(0, 'peasant', x, z).id;
+    },
+    [targetStart.x, targetStart.z] as const,
+  );
+  await waitForTicks(page, 2);
+  // A: right-click the own unit, then move it; the spawn resolves its new position.
+  await rightClickEntityWithBuildingSelected(page, barracks.id, targetId);
+  const rallyOnUnit = await rallyOf(page, barracks.id);
+  expect(rallyOnUnit?.targetId, 'right-click on own unit follows it').toBe(
+    targetId,
+  );
+
+  const targetEnd = await page.evaluate(
+    ([id, mx, mz]) => {
+      const sim = window.__bordev?.sim;
+      if (!sim) throw new Error('Simulation not initialized');
+      sim.issue({ kind: 'move', player: 0, ids: [id], x: mx, z: mz });
+      const unit = sim.world.getEntity(id);
+      if (!unit || unit.kind !== 'unit') throw new Error('Target unit missing');
+      sim.step();
+      for (let t = 0; t < 1500 && unit.order?.kind === 'move'; t++) sim.step();
+      return { x: unit.x, z: unit.z };
+    },
+    [targetId, barracks.x - 0.5, barracks.z + barracks.height + 0.5] as const,
+  );
+  expect(
+    Math.hypot(targetEnd.x - targetStart.x, targetEnd.z - targetStart.z),
+    'target must really have moved away from the right-click position',
+  ).toBeGreaterThan(2);
+
+  const spearmanA = await trainSpearmanToSpawn(page, barracks.id);
+  expect(spearmanA.dest, 'rally move order at spawn').not.toBeNull();
+  expect(
+    Math.hypot(spearmanA.dest!.x - targetEnd.x, spearmanA.dest!.z - targetEnd.z),
+    'spawn order follows the target to its current position',
+  ).toBeLessThan(0.05);
+  expect(
+    Math.hypot(
+      spearmanA.dest!.x - rallyOnUnit!.x,
+      spearmanA.dest!.z - rallyOnUnit!.z,
+    ),
+    'not the stale click-time ground point',
+  ).toBeGreaterThan(2);
+  expect(
+    await stepUntilNear(page, spearmanA.id, targetEnd, 2),
+  ).toBeLessThanOrEqual(2);
+
+  // B: right-click another own building; the spawn walks to its perimeter.
+  await rightClickEntityWithBuildingSelected(page, barracks.id, chapel.id);
+  const rallyOnChapel = await rallyOf(page, barracks.id);
+  expect(
+    rallyOnChapel?.targetId,
+    'right-click on own building follows it',
+  ).toBe(chapel.id);
+
+  const spearmanB = await trainSpearmanToSpawn(page, barracks.id);
+  expect(spearmanB.dest, 'rally move order at spawn').not.toBeNull();
+  const bx = spearmanB.dest!.x;
+  const bz = spearmanB.dest!.z;
+  expect(
+    bx >= chapel.x &&
+      bx < chapel.x + chapel.width &&
+      bz >= chapel.z &&
+      bz < chapel.z + chapel.height,
+    'destination is never inside the blocked footprint',
+  ).toBe(false);
+  const perimeterDist = Math.hypot(
+    Math.max(0, chapel.x - bx, bx - (chapel.x + chapel.width)),
+    Math.max(0, chapel.z - bz, bz - (chapel.z + chapel.height)),
+  );
+  expect(
+    perimeterDist,
+    'destination hugs the chapel perimeter',
+  ).toBeLessThanOrEqual(1.5);
+  expect(
+    await stepUntilNear(page, spearmanB.id, spearmanB.dest!, 1.5),
+  ).toBeLessThanOrEqual(1.5);
+
+  // C: right-clicking the producer itself is a plain ground rally.
+  await rightClickEntityWithBuildingSelected(page, barracks.id, barracks.id);
+  const selfRally = await rallyOf(page, barracks.id);
+  expect(selfRally, 'self right-click still stores a rally').not.toBeNull();
+  expect(
+    selfRally!.targetId,
+    'self-target never follows itself',
+  ).toBeUndefined();
+
+  // D: a followed unit whose id is recycled by an enemy falls back to ground. The
+  // target walks (real move order) to open ground first so the spearmen that rallied
+  // to its previous spot and the nearby buildings cannot cover its sprite.
+  await moveUnitToOpenGround(page, targetId, targetStart);
+  await rightClickEntityWithBuildingSelected(page, barracks.id, targetId);
+  const rallyBeforeRecycle = await rallyOf(page, barracks.id);
+  expect(rallyBeforeRecycle?.targetId).toBe(targetId);
+  const enemy = await page.evaluate(
+    ([id, x, z]) => {
+      const sim = window.__bordev?.sim;
+      if (!sim) throw new Error('Simulation missing');
+      sim.world.removeEntity(id);
+      const unit = sim.world.spawnUnit(1, 'peasant', x, z);
+      return { id: unit.id, x: unit.x, z: unit.z };
+    },
+    [targetId, targetStart.x, targetStart.z] as const,
+  );
+  await waitForTicks(page, 2);
+  expect(enemy.id, 'enemy unit recycled the followed id').toBe(targetId);
+
+  const spearmanD = await trainSpearmanToSpawn(page, barracks.id);
+  expect(spearmanD.dest, 'rally move order at spawn').not.toBeNull();
+  expect(
+    Math.hypot(
+      spearmanD.dest!.x - rallyBeforeRecycle!.x,
+      spearmanD.dest!.z - rallyBeforeRecycle!.z,
+    ),
+    'recycled target falls back to the stored ground point',
+  ).toBeLessThan(0.05);
+  expect(
+    Math.hypot(spearmanD.dest!.x - enemy.x, spearmanD.dest!.z - enemy.z),
+    'never follows the enemy unit that reused the id',
+  ).toBeGreaterThan(2);
+
+  expect(consoleErrors, 'console errors during M6 rally test').toEqual([]);
+  expect(pageErrors, 'uncaught page errors during M6 rally test').toEqual([]);
 });

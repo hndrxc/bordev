@@ -50,27 +50,18 @@ def build():
 
 
 def clips(parts):
-    reset = anim.resetter(parts["root"])
+    def pose(name, frame, count):
+        if name == "walk":
+            anim.bob(parts["chassis"], frame * 2, 8, 0.012)
+            anim.bob(parts["ox"], frame * 2, 8, 0.018)
+            for index, leg in enumerate(parts["legs"]):
+                anim.swing(leg, frame, 8, 0.34, math.pi if index in (1, 2) else 0)
+            for wheel_part in parts["wheels"]:
+                wheel_part.rotation_euler.x = -frame * math.pi / 4
+        if name == "load":
+            parts["cargo"].scale.z = (0.12, 0.42, 0.72, 1.0)[frame]
+            anim.lean(parts["head"], 0.18 * math.sin(frame * math.pi / 2))
+        else:
+            anim.visibility(parts["cargo"], False)
 
-    def clip(name):
-        descriptor = anim.CART_ANIMS[name]
-
-        def apply(frame):
-            reset()
-            if name == "walk":
-                anim.bob(parts["chassis"],frame*2,8,0.012)
-                anim.bob(parts["ox"],frame*2,8,0.018)
-                for index, leg in enumerate(parts["legs"]):
-                    anim.swing(leg,frame,8,0.34,math.pi if index in (1,2) else 0)
-                for wheel_part in parts["wheels"]:
-                    wheel_part.rotation_euler.x = -frame * math.pi / 4
-            if name == "load":
-                parts["cargo"].scale.z = (0.12,0.42,0.72,1.0)[frame]
-                anim.lean(parts["head"],0.18*math.sin(frame*math.pi/2))
-            else:
-                anim.visibility(parts["cargo"],False)
-        apply.descriptor = descriptor
-        apply.frames = descriptor["frames"]
-        apply.loop = descriptor["loop"]
-        return apply
-    return {name:clip(name) for name in anim.CART_ANIMS}
+    return anim.clip_set(parts["root"], anim.CART_ANIMS, pose)

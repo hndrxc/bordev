@@ -1,42 +1,12 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import {
   setupM4Session,
   worldToScreen,
   waitForTicks,
   playfield,
   pickablePoint,
+  trustedDigit1DoubleTap,
 } from './fixtures/m4';
-
-/**
- * Delivers a physical Digit1 double tap through the browser input pipeline (CDP
- * Input.dispatchKeyEvent). Each event carries an explicit epoch timestamp, so its
- * DOM `event.timeStamp` models the physical creation time and stays 50 ms apart
- * no matter how long the page's render/event queue delays handling under load.
- */
-async function trustedDigit1DoubleTap(page: Page): Promise<void> {
-  const session = await page.context().newCDPSession(page);
-  try {
-    const startSeconds = Date.now() / 1000;
-    const events = [
-      { type: 'keyDown', text: '1', unmodifiedText: '1' },
-      { type: 'keyUp' },
-      { type: 'keyDown', text: '1', unmodifiedText: '1' },
-      { type: 'keyUp' },
-    ] as const;
-    for (const [index, event] of events.entries()) {
-      await session.send('Input.dispatchKeyEvent', {
-        ...event,
-        key: '1',
-        code: 'Digit1',
-        windowsVirtualKeyCode: 49,
-        nativeVirtualKeyCode: 49,
-        timestamp: startSeconds + index * 0.05,
-      });
-    }
-  } finally {
-    await session.detach();
-  }
-}
 
 test('1. required goalposts: 5 peasants box select, arrival within 20s sim time, control groups, W stop, and resource cheats', async ({
   page,
@@ -1603,20 +1573,51 @@ test('5. contextual orders: enemy combat, gold mining, farm economy, repair, ral
     { unitId: peasantId, targetId: farmId },
     { timeout: 10_000 },
   );
-  await page.waitForFunction(
-    ({ unitId, collected }) => {
-      const world = window.__bordev?.sim?.world;
-      const unit = world?.getEntity(unitId);
-      return (
-        unit?.kind === 'unit' &&
-        unit.workAnimation === 'work' &&
-        world !== undefined &&
-        world.players[0].foodCollected > collected
+  // Advance simulation ticks deterministically based on travel distance to the reachable farm perimeter
+  // (peasant speed 1.0 tile/s = 0.05 tiles/tick; documented debug fast-forward style per 00-overview.md)
+  const farmOutcome = await page.evaluate(
+    ({ unitId, farmId, baselineFood }) => {
+      const sim = window.__bordev?.sim;
+      if (!sim) throw new Error('Simulation not initialized');
+      const world = sim.world;
+      const unit = world.getEntity(unitId);
+      const farm = world.getEntity(farmId);
+      if (!unit || unit.kind !== 'unit') throw new Error(`Unit ${unitId} missing`);
+      if (!farm || farm.kind !== 'building') throw new Error(`Farm ${farmId} missing`);
+
+      const dist = Math.hypot(
+        unit.x - (farm.x + farm.width / 2),
+        unit.z - (farm.z + farm.height / 2),
       );
+      // Bounded sim-tick budget based on travel to reachable perimeter + working ticks
+      const maxTicks = Math.max(500, Math.ceil(dist / 0.05) * 3 + 100);
+
+      for (let t = 0; t < maxTicks; t++) {
+        if (
+          unit.workAnimation === 'work' &&
+          world.players[0].foodCollected > baselineFood
+        ) {
+          return {
+            workAnimation: unit.workAnimation,
+            foodCollected: world.players[0].foodCollected,
+            ticksElapsed: t,
+          };
+        }
+        sim.step();
+      }
+
+      return {
+        workAnimation: unit.workAnimation,
+        foodCollected: world.players[0].foodCollected,
+        ticksElapsed: maxTicks,
+      };
     },
-    { unitId: peasantId, collected: foodBeforeFarm },
-    { timeout: 10_000 },
+    { unitId: peasantId, farmId, baselineFood: foodBeforeFarm },
   );
+
+  expect(farmOutcome.workAnimation).toBe('work');
+  expect(farmOutcome.foodCollected).toBeGreaterThan(foodBeforeFarm);
+  await waitForTicks(page, 2);
 
   // 5. Right-clicking a gold mine pins the selected cart and begins loading.
   // Spawn gold mine at (20, 25) south of Keep and cart at (21, 28) in clear ground

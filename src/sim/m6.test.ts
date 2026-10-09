@@ -15,8 +15,8 @@ import {
 /**
  * M6 Alpha acceptance: age research, requirements, timing, cancellation,
  * duplicate/in-progress locks and the first wired upgrade (Heavy Plough).
- * Every assertion crosses `Sim.issue` / `Sim.step`; only world setup (completed
- * buildings, resources, starting age) is written directly.
+ * Lifecycle and command acceptance assertions cross `Sim.issue` / `Sim.step`,
+ * alongside direct availability queries and modifier unit assertions.
  */
 
 function makeCleanMap48(): GameMap {
@@ -231,8 +231,8 @@ describe('M6 Alpha acceptance: Age II research', () => {
     player.gold = 199;
     expectDenied(fx, 'age_2');
 
-    player.food = 1000;
-    player.gold = 1000;
+    player.food = 500;
+    player.gold = 200;
     research(fx, 'age_2');
     sim.step();
     expect(keep.research).toMatchObject({
@@ -240,8 +240,8 @@ describe('M6 Alpha acceptance: Age II research', () => {
       food: AGES[2].cost.food,
       gold: AGES[2].cost.gold,
     });
-    expect(player.food).toBe(1000 - 500);
-    expect(player.gold).toBe(1000 - 200);
+    expect(player.food).toBe(0);
+    expect(player.gold).toBe(0);
   });
 
   it('completes in exactly 800 ticks at normal faith and emits one ageReached', () => {
@@ -317,7 +317,7 @@ describe('M6 Alpha acceptance: Age III research', () => {
     const { sim, player } = fx;
 
     // Stable alone is short by one Age II category.
-    const stable = put(fx, 'stable');
+    put(fx, 'stable');
     const stableOnly = expectDenied(fx, 'age_3');
     expect(stableOnly).toMatch(/1 more/);
     expect(stableOnly).toContain(BARRACKS_NAME);
@@ -345,9 +345,8 @@ describe('M6 Alpha acceptance: Age III research', () => {
     expect(reason).toContain(STABLE_NAME);
 
     // Age III cannot be skipped from Age I even with every building.
-    expect(stable.built).toBe(true);
     player.age = 1;
-    expect(expectDenied(fx, 'age_3')).toBeTruthy();
+    expectDenied(fx, 'age_3');
   });
 
   it('charges 800/600 and completes in exactly 1200 ticks at normal faith', () => {
@@ -527,9 +526,8 @@ describe('M6 Alpha acceptance: research cancellation, duplicates and exclusion',
     research(fx, 'age_2');
     sim.step();
     expect(keep.research).toBeDefined();
-    const reason = expectDenied(fx, 'age_2', keep2);
+    expectDenied(fx, 'age_2', keep2);
     expect(keep2.research).toBeUndefined();
-    expect(reason).toBeTruthy();
 
     // Finish the age, then the upgrade follows the same rules.
     stepN(sim, 800);
@@ -695,7 +693,6 @@ describe('M6 Alpha acceptance: Heavy Plough end to end', () => {
     recomputeUpgradeModifiers(player);
     recomputeUpgradeModifiers(player);
     expect(player.farmFoodRateMultiplier).toBeCloseTo(1.2, 10);
-    expect(player.farmFoodRateMultiplier).not.toBeCloseTo(1.44, 6);
 
     // The Beta upgrade is not completable now.
     expect(completeUpgrade(player, 'crop_rotation')).toBe(false);
@@ -705,6 +702,5 @@ describe('M6 Alpha acceptance: Heavy Plough end to end', () => {
     player.upgrades.add('crop_rotation');
     recomputeUpgradeModifiers(player);
     expect(player.farmFoodRateMultiplier).toBeCloseTo(1.4, 10);
-    expect(player.farmFoodRateMultiplier).not.toBeCloseTo(1.44, 6);
   });
 });

@@ -91,28 +91,35 @@ interface PassableGrid {
   isPassable(x: number, z: number, player: number): boolean;
 }
 
+interface SnapshotSlot extends InterpolatedEntity {
+  _rallyScratch?: { x: number; z: number };
+}
+
 /**
- * Render-time rally endpoint: the live (identity-checked) target's interpolated
- * position, else the stored ground coordinates. Never exposes the raw rally
- * record, so snapshot consumers cannot hold a stale target reference.
+ * Render-time rally endpoint: writes the live (identity- and ownership-checked)
+ * target's interpolated position, or the stored ground coordinates, into output.
  */
 function resolveSnapshotRally(
   world: World,
   rally: NonNullable<BuildingEntity['rallyPoint']>,
   alpha: number,
+  out: { x: number; z: number },
+  ownerPlayerId?: number,
 ): { x: number; z: number } {
-  const target = resolveRallyTarget(world, rally);
-  if (!target) return { x: rally.x, z: rally.z };
-  if (target.kind === 'unit') {
-    return {
-      x: target.previousX + (target.x - target.previousX) * alpha,
-      z: target.previousZ + (target.z - target.previousZ) * alpha,
-    };
+  const target = resolveRallyTarget(world, rally, ownerPlayerId);
+  if (!target) {
+    out.x = rally.x;
+    out.z = rally.z;
+    return out;
   }
-  return {
-    x: target.x + target.width * 0.5,
-    z: target.z + target.height * 0.5,
-  };
+  if (target.kind === 'unit') {
+    out.x = target.previousX + (target.x - target.previousX) * alpha;
+    out.z = target.previousZ + (target.z - target.previousZ) * alpha;
+    return out;
+  }
+  out.x = target.x + target.width * 0.5;
+  out.z = target.z + target.height * 0.5;
+  return out;
 }
 
 function findNearbyPassablePoints(
@@ -462,7 +469,7 @@ export class GameSession {
       const e = worldEntities[i];
       if (!e) continue;
 
-      let slot = pool[count];
+      let slot = pool[count] as SnapshotSlot | undefined;
       if (!slot) {
         slot = {
           id: e.id,
@@ -500,10 +507,18 @@ export class GameSession {
       slot.built = 'built' in e ? e.built : undefined;
       slot.buildProgress = 'buildProgress' in e ? e.buildProgress : undefined;
       slot.goldRemaining = 'goldRemaining' in e ? e.goldRemaining : undefined;
-      slot.rallyPoint =
-        'rallyPoint' in e && e.rallyPoint
-          ? resolveSnapshotRally(this._sim.world, e.rallyPoint, alpha)
-          : undefined;
+      if ('rallyPoint' in e && e.rallyPoint) {
+        const scratch = slot._rallyScratch ?? (slot._rallyScratch = { x: 0, z: 0 });
+        slot.rallyPoint = resolveSnapshotRally(
+          this._sim.world,
+          e.rallyPoint,
+          alpha,
+          scratch,
+          'player' in e ? e.player : undefined,
+        );
+      } else {
+        slot.rallyPoint = undefined;
+      }
       slot.workAnimation =
         'workAnimation' in e ? (e as UnitEntity).workAnimation : undefined;
       slot.workStartedTick =

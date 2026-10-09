@@ -1,5 +1,6 @@
 import type { BuildingEntity, UnitEntity } from '../entity.js';
 import type { World } from '../world.js';
+import { findReachablePerimeterDestination } from './work.js';
 
 export type RallyPoint = NonNullable<BuildingEntity['rallyPoint']>;
 
@@ -13,6 +14,7 @@ export type RallyPoint = NonNullable<BuildingEntity['rallyPoint']>;
 export function resolveRallyTarget(
   world: World,
   rally: RallyPoint,
+  ownerPlayerId?: number,
 ): UnitEntity | BuildingEntity | undefined {
   const { targetId, targetRef } = rally;
   if (targetId === undefined || targetRef === undefined) return undefined;
@@ -20,6 +22,7 @@ export function resolveRallyTarget(
   if (!ent || ent !== targetRef) return undefined;
   if (ent.kind !== 'unit' && ent.kind !== 'building') return undefined;
   if (ent.hp <= 0) return undefined;
+  if (ownerPlayerId !== undefined && ent.player !== ownerPlayerId) return undefined;
   return ent;
 }
 
@@ -30,8 +33,9 @@ export function resolveRallyTarget(
 export function resolveRallyPoint(
   world: World,
   rally: RallyPoint,
+  ownerPlayerId?: number,
 ): { x: number; z: number } {
-  const target = resolveRallyTarget(world, rally);
+  const target = resolveRallyTarget(world, rally, ownerPlayerId);
   if (!target) return { x: rally.x, z: rally.z };
   if (target.kind === 'unit') return { x: target.x, z: target.z };
   return {
@@ -40,47 +44,6 @@ export function resolveRallyPoint(
   };
 }
 
-/**
- * Nearest passable tile centre on the one-tile ring around a building
- * footprint, measured from (fromX, fromZ). Row-major order breaks ties.
- */
-function findPerimeterDestination(
-  world: World,
-  target: BuildingEntity,
-  unit: UnitEntity,
-  fromX: number,
-  fromZ: number,
-): { x: number; z: number } | undefined {
-  const size = world.map.size;
-  let best: { x: number; z: number } | undefined;
-  let bestDistSq = Infinity;
-
-  for (let tz = target.z - 1; tz <= target.z + target.height; tz++) {
-    for (let tx = target.x - 1; tx <= target.x + target.width; tx++) {
-      if (
-        tx >= target.x &&
-        tx < target.x + target.width &&
-        tz >= target.z &&
-        tz < target.z + target.height
-      ) {
-        continue;
-      }
-      if (tx < 0 || tx >= size || tz < 0 || tz >= size) continue;
-
-      const cx = tx + 0.5;
-      const cz = tz + 0.5;
-      if (!world.grid.canOccupy(cx, cz, unit.radius, unit.player)) continue;
-
-      const distSq = (cx - fromX) ** 2 + (cz - fromZ) ** 2;
-      if (distSq < bestDistSq) {
-        bestDistSq = distSq;
-        best = { x: cx, z: cz };
-      }
-    }
-  }
-
-  return best;
-}
 
 /**
  * Issues the rally move order to a freshly spawned unit.
@@ -101,7 +64,7 @@ export function applyRallyOrder(
   let destZ = rally.z;
 
   if (rally.targetId !== undefined || rally.targetRef !== undefined) {
-    const target = resolveRallyTarget(world, rally);
+    const target = resolveRallyTarget(world, rally, building.player);
     if (!target) {
       delete rally.targetId;
       delete rally.targetRef;
@@ -109,12 +72,11 @@ export function applyRallyOrder(
       destX = target.x;
       destZ = target.z;
     } else {
-      const perimeter = findPerimeterDestination(
+      const perimeter = findReachablePerimeterDestination(
         world,
         target,
         unit,
-        unit.x,
-        unit.z,
+        'prefer-empty',
       );
       if (perimeter) {
         destX = perimeter.x;

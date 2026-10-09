@@ -11,11 +11,11 @@ ROPE = 0.38
 COCKED = -0.6
 COCKED_ROPE = -0.25
 # Attack tables: arm angle about X (positive lifts the long end), rope world angle,
-# counterweight bounce and chassis recoil. Stone leaves the sling at frame index 4.
-ARM = (-0.62, -0.55, -0.10, 0.75, 1.65, 2.15, 2.35, 2.28)
-ROPE_ANGLE = (-0.25, -0.25, -0.25, 0.0, 1.2, 2.7, 3.6, 4.2)
-BOUNCE = (0.0, 0.0, 0.04, 0.10, 0.20, -0.30, 0.20, -0.10)
-RECOIL = (0.0, 0.0, 0.0, -0.01, 0.0, 0.03, -0.015, 0.0)
+# counterweight bounce and chassis recoil. Stone leaves the sling at frame index 5.
+ARM = (-0.62, -0.62, -0.55, -0.10, 0.75, 1.65, 2.15, 2.35)
+ROPE_ANGLE = (-0.25, -0.25, -0.25, -0.25, 0.0, 1.2, 2.7, 3.6)
+BOUNCE = (0.0, 0.0, 0.0, 0.04, 0.10, 0.20, -0.30, 0.20)
+RECOIL = (0.0, 0.0, 0.0, 0.0, -0.01, 0.0, 0.03, -0.015)
 
 
 def _pennant(parent, base, length, height, axis):
@@ -92,54 +92,44 @@ def _pose(parts, arm_angle, rope_angle, swing):
 
 def anims():
     parts = _parts
-    reset = anim.resetter(parts["root"])
+    chassis, banner, flag, stone = parts["chassis"], parts["banner"], parts["flag"], parts["stone"]
 
-    def clip(name):
-        descriptor = anim.UNIT_ANIMS[name]
-        count = descriptor["frames"]
+    def pose(name, frame, count):
+        phase = 2 * math.pi * frame / count
+        if name == "idle":
+            _pose(parts, COCKED + 0.012 * math.sin(phase), COCKED_ROPE + 0.04 * math.sin(phase + 1.0),
+                  0.06 * math.sin(phase))
+            banner.rotation_euler.z = 0.05 * math.sin(phase)
+            flag.rotation_euler.z = 0.05 * math.sin(phase + 0.8)
+        elif name == "walk":
+            anim.bob(chassis, frame * 2, count, 0.012, 0.012)
+            _pose(parts, COCKED + 0.025 * math.sin(2 * phase), COCKED_ROPE + 0.06 * math.sin(2 * phase + 1.0),
+                  0.10 * math.sin(phase))
+            for wheel_part in parts["wheels"]:
+                wheel_part.rotation_euler.x = frame * math.pi / 8
+            banner.rotation_euler.z = 0.08 * math.sin(phase)
+            flag.rotation_euler.z = 0.08 * math.sin(phase + 0.8)
+            chassis.rotation_euler.x = 0.01 * math.sin(2 * phase)
+        elif name == "attack":
+            _pose(parts, ARM[frame], ROPE_ANGLE[frame], BOUNCE[frame])
+            chassis.rotation_euler.x = RECOIL[frame]
+            anim.visibility(stone, frame < 5)
+            banner.rotation_euler.z = 0.1 * math.sin(frame * 1.2)
+        else:
+            eased = anim.smoothstep(frame / (count - 1))
+            chassis.rotation_euler.y = 0.30 * eased
+            chassis.rotation_euler.x = -0.12 * eased
+            chassis.location.z = 0.07 * eased
+            _pose(parts, COCKED + 1.1 * eased, COCKED_ROPE - 0.9 * eased, 0.5 * math.sin(frame * 1.1) * (1 - eased))
+            parts["arm"].rotation_euler.z = 0.35 * eased
+            parts["hinge"].location.z -= 0.10 * eased
+            banner.rotation_euler.x = 1.2 * eased
+            flag.rotation_euler.y = -1.0 * eased
+            # One front wheel shears off and rolls clear; the rest stop turning.
+            broken = parts["wheels"][0]
+            broken.location.x -= 0.45 * eased
+            broken.location.z -= 0.10 * eased
+            broken.rotation_euler.y = 0.9 * eased
+            anim.visibility(stone, frame < 2)
 
-        def apply(frame):
-            reset()
-            chassis, banner, flag, stone = parts["chassis"], parts["banner"], parts["flag"], parts["stone"]
-            phase = 2 * math.pi * frame / count
-            if name == "idle":
-                _pose(parts, COCKED + 0.012 * math.sin(phase), COCKED_ROPE + 0.04 * math.sin(phase + 1.0),
-                      0.06 * math.sin(phase))
-                banner.rotation_euler.z = 0.05 * math.sin(phase)
-                flag.rotation_euler.z = 0.05 * math.sin(phase + 0.8)
-            elif name == "walk":
-                anim.bob(chassis, frame * 2, count, 0.012, 0.012)
-                _pose(parts, COCKED + 0.025 * math.sin(2 * phase), COCKED_ROPE + 0.06 * math.sin(2 * phase + 1.0),
-                      0.10 * math.sin(phase))
-                for wheel_part in parts["wheels"]:
-                    wheel_part.rotation_euler.x = frame * math.pi / 8
-                banner.rotation_euler.z = 0.08 * math.sin(phase)
-                flag.rotation_euler.z = 0.08 * math.sin(phase + 0.8)
-                chassis.rotation_euler.x = 0.01 * math.sin(2 * phase)
-            elif name == "attack":
-                _pose(parts, ARM[frame], ROPE_ANGLE[frame], BOUNCE[frame])
-                chassis.rotation_euler.x = RECOIL[frame]
-                anim.visibility(stone, frame < 4)
-                banner.rotation_euler.z = 0.1 * math.sin(frame * 1.2)
-            else:
-                progress = frame / (count - 1)
-                eased = progress * progress * (3 - 2 * progress)
-                chassis.rotation_euler.y = 0.30 * eased
-                chassis.rotation_euler.x = -0.12 * eased
-                chassis.location.z = 0.07 * eased
-                _pose(parts, COCKED + 1.1 * eased, COCKED_ROPE - 0.9 * eased, 0.5 * math.sin(frame * 1.1) * (1 - eased))
-                parts["arm"].rotation_euler.z = 0.35 * eased
-                parts["hinge"].location.z -= 0.10 * eased
-                banner.rotation_euler.x = 1.2 * eased
-                flag.rotation_euler.y = -1.0 * eased
-                # One front wheel shears off and rolls clear; the rest stop turning.
-                broken = parts["wheels"][0]
-                broken.location.x -= 0.45 * eased
-                broken.location.z -= 0.10 * eased
-                broken.rotation_euler.y = 0.9 * eased
-                anim.visibility(stone, frame < 2)
-        apply.descriptor = descriptor
-        apply.frames = count
-        apply.loop = descriptor["loop"]
-        return apply
-    return {name: clip(name) for name in anim.UNIT_ANIMS}
+    return anim.clip_set(parts["root"], anim.UNIT_ANIMS, pose)

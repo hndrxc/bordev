@@ -14,6 +14,7 @@ import {
   listResearchDefinitions,
   type ResearchDefinition,
 } from '../sim/systems/research';
+import { getTrainAvailability } from '../sim/systems/production';
 
 export interface CommandSlotContext {
   age: number;
@@ -155,31 +156,6 @@ function describeCost(food: number, gold: number, seconds: number): string {
   return parts.join(', ');
 }
 
-/** Why `building` cannot take another `unitType` order right now (undefined = it can). */
-function getTrainBlockReason(
-  building: BuildingEntity | undefined,
-  unitType: string,
-  context: CommandSlotContext | null,
-): string | undefined {
-  if (!context) return 'Simulation not ready';
-  const unit = getUnitData(unitType, context.faction);
-  if (!unit || unit.faction !== context.faction) return 'Unavailable';
-  if (context.age < unit.age) return `Requires Age ${unit.age}`;
-  if (!building) return undefined;
-  if (!building.built || building.hp <= 0) return 'Under construction';
-  if (building.research) return 'Researching: cancel research to train';
-  if (building.trainingQueue.length >= 5) return 'Training queue full';
-  const player = context.world.players[0];
-  if (player) {
-    const lacksFood = player.food < unit.food;
-    const lacksGold = player.gold < unit.gold;
-    if (lacksFood || lacksGold) {
-      return `Not enough ${lacksFood && lacksGold ? 'food and gold' : lacksFood ? 'food' : 'gold'}`;
-    }
-  }
-  return undefined;
-}
-
 function buildTrainSlot(
   key: string,
   unitType: string,
@@ -188,23 +164,29 @@ function buildTrainSlot(
 ): CommandSlot {
   const unit = getUnitData(unitType, context?.faction);
   const name = unit?.name ?? unitType;
-  let chosen: BuildingEntity | undefined;
-  let reason: string | undefined;
-  let first = true;
-  for (const candidate of candidates) {
-    const building = resolveBuilding(candidate, context);
-    const blocked = getTrainBlockReason(building, unitType, context);
-    if (first) {
-      chosen = building;
-      reason = blocked;
-      first = false;
+  let buildingId: number | undefined;
+  let reason: string | undefined = context ? undefined : 'Simulation not ready';
+
+  if (context) {
+    let first = true;
+    for (const candidate of candidates) {
+      if (candidate.id === undefined) continue;
+      const result = getTrainAvailability(
+        context.world,
+        0,
+        candidate.id,
+        unitType,
+      );
+      if (first || result.allowed) {
+        buildingId = candidate.id;
+        reason = result.allowed ? undefined : (result.reason ?? 'Unavailable');
+        first = false;
+      }
+      if (result.allowed) break;
     }
-    if (blocked === undefined) {
-      chosen = building;
-      reason = undefined;
-      break;
-    }
+    if (first) reason = 'Unavailable';
   }
+
   const cost = unit
     ? ` - ${describeCost(unit.food, unit.gold, unit.trainTime)}`
     : '';
@@ -214,7 +196,7 @@ function buildTrainSlot(
     label: `Train ${name}`,
     action: 'train',
     unitType,
-    buildingId: chosen?.id,
+    buildingId,
     disabled: reason !== undefined,
     reason,
     tooltip: `Train ${name} [${key}]${cost}${reason ? ` (${reason})` : ''}`,
@@ -502,27 +484,26 @@ export function getCommandSlots(
   // 4. Building Commands
   if (hasBuilding) {
     const buildings = own.filter((e) => e.kind === 'building');
-    const types: string[] = [];
-    for (const b of buildings) {
-      if (!types.includes(b.type)) types.push(b.type);
-    }
+    if (buildings.length === 0) return slots;
 
-    // Train slots: Q, W, E, R (every unit the selected building types produce)
+    // Train and research layout comes from ONE active type: first selected building type
+    const activeType = buildings[0].type;
+    const activeCandidates = buildings.filter((b) => b.type === activeType);
+
+    // Train slots: Q, W, E, R (every unit the active building type produces)
     let trainIdx = 0;
-    for (const type of types) {
-      for (const unit of ALL_UNITS) {
-        if (unit.from !== type || trainIdx > 3) continue;
-        slots[trainIdx] = buildTrainSlot(
-          CARD_KEYS[trainIdx],
-          unit.id,
-          buildings.filter((b) => b.type === type),
-          context,
-        );
-        trainIdx++;
-      }
+    for (const unit of ALL_UNITS) {
+      if (unit.from !== activeType || trainIdx > 3) continue;
+      slots[trainIdx] = buildTrainSlot(
+        CARD_KEYS[trainIdx],
+        unit.id,
+        activeCandidates,
+        context,
+      );
+      trainIdx++;
     }
 
-    if (types.some((t) => isProductionType(t))) {
+    if (buildings.some((b) => isProductionType(b.type))) {
       slots[4] = {
         key: 'T',
         id: 'set-rally',
@@ -535,19 +516,17 @@ export function getCommandSlots(
       };
     }
 
-    // Research slots: A, S, D, F, G (ages first, then upgrades)
+    // Research slots: A, S, D, F, G (ages first, then upgrades for active building type)
     let researchIdx = 5;
-    for (const type of types) {
-      for (const def of listResearchDefinitions(type)) {
-        if (researchIdx > 9) break;
-        slots[researchIdx] = buildResearchSlot(
-          CARD_KEYS[researchIdx],
-          def,
-          buildings.filter((b) => b.type === type),
-          context,
-        );
-        researchIdx++;
-      }
+    for (const def of listResearchDefinitions(activeType)) {
+      if (researchIdx > 9) break;
+      slots[researchIdx] = buildResearchSlot(
+        CARD_KEYS[researchIdx],
+        def,
+        activeCandidates,
+        context,
+      );
+      researchIdx++;
     }
 
     slots[10] = {

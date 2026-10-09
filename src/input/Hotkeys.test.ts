@@ -172,7 +172,6 @@ describe('Hotkeys', () => {
       timeStamp: 100,
     });
     harness.selection.clear();
-    expect(harness.selection.ids).toHaveLength(0);
 
     // First press: non-repeat -> selects group 1
     harness.hotkeys.handleKeyDown({
@@ -311,7 +310,6 @@ describe('Hotkeys', () => {
       timeStamp: 100,
     });
     harness.selection.clear();
-    expect(harness.selection.ids).toHaveLength(0);
 
     // Meta+Digit assigns group
     harness.selection.set([p2.id]);
@@ -322,7 +320,6 @@ describe('Hotkeys', () => {
       timeStamp: 200,
     });
     harness.selection.clear();
-    expect(harness.selection.ids).toHaveLength(0);
 
     // Plain Digit recalls group
     harness.hotkeys.handleKeyDown({

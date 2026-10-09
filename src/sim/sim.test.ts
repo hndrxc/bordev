@@ -402,6 +402,20 @@ describe('Sim Core Consumer Regressions', () => {
     expect(keep.rallyPoint).toEqual({ x: 12, z: 14 });
   });
 
+  it('rejects unsupported command kinds with not-implemented error', () => {
+    const map = makeTestMap(32);
+    const sim = new Sim(map, 1);
+
+    expect(() => {
+      sim.issue({
+        kind: 'attack',
+        player: 0,
+        ids: [1],
+        targetId: 2,
+      });
+    }).toThrow(/not implemented/i);
+  });
+
   it('every M5 command works next-tick through Sim.issue', () => {
     const map = makeTestMap(32);
     const sim = new Sim(map, 1);

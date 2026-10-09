@@ -4,6 +4,7 @@ import {
   worldToScreen,
   waitForTicks,
   playfield,
+  trustedDigit1DoubleTap,
 } from './fixtures/m4';
 
 test('H hotkey and Keep control-group doubletap centre camera at actual footprint midpoint', async ({
@@ -54,7 +55,7 @@ test('H hotkey and Keep control-group doubletap centre camera at actual footprin
   await page.keyboard.press('KeyH');
 
   await page.waitForFunction(
-    async ({ midX, midZ, expX, expY }) => {
+    ({ midX, midZ, expX, expY }) => {
       const cam = window.__bordev?.session.renderer.camera;
       const canvas = window.__bordev?.session.renderer.canvas;
       if (!cam || !canvas) return false;
@@ -125,13 +126,11 @@ test('H hotkey and Keep control-group doubletap centre camera at actual footprin
   });
 
   // 3. Double-tap '1' to recall and centre camera on control group
-  await page.keyboard.press('Digit1');
-  await page.waitForTimeout(60);
-  await page.keyboard.press('Digit1');
+  await trustedDigit1DoubleTap(page);
 
   // Verify camera centres Keep midpoint at playfield centre
   await page.waitForFunction(
-    async ({ midX, midZ, expX, expY }) => {
+    ({ midX, midZ, expX, expY }) => {
       const cam = window.__bordev?.session.renderer.camera;
       const canvas = window.__bordev?.session.renderer.canvas;
       if (!cam || !canvas) return false;
@@ -889,13 +888,11 @@ test('key autorepeat is ignored for group recall and command execution (ReviewIn
   expect(Math.abs(camAfterRepeat.z! - distantUnit.z)).toBeGreaterThan(10);
 
   // Positive control: two separate press/release taps within 300 ms DO centre camera
-  await page.keyboard.press('Digit1');
-  await page.waitForTimeout(60);
-  await page.keyboard.press('Digit1');
+  await trustedDigit1DoubleTap(page);
 
   // Wait for camera to centre on distant peasant at (distantUnit.x, distantUnit.z)
   await page.waitForFunction(
-    async ({ targetX, targetZ, expX, expY }) => {
+    ({ targetX, targetZ, expX, expY }) => {
       const cam = window.__bordev?.session.renderer.camera;
       const canvas = window.__bordev?.session.renderer.canvas;
       if (!cam || !canvas) return false;
