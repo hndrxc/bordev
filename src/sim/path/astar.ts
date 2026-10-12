@@ -19,9 +19,7 @@ const DIRS_8: readonly [number, number][] = [
 function octileDistance(dx: number, dz: number): number {
   const adx = Math.abs(dx);
   const adz = Math.abs(dz);
-  return adx < adz
-    ? SQRT2_MINUS_ONE * adx + adz
-    : SQRT2_MINUS_ONE * adz + adx;
+  return adx < adz ? SQRT2_MINUS_ONE * adx + adz : SQRT2_MINUS_ONE * adz + adx;
 }
 
 function distToSegmentSquared(
@@ -30,7 +28,7 @@ function distToSegmentSquared(
   x0: number,
   z0: number,
   x1: number,
-  z1: number
+  z1: number,
 ): number {
   const dx = x1 - x0;
   const dz = z1 - z0;
@@ -56,12 +54,15 @@ function checkTileCorners(
   x0: number,
   z0: number,
   x1: number,
-  z1: number
+  z1: number,
 ): boolean {
   if (distToSegmentSquared(nx, nz, x0, z0, x1, z1) < CLEARANCE_SQ) return false;
-  if (distToSegmentSquared(nx + 1, nz, x0, z0, x1, z1) < CLEARANCE_SQ) return false;
-  if (distToSegmentSquared(nx, nz + 1, x0, z0, x1, z1) < CLEARANCE_SQ) return false;
-  if (distToSegmentSquared(nx + 1, nz + 1, x0, z0, x1, z1) < CLEARANCE_SQ) return false;
+  if (distToSegmentSquared(nx + 1, nz, x0, z0, x1, z1) < CLEARANCE_SQ)
+    return false;
+  if (distToSegmentSquared(nx, nz + 1, x0, z0, x1, z1) < CLEARANCE_SQ)
+    return false;
+  if (distToSegmentSquared(nx + 1, nz + 1, x0, z0, x1, z1) < CLEARANCE_SQ)
+    return false;
   return true;
 }
 
@@ -73,7 +74,7 @@ function checkNearObstacles(
   z0: number,
   x1: number,
   z1: number,
-  player: number
+  player: number,
 ): boolean {
   for (let d = 0; d < 8; d++) {
     const nx = cx + DIRS_8[d][0];
@@ -96,7 +97,7 @@ export function hasLineOfSight(
   z0: number,
   x1: number,
   z1: number,
-  player: number
+  player: number,
 ): boolean {
   if (x0 === x1 && z0 === z1) {
     return grid.isPassable(x0, z0, player);
@@ -123,7 +124,10 @@ export function hasLineOfSight(
   let currIdx = currZ * grid.size + currX;
   const endIdx = endZ * grid.size + endX;
 
-  if (!grid.isTilePassable(currIdx, player) || !grid.isTilePassable(endIdx, player)) {
+  if (
+    !grid.isTilePassable(currIdx, player) ||
+    !grid.isTilePassable(endIdx, player)
+  ) {
     return false;
   }
   if (currIdx === endIdx) {
@@ -158,10 +162,16 @@ export function hasLineOfSight(
   }
 
   while (currIdx !== endIdx) {
+    // Once an endpoint tile is entered, never advance beyond it on that axis.
+    if (currX === endX) tMaxX = Infinity;
+    if (currZ === endZ) tMaxZ = Infinity;
     if (Math.abs(tMaxX - tMaxZ) < 1e-8) {
       const c1Idx = currZ * grid.size + (currX + stepX);
       const c2Idx = (currZ + stepZ) * grid.size + currX;
-      if (!grid.isTilePassable(c1Idx, player) || !grid.isTilePassable(c2Idx, player)) {
+      if (
+        !grid.isTilePassable(c1Idx, player) ||
+        !grid.isTilePassable(c2Idx, player)
+      ) {
         return false;
       }
       currX += stepX;
@@ -193,14 +203,16 @@ export function hasLineOfSight(
 export function stringPull(
   grid: Grid,
   rawPath: readonly { x: number; z: number }[],
-  player: number
+  player: number,
 ): { x: number; z: number }[] {
   const len = rawPath.length;
   if (len <= 2) {
     return rawPath.map((p) => ({ x: p.x, z: p.z }));
   }
 
-  const result: { x: number; z: number }[] = [{ x: rawPath[0].x, z: rawPath[0].z }];
+  const result: { x: number; z: number }[] = [
+    { x: rawPath[0].x, z: rawPath[0].z },
+  ];
   let curr = 0;
 
   while (curr < len - 1) {
@@ -213,7 +225,7 @@ export function stringPull(
         rawPath[curr].z,
         rawPath[len - 1].x,
         rawPath[len - 1].z,
-        player
+        player,
       )
     ) {
       result.push({ x: rawPath[len - 1].x, z: rawPath[len - 1].z });
@@ -229,7 +241,7 @@ export function stringPull(
           rawPath[curr].z,
           rawPath[next].x,
           rawPath[next].z,
-          player
+          player,
         )
       ) {
         furthest = next;
@@ -308,7 +320,7 @@ export class AStarSearch {
     targetTx: number,
     targetTz: number,
     player: number,
-    scratch?: AStarScratch
+    scratch?: AStarScratch,
   ) {
     this.grid = grid;
     this.player = player;
@@ -340,7 +352,10 @@ export class AStarSearch {
     this.pushHeap(this.startIdx);
   }
 
-  step(budget: number): { expansions: number; status: 'in_progress' | 'found' | 'not_found' } {
+  step(budget: number): {
+    expansions: number;
+    status: 'in_progress' | 'found' | 'not_found';
+  } {
     if (this.status !== 'in_progress') {
       return { expansions: 0, status: this.status };
     }

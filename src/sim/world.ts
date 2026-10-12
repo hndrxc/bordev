@@ -12,6 +12,8 @@ import type {
   BuildingEntity,
   MineEntity,
   DoodadEntity,
+  Combatant,
+  ProjectileEntity,
 } from './entity.js';
 import type { SimEvent } from './commands.js';
 
@@ -44,7 +46,7 @@ export class World {
   readonly players: PlayerState[] = [];
   readonly entities: (Entity | undefined)[] = [];
   readonly events: SimEvent[] = [];
-
+  readonly remains: Combatant[] = [];
   tick = 0;
   private readonly freeIds: number[] = [];
 
@@ -249,7 +251,7 @@ export class World {
     }
 
     this.grid.setBuilding(x, z, width, height, true);
-    if (isGate) {
+    if (isGate && built) {
       this.grid.setGate(x, z, width, height, player);
     }
 
@@ -289,6 +291,15 @@ export class World {
       } else if (building.faith < 0) {
         pState.faithUsed += -building.faith;
       }
+    }
+    if (building.isGate) {
+      this.grid.setGate(
+        building.x,
+        building.z,
+        building.width,
+        building.height,
+        building.player,
+      );
     }
 
     this.emitEvent({
@@ -345,6 +356,24 @@ export class World {
     }
 
     return doodad;
+  }
+  spawnProjectile(
+    input: Omit<ProjectileEntity, 'id' | 'kind'>,
+  ): ProjectileEntity {
+    const id = this.allocateId();
+    const projectile: ProjectileEntity = {
+      id,
+      kind: 'projectile',
+      ...input,
+    };
+
+    if (id < this.entities.length) {
+      this.entities[id] = projectile;
+    } else {
+      this.entities.push(projectile);
+    }
+
+    return projectile;
   }
 
   removeEntity(id: number): Entity | undefined {

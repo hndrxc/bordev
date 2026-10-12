@@ -369,12 +369,24 @@ export class OrderController {
       targetId !== undefined ? sim.world.getEntity(targetId) : undefined;
 
     // 2. Enemy target -> attack (Combat M7)
-    if (
+    const isEnemy =
       targetEntity &&
       (targetEntity.kind === 'unit' || targetEntity.kind === 'building') &&
-      targetEntity.player !== 0
-    ) {
-      this.session.showStatus('Combat system requires Milestone 7');
+      targetEntity.player !== 0 &&
+      (sim.world.players[targetEntity.player]?.team ?? targetEntity.player) !==
+        (sim.world.players[0]?.team ?? 0);
+
+    if (isEnemy && targetEntity) {
+      if (ownUnitIds.length > 0) {
+        this.session.issue({
+          kind: 'attack',
+          player: 0,
+          ids: ownUnitIds,
+          targetId: targetEntity.id,
+          queued,
+        });
+        this.addMarker(targetEntity.x, targetEntity.z, 'attackMove');
+      }
       return;
     }
 

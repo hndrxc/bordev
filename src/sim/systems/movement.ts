@@ -2,6 +2,7 @@ import { getTerrainSpeedMultiplier } from '../../data/terrain.js';
 import type { Grid } from '../grid.js';
 import type { UnitEntity } from '../entity.js';
 import type { World } from '../world.js';
+import { resolveAttackOrderTarget } from './damage.js';
 import { SIM_DT } from '../sim.js';
 
 export interface FormationSlot {
@@ -193,6 +194,47 @@ function isWorkOrderKind(kind: string): boolean {
     kind === 'pinMine'
   );
 }
+/**
+ * True while combat owns this unit's translation: it has a live combat target and an
+ * idle/stop/attackMove order. Hold never translates.
+ */
+function isCombatChase(unit: UnitEntity): boolean {
+  if (unit.combat?.targetRef === undefined) return false;
+  const kind = unit.order?.kind ?? 'idle';
+  return kind === 'idle' || kind === 'stop' || kind === 'attackMove';
+}
+/** Clears work animation and cart transient state when an order replaces active work. */
+export function clearActiveWorkAndCartTransientState(unit: UnitEntity): void {
+  unit.workAnimation = undefined;
+  unit.workStartedTick = undefined;
+  if (unit.cart) {
+    unit.cart.phase = 'idle';
+    unit.cart.ticks = 0;
+    unit.cart.mineId = undefined;
+    unit.cart.mineRef = undefined;
+    unit.cart.dropOffId = undefined;
+    unit.cart.dropOffRef = undefined;
+    unit.cart.pinnedMineId = undefined;
+    unit.cart.pinnedMineRef = undefined;
+    unit.loaded = unit.cart.carriedGold > 0;
+    unit.speed =
+      unit.loaded && unit.loadedSpeed !== undefined
+        ? unit.loadedSpeed
+        : unit.baseSpeed;
+  }
+}
+
+/** Base/loaded speed scaled by the terrain under the unit. */
+export function computeUnitSpeed(world: World, unit: UnitEntity): number {
+  const tx = Math.max(0, Math.min(world.map.size - 1, Math.floor(unit.x)));
+  const tz = Math.max(0, Math.min(world.map.size - 1, Math.floor(unit.z)));
+  const tileCode = world.map.tiles[tz * world.map.size + tx];
+  const baseSpeed =
+    unit.loaded && unit.loadedSpeed !== undefined
+      ? unit.loadedSpeed
+      : unit.baseSpeed;
+  return baseSpeed * getTerrainSpeedMultiplier(tileCode);
+}
 
 export function advanceUnitOrder(world: World, unit: UnitEntity): void {
   world.pathQueue.cancel(unit.id);
@@ -207,7 +249,7 @@ export function advanceUnitOrder(world: World, unit: UnitEntity): void {
   unit.stuckLastCheckTick = world.tick;
   unit.workAnimation = undefined;
   unit.workStartedTick = undefined;
-
+  unit.combat = undefined;
   while (unit.orders.length > 0) {
     const nextOrder = unit.orders.shift()!;
     unit.order = nextOrder;
@@ -224,6 +266,17 @@ export function advanceUnitOrder(world: World, unit: UnitEntity): void {
     if (isWorkOrderKind(nextOrder.kind)) {
       // Construction/economy initializes the approach when this job becomes active.
       return;
+    }
+    if (nextOrder.kind === 'attack') {
+      const target = resolveAttackOrderTarget(world, unit, nextOrder);
+      if (target) {
+        unit.combat = {
+          targetRef: target,
+          targetId: target.id,
+        };
+        return;
+      }
+      continue;
     }
 
     if (
@@ -290,36 +343,36 @@ export function updateMovement(world: World): void {
     ent.previousZ = ent.z;
 
     const isWork = ent.order !== undefined && isWorkOrderKind(ent.order.kind);
+    const isAttack = ent.order !== undefined && ent.order.kind === 'attack';
+    const chase = isCombatChase(ent);
 
     if (
       !ent.order ||
-      (ent.order.kind !== 'move' && ent.order.kind !== 'attackMove' && !isWork)
+      (ent.order.kind !== 'move' &&
+        ent.order.kind !== 'attackMove' &&
+        !isWork &&
+        !isAttack)
     ) {
-      if (
-        (ent.order?.kind === 'stop' || ent.order?.kind === 'hold') &&
-        ent.orders.length > 0
-      ) {
+      if (ent.order?.kind === 'stop' && ent.orders.length > 0) {
         advanceUnitOrder(world, ent);
+        continue;
       }
-      continue;
+      if (!chase) continue;
     }
 
-    // Terrain slowdown check
-    const tx = Math.max(0, Math.min(world.map.size - 1, Math.floor(ent.x)));
-    const tz = Math.max(0, Math.min(world.map.size - 1, Math.floor(ent.z)));
-    const tileCode = world.map.tiles[tz * world.map.size + tx];
-    const baseSpeed =
-      ent.loaded && ent.loadedSpeed !== undefined
-        ? ent.loadedSpeed
-        : ent.baseSpeed;
-    const currentSpeed = baseSpeed * getTerrainSpeedMultiplier(tileCode);
+    const currentSpeed = computeUnitSpeed(world, ent);
     ent.speed = currentSpeed;
 
-    const targetDestX = ent.pathTarget?.x ?? ent.formationSlotX ?? ent.order.x;
-    const targetDestZ = ent.pathTarget?.z ?? ent.formationSlotZ ?? ent.order.z;
+    // Combat-owned chases only follow the combat chase path, never the order destination/slot.
+    const targetDestX = chase
+      ? ent.pathTarget?.x
+      : (ent.pathTarget?.x ?? ent.formationSlotX ?? ent.order?.x);
+    const targetDestZ = chase
+      ? ent.pathTarget?.z
+      : (ent.pathTarget?.z ?? ent.formationSlotZ ?? ent.order?.z);
 
     if (targetDestX === undefined || targetDestZ === undefined) {
-      if (!isWork) {
+      if (!isWork && !isAttack && !chase) {
         ent.order = { kind: 'idle' };
       }
       continue;
@@ -334,7 +387,7 @@ export function updateMovement(world: World): void {
     if (distToFinal <= 0.05) {
       ent.x = targetDestX;
       ent.z = targetDestZ;
-      if (isWork) {
+      if (isWork || isAttack || chase) {
         ent.path = undefined;
         ent.pathTarget = undefined;
         ent.pathPending = false;
@@ -461,20 +514,37 @@ export function updateMovement(world: World): void {
         let pushX: number;
         let pushZ: number;
         if (dist > 1e-4) {
-          pushX = (dx / dist) * overlap * 0.5;
-          pushZ = (dz / dist) * overlap * 0.5;
+          pushX = (dx / dist) * overlap;
+          pushZ = (dz / dist) * overlap;
         } else {
           const angle = (((u1.id * 31) % 360) * Math.PI) / 180;
-          pushX = Math.cos(angle) * overlap * 0.5;
-          pushZ = Math.sin(angle) * overlap * 0.5;
+          pushX = Math.cos(angle) * overlap;
+          pushZ = Math.sin(angle) * overlap;
         }
 
-        u1.x += pushX;
-        u1.z += pushZ;
-        u2.x -= pushX;
-        u2.z -= pushZ;
-        u1Moved = true;
-        clampUnitRadius(u2, world.grid);
+        const u1Hold = u1.order?.kind === 'hold';
+        const u2Hold = u2.order?.kind === 'hold';
+
+        if (u1Hold && u2Hold) {
+          // Neither unit moves on hold
+        } else if (u1Hold) {
+          // u1 stays fixed, u2 takes full displacement
+          u2.x -= pushX;
+          u2.z -= pushZ;
+          clampUnitRadius(u2, world.grid);
+        } else if (u2Hold) {
+          // u2 stays fixed, u1 takes full displacement
+          u1.x += pushX;
+          u1.z += pushZ;
+          u1Moved = true;
+        } else {
+          u1.x += pushX * 0.5;
+          u1.z += pushZ * 0.5;
+          u2.x -= pushX * 0.5;
+          u2.z -= pushZ * 0.5;
+          u1Moved = true;
+          clampUnitRadius(u2, world.grid);
+        }
       }
     }
     if (u1Moved) {
@@ -486,10 +556,35 @@ export function updateMovement(world: World): void {
   for (let i = 0; i < activeUnitsBuffer.length; i++) {
     const ent = activeUnitsBuffer[i];
     const isWork = ent.order !== undefined && isWorkOrderKind(ent.order.kind);
+    const isAttack = ent.order !== undefined && ent.order.kind === 'attack';
+    const chase = isCombatChase(ent);
 
     if (
       !ent.order ||
-      (ent.order.kind !== 'move' && ent.order.kind !== 'attackMove' && !isWork)
+      (ent.order.kind !== 'move' &&
+        ent.order.kind !== 'attackMove' &&
+        !isWork &&
+        !isAttack)
+    ) {
+      if (!chase) {
+        ent.stuckTicks = 0;
+        ent.stuckProgressX = ent.x;
+        ent.stuckProgressZ = ent.z;
+        ent.stuckLastCheckTick = world.tick;
+        continue;
+      }
+    }
+
+    const targetDestX = chase
+      ? ent.pathTarget?.x
+      : (ent.pathTarget?.x ?? ent.formationSlotX ?? ent.order?.x);
+    const targetDestZ = chase
+      ? ent.pathTarget?.z
+      : (ent.pathTarget?.z ?? ent.formationSlotZ ?? ent.order?.z);
+
+    if (
+      (isAttack || chase) &&
+      (targetDestX === undefined || targetDestZ === undefined)
     ) {
       ent.stuckTicks = 0;
       ent.stuckProgressX = ent.x;
@@ -497,9 +592,6 @@ export function updateMovement(world: World): void {
       ent.stuckLastCheckTick = world.tick;
       continue;
     }
-
-    const targetDestX = ent.pathTarget?.x ?? ent.formationSlotX ?? ent.order.x;
-    const targetDestZ = ent.pathTarget?.z ?? ent.formationSlotZ ?? ent.order.z;
 
     if (
       isWork &&
@@ -533,7 +625,7 @@ export function updateMovement(world: World): void {
           if (distToTarget <= 0.25) {
             ent.x = targetDestX;
             ent.z = targetDestZ;
-            if (isWork) {
+            if (isWork || isAttack || chase) {
               ent.path = undefined;
               ent.pathTarget = undefined;
               ent.pathPending = false;
@@ -547,7 +639,7 @@ export function updateMovement(world: World): void {
 
         ent.stuckTicks += 40;
         if (ent.stuckTicks >= 120) {
-          if (isWork) {
+          if (isWork || isAttack || chase) {
             if (targetDestX !== undefined && targetDestZ !== undefined) {
               world.pathQueue.request(
                 ent.id,

@@ -402,18 +402,23 @@ describe('Sim Core Consumer Regressions', () => {
     expect(keep.rallyPoint).toEqual({ x: 12, z: 14 });
   });
 
-  it('rejects unsupported command kinds with not-implemented error', () => {
+  it('accepts attack command through Sim.issue without throwing', () => {
     const map = makeTestMap(32);
     const sim = new Sim(map, 1);
+    const attacker = sim.world.spawnUnit(0, 'peasant', 10, 10);
+    const target = sim.world.spawnUnit(1, 'peasant', 12, 10);
 
     expect(() => {
       sim.issue({
         kind: 'attack',
         player: 0,
-        ids: [1],
-        targetId: 2,
+        ids: [attacker.id],
+        targetId: target.id,
       });
-    }).toThrow(/not implemented/i);
+    }).not.toThrow();
+
+    sim.step();
+    expect(attacker.order?.kind).toBe('attack');
   });
 
   it('every M5 command works next-tick through Sim.issue', () => {

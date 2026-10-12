@@ -10,7 +10,11 @@ import {
   isSupportedCommandKind,
 } from './commands.js';
 import type { UnitEntity } from './entity.js';
-import { assignFormationSlots, updateMovement } from './systems/movement.js';
+import {
+  assignFormationSlots,
+  clearActiveWorkAndCartTransientState,
+  updateMovement,
+} from './systems/movement.js';
 import {
   applyBuildCommand,
   applyRepairCommand,
@@ -35,28 +39,12 @@ import {
   refundResearch,
   stepResearch,
 } from './systems/research.js';
-
+import { applyAttackCommand, updateCombat } from './systems/combat.js';
+import { updateRemains } from './systems/damage.js';
+import { updateProjectiles } from './systems/projectiles.js';
+import { updateAuras } from './systems/auras.js';
+import { updateGates } from './systems/gates.js';
 export const SIM_DT = 0.05;
-
-function clearActiveWorkAndCartTransientState(unit: UnitEntity): void {
-  unit.workAnimation = undefined;
-  unit.workStartedTick = undefined;
-  if (unit.cart) {
-    unit.cart.phase = 'idle';
-    unit.cart.ticks = 0;
-    unit.cart.mineId = undefined;
-    unit.cart.mineRef = undefined;
-    unit.cart.dropOffId = undefined;
-    unit.cart.dropOffRef = undefined;
-    unit.cart.pinnedMineId = undefined;
-    unit.cart.pinnedMineRef = undefined;
-    unit.loaded = unit.cart.carriedGold > 0;
-    unit.speed =
-      unit.loaded && unit.loadedSpeed !== undefined
-        ? unit.loadedSpeed
-        : unit.baseSpeed;
-  }
-}
 
 export class Sim {
   readonly world: World;
@@ -91,11 +79,16 @@ export class Sim {
     }
 
     updateMovement(this.world);
+    updateCombat(this.world);
+    updateProjectiles(this.world);
+    updateAuras(this.world);
+    updateGates(this.world);
     updateConstruction(this.world);
     updateEconomy(this.world);
     updateFaith(this.world);
     stepResearch(this.world);
     updateProduction(this.world);
+    updateRemains(this.world);
     this.world.tick++;
   }
 
@@ -110,6 +103,9 @@ export class Sim {
       case 'move':
       case 'attackMove':
         this.applyMoveCommand(cmd);
+        break;
+      case 'attack':
+        applyAttackCommand(this.world, cmd);
         break;
       case 'stop':
         this.applyStopCommand(cmd);
@@ -180,8 +176,9 @@ export class Sim {
         });
       } else {
         clearActiveWorkAndCartTransientState(unit);
+        unit.combat = undefined;
         unit.order = { kind: cmd.kind, x: cmd.x, z: cmd.z };
-        unit.orders = [];
+        unit.orders.length = 0;
         unit.orderGeneration++;
         unit.formationSlotX = undefined;
         unit.formationSlotZ = undefined;
@@ -233,8 +230,9 @@ export class Sim {
         });
       } else {
         clearActiveWorkAndCartTransientState(unit);
+        unit.combat = undefined;
         unit.order = { kind: cmd.kind, x: targetX, z: targetZ };
-        unit.orders = [];
+        unit.orders.length = 0;
         unit.orderGeneration++;
         unit.formationSlotX = targetX;
         unit.formationSlotZ = targetZ;
@@ -271,8 +269,9 @@ export class Sim {
           ent.orders.push({ kind: 'stop' });
         } else {
           clearActiveWorkAndCartTransientState(ent);
+          ent.combat = undefined;
           ent.order = { kind: 'stop' };
-          ent.orders = [];
+          ent.orders.length = 0;
           ent.orderGeneration++;
           ent.formationSlotX = undefined;
           ent.formationSlotZ = undefined;
@@ -298,8 +297,9 @@ export class Sim {
           ent.orders.push({ kind: 'hold' });
         } else {
           clearActiveWorkAndCartTransientState(ent);
+          ent.combat = undefined;
           ent.order = { kind: 'hold' };
-          ent.orders = [];
+          ent.orders.length = 0;
           ent.orderGeneration++;
           ent.formationSlotX = undefined;
           ent.formationSlotZ = undefined;

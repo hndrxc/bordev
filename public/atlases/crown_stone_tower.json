@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "id": "crown_stone_tower",
+  "pages": [
+    {
+      "image": "crown_stone_tower_0.png",
+      "mask": "crown_stone_tower_0_mask.png",
+      "shadow": "crown_stone_tower_0_shadow.png"
+    }
+  ],
+  "fps": 12,
+  "anims": {
+    "construct": {
+      "frames": 3,
+      "loop": false,
+      "dirs": 1
+    },
+    "damaged": {
+      "frames": 1,
+      "loop": false,
+      "dirs": 1
+    },
+    "idle": {
+      "frames": 1,
+      "loop": true,
+      "dirs": 1
+    },
+    "rubble": {
+      "frames": 1,
+      "loop": false,
+      "dirs": 1
+    }
+  },
+  "frames": {
+    "construct/0/0": {
+      "page": 0,
+      "x": 2,
+      "y": 414,
+      "w": 201,
+      "h": 188,
+      "ax": 53,
+      "ay": 159
+    },
+    "construct/0/1": {
+      "page": 0,
+      "x": 2,
+      "y": 215,
+      "w": 214,
+      "h": 197,
+      "ax": 54,
+      "ay": 159
+    },
+    "construct/0/2": {
+      "page": 0,
+      "x": 2,
+      "y": 2,
+      "w": 219,
+      "h": 211,
+      "ax": 54,
+      "ay": 180
+    },
+    "damaged/0/0": {
+      "page": 0,
+      "x": 223,
+      "y": 2,
+      "w": 213,
+      "h": 200,
+      "ax": 45,
+      "ay": 175
+    },
+    "idle/0/0": {
+      "page": 0,
+      "x": 223,
+      "y": 204,
+      "w": 211,
+      "h": 205,
+      "ax": 47,
+      "ay": 180
+    },
+    "rubble/0/0": {
+      "page": 0,
+      "x": 218,
+      "y": 411,
+      "w": 86,
+      "h": 49,
+      "ax": 31,
+      "ay": 35
+    }
+  }
+}

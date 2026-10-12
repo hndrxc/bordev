@@ -1,8 +1,8 @@
 import { isTerrainPassable } from '../data/terrain.js';
 import type { GameMap } from './map.js';
-export const FLAG_TERRAIN = 1;  // bit 0: terrain-blocked (water, forest, rock)
+export const FLAG_TERRAIN = 1; // bit 0: terrain-blocked (water, forest, rock)
 export const FLAG_BUILDING = 2; // bit 1: building-blocked
-export const FLAG_GATE = 4;     // bit 2: gate (passable for owner and allies)
+export const FLAG_GATE = 4; // bit 2: gate (passable for owner and allies)
 
 const DIRS_8: readonly [number, number][] = [
   [1, 0],
@@ -79,13 +79,17 @@ export class Grid {
     return this.isTilePassable(tz * this.size + tx, player);
   }
 
-
   canOccupy(x: number, z: number, radius: number, player: number): boolean {
     if (radius <= 0) {
       return this.isPassable(x, z, player);
     }
     // Check whole circle bounding box against map boundaries
-    if (x - radius < 0 || x + radius > this.size || z - radius < 0 || z + radius > this.size) {
+    if (
+      x - radius < 0 ||
+      x + radius > this.size ||
+      z - radius < 0 ||
+      z + radius > this.size
+    ) {
       return false;
     }
 
@@ -113,7 +117,13 @@ export class Grid {
     return true;
   }
 
-  setBuilding(x: number, z: number, width: number, height: number, blocked: boolean): void {
+  setBuilding(
+    x: number,
+    z: number,
+    width: number,
+    height: number,
+    blocked: boolean,
+  ): void {
     for (let dz = 0; dz < height; dz++) {
       for (let dx = 0; dx < width; dx++) {
         const tx = x + dx;
@@ -136,7 +146,13 @@ export class Grid {
     this.revision++;
   }
 
-  setGate(x: number, z: number, width: number, height: number, owner: number): void {
+  setGate(
+    x: number,
+    z: number,
+    width: number,
+    height: number,
+    owner: number,
+  ): void {
     for (let dz = 0; dz < height; dz++) {
       for (let dx = 0; dx < width; dx++) {
         const tx = x + dx;
@@ -159,7 +175,25 @@ export class Grid {
   }
 
   setAllies(player: number, allies: readonly number[]): void {
-    this.alliesMap.set(player, new Set(allies));
+    const existing = this.alliesMap.get(player);
+    const newSet = new Set(allies);
+    if (existing) {
+      if (existing.size === newSet.size) {
+        let same = true;
+        for (const ally of newSet) {
+          if (!existing.has(ally)) {
+            same = false;
+            break;
+          }
+        }
+        if (same) {
+          return;
+        }
+      }
+    } else if (newSet.size === 0) {
+      return;
+    }
+    this.alliesMap.set(player, newSet);
     this.revision++;
   }
 

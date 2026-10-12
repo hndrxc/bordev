@@ -12,6 +12,8 @@ import type {
   UnitOrder,
   UnitEntity,
   BuildingEntity,
+  CombatState,
+  Combatant,
 } from '../sim/entity';
 import { InputController } from '../input/InputController';
 import { publishHud, resetHud, setHudStatus } from '../ui/hud';
@@ -51,7 +53,10 @@ export interface InterpolatedEntity {
   orientation?: 'horizontal' | 'vertical';
   trainingQueue?: readonly TrainingItem[];
   order?: UnitOrder;
-  raw: Entity;
+  combat?: CombatState;
+  deathTick?: number;
+  gateOpen?: boolean;
+  raw: Entity | Combatant;
 }
 
 export interface SessionSnapshot {
@@ -508,7 +513,8 @@ export class GameSession {
       slot.buildProgress = 'buildProgress' in e ? e.buildProgress : undefined;
       slot.goldRemaining = 'goldRemaining' in e ? e.goldRemaining : undefined;
       if ('rallyPoint' in e && e.rallyPoint) {
-        const scratch = slot._rallyScratch ?? (slot._rallyScratch = { x: 0, z: 0 });
+        const scratch =
+          slot._rallyScratch ?? (slot._rallyScratch = { x: 0, z: 0 });
         slot.rallyPoint = resolveSnapshotRally(
           this._sim.world,
           e.rallyPoint,
@@ -529,7 +535,73 @@ export class GameSession {
       slot.trainingQueue =
         'trainingQueue' in e ? (e as BuildingEntity).trainingQueue : undefined;
       slot.order = 'order' in e ? (e as UnitEntity).order : undefined;
+      slot.combat =
+        'combat' in e ? (e as UnitEntity | BuildingEntity).combat : undefined;
+      slot.deathTick =
+        'deathTick' in e
+          ? (e as UnitEntity | BuildingEntity).deathTick
+          : undefined;
+      slot.gateOpen =
+        'gateOpen' in e ? (e as BuildingEntity).gateOpen : undefined;
       count++;
+    }
+
+    const remains = this._sim.world.remains;
+    if (remains) {
+      for (let i = 0; i < remains.length; i++) {
+        const e = remains[i];
+        if (!e) continue;
+
+        let slot = pool[count] as SnapshotSlot | undefined;
+        if (!slot) {
+          slot = {
+            id: e.id,
+            kind: e.kind,
+            x: 0,
+            z: 0,
+            simX: 0,
+            simZ: 0,
+            previousX: 0,
+            previousZ: 0,
+            raw: e,
+          };
+          pool[count] = slot;
+        }
+
+        slot.id = e.id;
+        slot.kind = e.kind;
+        slot.x = e.x;
+        slot.z = e.z;
+        slot.simX = e.x;
+        slot.simZ = e.z;
+        slot.previousX = e.previousX ?? e.x;
+        slot.previousZ = e.previousZ ?? e.z;
+        slot.raw = e;
+
+        slot.player = e.player;
+        slot.type = e.type;
+        slot.faction = e.faction;
+        slot.radius = 'radius' in e ? e.radius : undefined;
+        slot.facing = 'facing' in e ? e.facing : undefined;
+        slot.hp = e.hp;
+        slot.maxHp = e.maxHp;
+        slot.width = 'width' in e ? e.width : undefined;
+        slot.height = 'height' in e ? e.height : undefined;
+        slot.built = 'built' in e ? e.built : undefined;
+        slot.buildProgress = 'buildProgress' in e ? e.buildProgress : undefined;
+        slot.goldRemaining = undefined;
+        slot.rallyPoint = undefined;
+        slot.workAnimation = undefined;
+        slot.workStartedTick = undefined;
+        slot.cart = undefined;
+        slot.orientation = 'orientation' in e ? e.orientation : undefined;
+        slot.trainingQueue = undefined;
+        slot.order = undefined;
+        slot.combat = undefined;
+        slot.deathTick = e.deathTick;
+        slot.gateOpen = 'gateOpen' in e ? e.gateOpen : undefined;
+        count++;
+      }
     }
 
     pool.length = count;

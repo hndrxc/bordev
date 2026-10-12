@@ -137,6 +137,7 @@ export type Command =
 export const SUPPORTED_COMMAND_KINDS = [
   'move',
   'attackMove',
+  'attack',
   'stop',
   'hold',
   'delete',
@@ -150,7 +151,6 @@ export const SUPPORTED_COMMAND_KINDS = [
   'research',
   'cancelResearch',
 ] as const;
-
 export type SupportedCommandKind = (typeof SUPPORTED_COMMAND_KINDS)[number];
 
 export function isSupportedCommandKind(
@@ -159,6 +159,7 @@ export function isSupportedCommandKind(
   return (
     kind === 'move' ||
     kind === 'attackMove' ||
+    kind === 'attack' ||
     kind === 'stop' ||
     kind === 'hold' ||
     kind === 'delete' ||

@@ -17,7 +17,7 @@ const componentManagers = new WeakMap<World, ComponentManager>();
 export function isValidTarget(
   world: World,
   targetId?: number,
-  targetRef?: BuildingEntity | MineEntity,
+  targetRef?: UnitOrder['targetRef'],
 ): (BuildingEntity | MineEntity) | null {
   if (
     targetId === undefined ||
@@ -31,7 +31,7 @@ export function isValidTarget(
   if (ent.kind !== 'building' && ent.kind !== 'mine') return null;
   if (targetRef !== undefined && ent !== targetRef) return null;
   if (ent.kind === 'building' && ent.hp <= 0) return null;
-  return ent as BuildingEntity | MineEntity;
+  return ent;
 }
 
 export function issueWorkOrder(

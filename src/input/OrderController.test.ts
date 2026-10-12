@@ -104,3 +104,128 @@ describe('OrderController functional rally outcomes in Sim', () => {
     expect(keep.rallyPoint?.z).toBe(keep.z + 2);
   });
 });
+
+describe('OrderController combat and contextual precedence orders', () => {
+  function createTestController(
+    sim: Sim,
+    selectedIds: number[],
+    issuedCommands: Command[],
+  ) {
+    const mockSession = {
+      sim,
+      issue: (cmd: Command) => {
+        issuedCommands.push(cmd);
+        sim.issue(cmd);
+      },
+      showStatus: () => {},
+    } as unknown as GameSession;
+
+    const mockSelection = {
+      ids: selectedIds,
+      addSelectionChangeListener: () => () => {},
+    } as unknown as SelectionController;
+
+    return new OrderController(mockSession, mockSelection);
+  }
+
+  it('emits attack command when right-clicking enemy unit with selected units', () => {
+    const sim = new Sim(makeTestMap(), 1);
+    const spearman = sim.world.spawnUnit(0, 'spearman', 10, 10);
+    const enemy = sim.world.spawnUnit(1, 'peasant', 14, 14);
+
+    const issued: Command[] = [];
+    const controller = createTestController(sim, [spearman.id], issued);
+    controller.contextOrder(enemy.x, enemy.z, false, enemy.id);
+
+    expect(issued).toHaveLength(1);
+    expect(issued[0]).toEqual({
+      kind: 'attack',
+      player: 0,
+      ids: [spearman.id],
+      targetId: enemy.id,
+      queued: false,
+    });
+  });
+
+  it('supports shift queue when right-clicking enemy unit', () => {
+    const sim = new Sim(makeTestMap(), 1);
+    const spearman = sim.world.spawnUnit(0, 'spearman', 10, 10);
+    const enemy = sim.world.spawnUnit(1, 'peasant', 14, 14);
+
+    const issued: Command[] = [];
+    const controller = createTestController(sim, [spearman.id], issued);
+    controller.contextOrder(enemy.x, enemy.z, true, enemy.id);
+
+    expect(issued).toHaveLength(1);
+    expect(issued[0]).toEqual({
+      kind: 'attack',
+      player: 0,
+      ids: [spearman.id],
+      targetId: enemy.id,
+      queued: true,
+    });
+  });
+
+  it('emits attack command when right-clicking enemy building', () => {
+    const sim = new Sim(makeTestMap(), 1);
+    const spearman = sim.world.spawnUnit(0, 'spearman', 10, 10);
+    const enemyBuilding = sim.world.spawnBuilding(1, 'keep', 15, 15, true);
+
+    const issued: Command[] = [];
+    const controller = createTestController(sim, [spearman.id], issued);
+    controller.contextOrder(
+      enemyBuilding.x,
+      enemyBuilding.z,
+      false,
+      enemyBuilding.id,
+    );
+
+    expect(issued).toHaveLength(1);
+    expect(issued[0]).toEqual({
+      kind: 'attack',
+      player: 0,
+      ids: [spearman.id],
+      targetId: enemyBuilding.id,
+      queued: false,
+    });
+  });
+
+  it('preserves worker build precedence on own unfinished building', () => {
+    const sim = new Sim(makeTestMap(), 1);
+    const peasant = sim.world.spawnUnit(0, 'peasant', 10, 10);
+    const unfinished = sim.world.spawnBuilding(0, 'cottage', 12, 12, false);
+
+    const issued: Command[] = [];
+    const controller = createTestController(sim, [peasant.id], issued);
+    controller.contextOrder(unfinished.x, unfinished.z, false, unfinished.id);
+
+    expect(issued).toHaveLength(1);
+    expect(issued[0].kind).toBe('build');
+  });
+
+  it('preserves cart pinMine precedence on gold mine', () => {
+    const sim = new Sim(makeTestMap(), 1);
+    const cart = sim.world.spawnUnit(0, 'ox_cart', 10, 10);
+    const mine = sim.world.spawnMine(12, 12, 1000);
+
+    const issued: Command[] = [];
+    const controller = createTestController(sim, [cart.id], issued);
+    controller.contextOrder(mine.x, mine.z, false, mine.id);
+
+    expect(issued).toHaveLength(1);
+    expect(issued[0].kind).toBe('pinMine');
+  });
+
+  it('preserves production rally precedence when only keep is selected', () => {
+    const sim = new Sim(makeTestMap(), 1);
+    const keep = sim.world.spawnBuilding(0, 'keep', 4, 4, true);
+    const enemy = sim.world.spawnUnit(1, 'peasant', 20, 20);
+
+    const issued: Command[] = [];
+    const controller = createTestController(sim, [keep.id], issued);
+    controller.contextOrder(enemy.x, enemy.z, false, enemy.id);
+
+    expect(issued).toHaveLength(1);
+    expect(issued[0].kind).toBe('setRally');
+  });
+});

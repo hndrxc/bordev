@@ -1368,6 +1368,20 @@ test('5. contextual orders: enemy combat, gold mining, farm economy, repair, ral
   const { consoleErrors, pageErrors } = await setupM4Session(page, {
     centerOn: { x: 22, z: 22 },
   });
+  // Remove legacy M4 debug units so they do not auto-acquire and attack test fixtures
+  await page.evaluate(() => {
+    const bordev = window.__bordev;
+    const sim = bordev?.sim;
+    const probes = bordev?.renderer?.debugProbes;
+    if (sim && probes) {
+      for (const id of probes.allDebugUnitIds) {
+        if (sim.world.getEntity(id)?.kind === 'unit') {
+          sim.world.removeEntity(id);
+        }
+      }
+    }
+  });
+  await waitForTicks(page, 2);
 
   const field = await playfield(page);
   const statusEl = page.getByTestId('hud-status');
@@ -1582,8 +1596,10 @@ test('5. contextual orders: enemy combat, gold mining, farm economy, repair, ral
       const world = sim.world;
       const unit = world.getEntity(unitId);
       const farm = world.getEntity(farmId);
-      if (!unit || unit.kind !== 'unit') throw new Error(`Unit ${unitId} missing`);
-      if (!farm || farm.kind !== 'building') throw new Error(`Farm ${farmId} missing`);
+      if (!unit || unit.kind !== 'unit')
+        throw new Error(`Unit ${unitId} missing`);
+      if (!farm || farm.kind !== 'building')
+        throw new Error(`Farm ${farmId} missing`);
 
       const dist = Math.hypot(
         unit.x - (farm.x + farm.width / 2),
@@ -1733,11 +1749,28 @@ test('5. contextual orders: enemy combat, gold mining, farm economy, repair, ral
   expect(enemyPt.y).toBeGreaterThanOrEqual(field.top);
   expect(enemyPt.y).toBeLessThanOrEqual(field.bottom);
 
-  // Right-click enemy unit (cart is still selected)
-  await page.mouse.click(enemyPt.x, enemyPt.y, { button: 'right' });
-  await expect(statusEl).toHaveText('Combat system requires Milestone 7');
+  // Select own peasant to issue attack command
+  await page.evaluate((id) => {
+    window.__bordev?.session.input.selection.set([id]);
+  }, peasantId);
 
-  // 7. Status line auto-clears ~4 s after appearing (positive: visible first; then hidden, bounded wait)
+  // Right-click enemy unit with own peasant selected -> real combat attack order
+  await page.mouse.click(enemyPt.x, enemyPt.y, { button: 'right' });
+  await page.waitForFunction(
+    (id) => {
+      const sim = window.__bordev?.sim;
+      const u = sim?.world.getEntity(id);
+      return u && u.kind === 'unit' && u.order?.kind === 'attack';
+    },
+    peasantId,
+    { timeout: 5_000 },
+  );
+
+  // 7. Status line auto-clears ~4 s after appearing (verify auto-clear cleanly)
+  await page.evaluate(() => {
+    window.__bordev?.showStatus?.('Contextual order active');
+  });
+  await expect(statusEl).toHaveText('Contextual order active');
   await expect(statusEl).toBeHidden({ timeout: 6_000 });
 
   expect(consoleErrors, 'console errors during contextual orders test').toEqual(

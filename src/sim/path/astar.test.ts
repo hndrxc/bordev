@@ -42,7 +42,9 @@ describe('AStarSearch and LOS', () => {
     }
 
     // Verify it routed around the wall (z <= 1 or z >= 8)
-    const crossedX = path.some((p) => p.x >= 4.5 && p.x <= 5.5 && (p.z <= 1.5 || p.z >= 8.5));
+    const crossedX = path.some(
+      (p) => p.x >= 4.5 && p.x <= 5.5 && (p.z <= 1.5 || p.z >= 8.5),
+    );
     expect(crossedX).toBe(true);
   });
 
@@ -122,6 +124,41 @@ describe('AStarSearch and LOS', () => {
     // Parallel cardinal line alongside wall at distance 0.5 (e.g. z = 1.5)
     // Must HAVE line of sight
     expect(hasLineOfSight(grid2, 0.5, 1.5, 2.5, 1.5, 0)).toBe(true);
+  });
+  it('terminates mixed-sign LOS at integer endpoints and checks obstacles', () => {
+    const grid = new Grid(makeEmptyMap(40));
+    expect(
+      hasLineOfSight(grid, 13.315061245442461, 22.479793350968933, 30, 20, 0),
+    ).toBe(true);
+    expect(
+      hasLineOfSight(grid, 22.479793350968933, 13.315061245442461, 20, 30, 0),
+    ).toBe(true);
+
+    const blockedFirst = new Grid(makeEmptyMap(40));
+    blockedFirst.setBuilding(20, 21, 1, 1, true);
+    expect(
+      hasLineOfSight(
+        blockedFirst,
+        13.315061245442461,
+        22.479793350968933,
+        30,
+        20,
+        0,
+      ),
+    ).toBe(false);
+
+    const blockedSecond = new Grid(makeEmptyMap(40));
+    blockedSecond.setBuilding(21, 20, 1, 1, true);
+    expect(
+      hasLineOfSight(
+        blockedSecond,
+        22.479793350968933,
+        13.315061245442461,
+        20,
+        30,
+        0,
+      ),
+    ).toBe(false);
   });
 
   it('string pulls waypoints into straight segments without cutting corners', () => {

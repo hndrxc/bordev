@@ -14,12 +14,24 @@ export type UnitOrderKind =
   | 'farm'
   | 'pinMine';
 
+export type Combatant = UnitEntity | BuildingEntity;
+
+export interface CombatState {
+  targetRef?: Combatant;
+  /** Intended target when targetRef is a temporary blocking wall/gate; undefined when equal to targetRef. */
+  goalRef?: Combatant;
+  targetId?: number;
+  attackStartedTick?: number;
+  attackDurationTicks?: number;
+  hitApplied?: boolean;
+}
+
 export interface UnitOrder {
   kind: UnitOrderKind;
   x?: number;
   z?: number;
   targetId?: number;
-  targetRef?: BuildingEntity | MineEntity;
+  targetRef?: Combatant | MineEntity;
 }
 
 export type CartPhase =
@@ -96,6 +108,10 @@ export interface UnitEntity {
   workAnimation?: 'work' | 'load';
   workStartedTick?: number;
   cart?: CartState;
+  combat?: CombatState;
+  /** Persistent across target changes and clearCombat; earliest tick the next swing may start. */
+  attackCooldownUntilTick?: number;
+  deathTick?: number;
 }
 
 export interface BuildingEntity {
@@ -132,6 +148,11 @@ export interface BuildingEntity {
   orientation?: 'horizontal' | 'vertical';
   trainingQueue: TrainingItem[];
   research?: ResearchItem;
+  combat?: CombatState;
+  /** Persistent across target changes; earliest tick the next shot may fire. */
+  attackCooldownUntilTick?: number;
+  deathTick?: number;
+  gateOpen?: boolean;
 }
 
 export interface MineEntity {
@@ -169,6 +190,13 @@ export interface ProjectileEntity {
   targetId: number;
   damage: number;
   attackType: AttackType;
+  targetRef: Combatant;
+  sourceRef?: Combatant;
+  visualKind: 'arrow' | 'stone';
+  originX: number;
+  originZ: number;
+  traveledDistance: number;
+  flightProgress: number;
 }
 
 export type Entity =
