@@ -713,8 +713,11 @@ function updateUnitCombat(world: World, unit: UnitEntity): void {
   }
   combat.goalRef = target !== goal ? goal : undefined;
 
-  // 4. Execute
-  if (isInAttackRange(unit, target)) {
+  // 4. Execute. A started swing is committed: it is never cancelled by
+  // leaving range mid-swing. The hit lands only if the target is still in
+  // range at the hit frame (locked combat model, overview §Combat model).
+  const swingInProgress = combat.attackStartedTick !== undefined;
+  if (swingInProgress || isInAttackRange(unit, target)) {
     if (unit.pathPending || (unit.path && unit.path.length > 0)) {
       resetPath(world, unit);
     }
@@ -769,13 +772,11 @@ function updateUnitCombat(world: World, unit: UnitEntity): void {
     return;
   }
 
-  // Out of range
+  // Out of range with no swing in progress.
   if (unit.order?.kind === 'hold') {
     clearCombat(unit);
     return;
   }
-  combat.attackStartedTick = undefined;
-  combat.hitApplied = undefined;
   chaseTarget(world, unit, target);
 }
 
