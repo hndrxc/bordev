@@ -28,16 +28,16 @@ def stone_wall():
     box("East pilaster", (0.42, 0, 0.50), (0.06, 0.34, 0.58), "STONE_LIGHT", walls)
     box("Wall corbel band", (0, 0, 0.83), (0.90, 0.90, 0.06), "STONE_LIGHT", walls)
 
-    # Team coverage: heraldic team shields on camera-facing sides
-    shield_s = cylinder("South team shield", (0, -0.445, 0.54), 0.11, 0.022, "TEAM", walls, 8)
+    # Team coverage: heraldic team shields on camera-facing sides (South and East)
+    shield_s = cylinder("South team shield", (0, -0.455, 0.54), 0.11, 0.022, "TEAM", walls, 8)
     shield_s.rotation_euler.x = math.pi / 2
-    boss_s = cylinder("South shield boss", (0, -0.458, 0.54), 0.035, 0.015, "IRON", walls, 6)
+    boss_s = cylinder("South shield boss", (0, -0.468, 0.54), 0.035, 0.015, "IRON", walls, 6)
     boss_s.rotation_euler.x = math.pi / 2
 
-    shield_w = cylinder("West team shield", (-0.445, 0, 0.54), 0.11, 0.022, "TEAM", walls, 8)
-    shield_w.rotation_euler.y = math.pi / 2
-    boss_w = cylinder("West shield boss", (-0.458, 0, 0.54), 0.035, 0.015, "IRON", walls, 6)
-    boss_w.rotation_euler.y = math.pi / 2
+    shield_e = cylinder("East team shield", (0.455, 0, 0.54), 0.11, 0.022, "TEAM", walls, 8)
+    shield_e.rotation_euler.y = math.pi / 2
+    boss_e = cylinder("East shield boss", (0.468, 0, 0.54), 0.035, 0.015, "IRON", walls, 6)
+    boss_e.rotation_euler.y = math.pi / 2
 
     # --- Top (Walkway, Parapets & Merlons) ---
     box("Wall walkway", (0, 0, 0.86), (0.80, 0.80, 0.04), "STONE_DARK", top)

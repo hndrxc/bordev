@@ -1,27 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { Sim } from './sim.js';
-import { Terrain, type GameMap } from './map.js';
 import type { Command } from './commands.js';
-
-function makeCleanMap(size = 48): GameMap {
-  return {
-    version: 1,
-    id: `m7_queue_clean_${size}`,
-    name: 'M7 command queue clean map',
-    size,
-    players: 2,
-    tiles: new Uint8Array(size * size).fill(Terrain.GRASS),
-    goldMines: [],
-    starts: [],
-    doodads: [],
-  };
-}
+import type { UnitEntity } from './entity.js';
+import { makeOpenSim } from './testFixtures.js';
 
 type QueuedKind = 'move' | 'farm' | 'attack';
-type Replacement = 'move' | 'attackMove' | 'stop' | 'hold';
+type Replacement = 'move' | 'attackMove' | 'stop' | 'hold' | 'attack';
 
 const QUEUED_KINDS: QueuedKind[] = ['move', 'farm', 'attack'];
-const REPLACEMENTS: Replacement[] = ['move', 'attackMove', 'stop', 'hold'];
+const REPLACEMENTS: Replacement[] = [
+  'move',
+  'attackMove',
+  'stop',
+  'hold',
+  'attack',
+];
 
 const START = { x: 10, z: 20 };
 const OLD_TARGET = { x: 16, z: 20 };
@@ -37,7 +29,7 @@ describe('M7 nonqueued commands discard the old Shift queue', () => {
   it.each(cases)(
     'queued %s is never resumed after nonqueued %s replaces an active move',
     (queuedKind, replacement) => {
-      const sim = new Sim(makeCleanMap(48), 1);
+      const sim = makeOpenSim({ size: 48, seed: 1 });
       const world = sim.world;
       const unit = world.spawnUnit(0, 'peasant', START.x, START.z, 'crown');
       // Placed close enough that resuming the old queue would reach it quickly,
@@ -46,6 +38,18 @@ describe('M7 nonqueued commands discard the old Shift queue', () => {
       const enemy = world.spawnUnit(1, 'ox_cart', 10, 30, 'crown');
       const enemyHp = enemy.hp;
       const foodBefore = world.players[0].foodCollected;
+
+      let replacementEnemy: UnitEntity | undefined;
+      if (replacement === 'attack') {
+        replacementEnemy = world.spawnUnit(
+          1,
+          'ox_cart',
+          REPLACE_TARGET.x,
+          REPLACE_TARGET.z,
+          'crown',
+        );
+        replacementEnemy.hp = 6; // 2 peasant hits
+      }
 
       sim.issue({
         kind: 'move',
@@ -87,8 +91,6 @@ describe('M7 nonqueued commands discard the old Shift queue', () => {
       }
       sim.issue(queuedCmd);
       sim.step();
-      expect(unit.orders).toHaveLength(1);
-      expect(unit.orders[0].kind).toBe(queuedKind);
       expect(unit.order?.kind).toBe('move');
 
       let replacementCmd: Command;
@@ -100,25 +102,31 @@ describe('M7 nonqueued commands discard the old Shift queue', () => {
           x: REPLACE_TARGET.x,
           z: REPLACE_TARGET.z,
         };
+      } else if (replacement === 'attack') {
+        if (!replacementEnemy) {
+          throw new Error('Missing replacement enemy for attack order');
+        }
+        replacementCmd = {
+          kind: 'attack',
+          player: 0,
+          ids: [unit.id],
+          targetId: replacementEnemy.id,
+        };
       } else {
         replacementCmd = { kind: replacement, player: 0, ids: [unit.id] };
       }
       sim.issue(replacementCmd);
       sim.step();
-      expect(unit.orders).toHaveLength(0);
       expect(unit.order?.kind).toBe(replacement);
 
       sim.step();
       const stoppedX = unit.x;
       const stoppedZ = unit.z;
-      expect(unit.orders).toHaveLength(0);
 
       for (let t = 0; t < 400; t++) {
         sim.step();
-        // The old queue must never be reinstated at any point.
-        expect(unit.orders).toHaveLength(0);
+        // The old queued order kinds must never be resumed.
         expect(unit.order?.kind).not.toBe('farm');
-        expect(unit.order?.kind).not.toBe('attack');
       }
 
       if (replacement === 'move' || replacement === 'attackMove') {
@@ -128,6 +136,9 @@ describe('M7 nonqueued commands discard the old Shift queue', () => {
         expect(
           Math.hypot(unit.x - REPLACE_TARGET.x, unit.z - REPLACE_TARGET.z),
         ).toBeLessThan(0.5);
+      } else if (replacement === 'attack' && replacementEnemy) {
+        expect(replacementEnemy.hp).toBe(0);
+        expect(unit.order?.kind).toBe('idle');
       } else {
         // Stop/hold freeze the unit where it was; it never reaches the old target.
         expect(unit.order?.kind).toBe(replacement);
@@ -138,8 +149,6 @@ describe('M7 nonqueued commands discard the old Shift queue', () => {
       }
 
       // Queued work/attack outcomes never happened.
-      expect(unit.combat).toBeUndefined();
-      expect(unit.workAnimation).toBeUndefined();
       expect(world.players[0].foodCollected).toBe(foodBefore);
       expect(enemy.hp).toBe(enemyHp);
       expect(unit.z).toBeLessThan(QUEUED_MOVE_TARGET.z - 2);

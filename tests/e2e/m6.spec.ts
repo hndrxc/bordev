@@ -1,7 +1,9 @@
 import { expect, test, type Page } from '@playwright/test';
 import type { BuildingEntity } from '../../src/sim/entity';
+import type { SimEvent } from '../../src/sim/commands';
 import { screenToGround } from '../../src/render/iso';
 import {
+  clearDebugWalkers,
   pickablePoint,
   playfield,
   setupM4Session,
@@ -26,6 +28,12 @@ interface ResearchRun {
   ageEvents: { player: number; age: number }[];
 }
 
+declare global {
+  interface Window {
+    __m6TrainEvents?: SimEvent[];
+  }
+}
+
 const SIM_DT = 0.05;
 
 const TRAIN_PLAN: readonly { building: string; units: readonly string[] }[] = [
@@ -43,29 +51,6 @@ const cardButton = (page: Page, id: string) =>
 // World setup helpers (existing World create conventions, via the debug hook)
 // ---------------------------------------------------------------------------
 
-/** Removes debug walkers and stops autonomous starting carts so economy and pop cap are uncluttered. */
-async function clearDebugWalkers(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    const bordev = window.__bordev;
-    const sim = bordev?.sim;
-    const probes = bordev?.renderer?.debugProbes;
-    if (!sim || !probes) throw new Error('Debug scene unavailable');
-    for (const id of probes.allDebugUnitIds) {
-      if (sim.world.getEntity(id)?.kind === 'unit') sim.world.removeEntity(id);
-    }
-    for (const ent of sim.world.entities) {
-      if (
-        ent &&
-        ent.kind === 'unit' &&
-        ent.player === 0 &&
-        ent.type === 'ox_cart'
-      ) {
-        sim.issue({ kind: 'stop', player: 0, ids: [ent.id] });
-      }
-    }
-  });
-  await waitForTicks(page, 2);
-}
 
 async function getKeep(page: Page): Promise<BaseBuilding> {
   return page.evaluate(() => {
@@ -910,9 +895,11 @@ test('2. trains each of the ten Crown units from real buildings via the command 
   await page.evaluate(() => window.__bordev?.cheats.resources(20_000));
 
   // Queue every unit through the real command card with a real ground rally.
-  const eventStart = await page.evaluate(
-    () => window.__bordev?.sim?.world.events.length ?? 0,
-  );
+  await page.evaluate(() => {
+    const bordev = window.__bordev;
+    if (!bordev) throw new Error('Debug hook unavailable');
+    window.__m6TrainEvents = bordev.recordEvents();
+  });
   // ONE shared reachable ground rally for all 5 producers
   const producerBuildings = TRAIN_PLAN.map((step) => byType[step.building]);
   const sharedTarget = await findSharedGroundScreenPoint(
@@ -980,11 +967,17 @@ test('2. trains each of the ten Crown units from real buildings via the command 
 
   // Train to completion: exactly one unitCreated per Crown type, no extras.
   const trained = await page.evaluate(
-    ([start, expected]) => {
+    (expected) => {
       const sim = window.__bordev?.sim;
-      if (!sim) throw new Error('Simulation not initialized');
+      const recorded = window.__m6TrainEvents;
+      if (!sim || !recorded) throw new Error('Event recorder not installed');
+      // No frames run inside this evaluate: each step's events are moved from the
+      // world queue into the recorder, so nothing is drained by the session or counted twice.
+      const flush = () => {
+        for (const ev of sim.drainEvents()) recorded.push(ev);
+      };
       const collect = () =>
-        sim.world.events.slice(start as number).flatMap((ev) =>
+        recorded.flatMap((ev) =>
           ev.kind === 'unitCreated' && ev.player === 0
             ? [
                 {
@@ -996,14 +989,16 @@ test('2. trains each of the ten Crown units from real buildings via the command 
               ]
             : [],
         );
+      flush();
       let ticks = 0;
-      while (collect().length < (expected as number) && ticks < 8000) {
+      while (collect().length < expected && ticks < 8000) {
         sim.step();
+        flush();
         ticks++;
       }
       return { units: collect(), ticks };
     },
-    [eventStart, 10] as const,
+    10,
   );
   expect(trained.units).toHaveLength(10);
   expect(trained.units.map((u) => u.unitType).sort()).toEqual(

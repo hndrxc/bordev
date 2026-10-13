@@ -1,10 +1,22 @@
 import { expect, test, type Page } from '@playwright/test';
 import {
+  canvasOrigin,
+  capture,
+  captureInFlightProjectile,
+  clearDebugWalkers,
+  clickEntity,
+  clickGround,
+  clipAround,
+  clipAtGround,
+  countDifferingPixels,
+  entityRect,
+  nextFrames,
+  selectOnly,
   setupM4Session,
-  worldToScreen,
+  waitForRender,
   waitForTicks,
-  playfield,
-  pickablePoint,
+  worldToScreen,
+  type Clip,
 } from './fixtures/m4';
 
 /**
@@ -17,31 +29,13 @@ import {
  * their real ids. Orders always travel through real mouse/keyboard/card input; only the
  * staged entities are created through the World API.
  *
- * Visual claims are checked from real canvas screenshots compared pixel-wise.
+ * Visual claims are checked from real canvas screenshots compared pixel-wise:
+ * corpse presence and removal, attack vs rest swing frames, stone projectiles
+ * in flight, tower damaged and rubble transitions, arrows in flight, and gate
+ * open vs closed frames.
  */
 
-interface Clip {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-interface PageRect {
-  left: number;
-  top: number;
-  right: number;
-  bottom: number;
-}
-
-interface UnitSpec {
-  player: number;
-  type: string;
-  x: number;
-  z: number;
-}
-
-interface BuildingSpec {
+interface EntitySpec {
   player: number;
   type: string;
   x: number;
@@ -50,10 +44,6 @@ interface BuildingSpec {
 
 interface M7Probe {
   buildingHp: number[];
-  unitHp: number[];
-  drawnStoneFrames: number;
-  drawnArrowFrames: number;
-  maxDrawnProjectiles: number;
   firstStoneOriginDistance: number | null;
 }
 
@@ -73,22 +63,7 @@ const MIN_FRAME_DIFF_PIXELS = 40;
 async function bootFixture(page: Page, center: { x: number; z: number }) {
   const errors = await setupM4Session(page, { centerOn: center });
 
-  const removal = await page.evaluate(() => {
-    const world = window.__bordev?.sim?.world;
-    const probes = window.__bordev?.renderer?.debugProbes;
-    if (!world || !probes) throw new Error('Debug scene unavailable');
-    let removed = 0;
-    for (const id of probes.allDebugUnitIds) {
-      if (world.getEntity(id)?.kind === 'unit') {
-        world.removeEntity(id);
-        removed++;
-      }
-    }
-    return { listed: probes.allDebugUnitIds.length, removed };
-  });
-  expect(removal.listed).toBeGreaterThan(0);
-  expect(removal.removed).toBe(removal.listed);
-  await waitForTicks(page, 2);
+  await clearDebugWalkers(page);
 
   const view = await page.evaluate(() => {
     const v = window.__bordev?.session.renderer.camera?.view;
@@ -102,7 +77,7 @@ async function bootFixture(page: Page, center: { x: number; z: number }) {
 }
 
 /** Spawns units on tiles the grid reports as occupiable; returns their real ids. */
-async function spawnUnits(page: Page, specs: UnitSpec[]): Promise<number[]> {
+async function spawnUnits(page: Page, specs: EntitySpec[]): Promise<number[]> {
   return page.evaluate((list) => {
     const world = window.__bordev?.sim?.world;
     if (!world) throw new Error('Simulation not initialized');
@@ -127,7 +102,7 @@ async function spawnUnits(page: Page, specs: UnitSpec[]): Promise<number[]> {
 }
 
 /** Spawns a completed building (callers verify the footprint first with expectFootprintPassable). */
-async function spawnBuilding(page: Page, spec: BuildingSpec): Promise<number> {
+async function spawnBuilding(page: Page, spec: EntitySpec): Promise<number> {
   return page.evaluate((s) => {
     const world = window.__bordev?.sim?.world;
     if (!world) throw new Error('Simulation not initialized');
@@ -162,297 +137,6 @@ async function expectFootprintPassable(
   expect(blocked).toBe(0);
 }
 
-/** Resolves once the renderer drew each entity this frame (valid screen rect). */
-async function waitForRender(page: Page, ids: number[]): Promise<void> {
-  for (const id of ids) {
-    await page.waitForFunction((entityId) => {
-      const r = window.__bordev?.renderer?.getEntityScreenRect(entityId);
-      return r !== undefined && r.right > r.left && r.bottom > r.top;
-    }, id);
-  }
-}
-
-/** Waits for `count` real animation frames, so GameSession has rendered the latest snapshot. */
-async function nextFrames(page: Page, count = 2): Promise<void> {
-  await page.evaluate(
-    (n) =>
-      new Promise<void>((resolve) => {
-        let left = n;
-        const step = () => {
-          left--;
-          if (left <= 0) resolve();
-          else requestAnimationFrame(step);
-        };
-        requestAnimationFrame(step);
-      }),
-    count,
-  );
-}
-
-async function canvasOrigin(page: Page): Promise<{ x: number; y: number }> {
-  return page.evaluate(() => {
-    const canvas = document.querySelector('canvas[aria-label="Game view"]');
-    const r = canvas?.getBoundingClientRect();
-    return { x: r?.left ?? 0, y: r?.top ?? 0 };
-  });
-}
-
-/** Renderer screen rect of an entity in page CSS px. */
-async function entityRect(page: Page, id: number): Promise<PageRect> {
-  const origin = await canvasOrigin(page);
-  const rect = await page.evaluate((entityId) => {
-    const r = window.__bordev?.renderer?.getEntityScreenRect(entityId);
-    return r
-      ? { left: r.left, top: r.top, right: r.right, bottom: r.bottom }
-      : null;
-  }, id);
-  if (!rect) throw new Error(`No screen rect for entity ${id}`);
-  return {
-    left: rect.left + origin.x,
-    top: rect.top + origin.y,
-    right: rect.right + origin.x,
-    bottom: rect.bottom + origin.y,
-  };
-}
-
-/** Integer screenshot clip around a page rect, clamped into the visible playfield. */
-async function clipAround(
-  page: Page,
-  rect: PageRect,
-  pad: number,
-): Promise<Clip> {
-  const field = await playfield(page);
-  const left = Math.max(field.left, Math.floor(rect.left - pad));
-  const top = Math.max(field.top, Math.floor(rect.top - pad));
-  const right = Math.min(field.right, Math.ceil(rect.right + pad));
-  const bottom = Math.min(field.bottom, Math.ceil(rect.bottom + pad));
-  expect(right).toBeGreaterThan(left);
-  expect(bottom).toBeGreaterThan(top);
-  return { x: left, y: top, width: right - left, height: bottom - top };
-}
-
-/** Clip around a ground point where a unit-sized sprite (and its corpse) is drawn. */
-async function clipAtGround(page: Page, x: number, z: number): Promise<Clip> {
-  const p = await worldToScreen(page, x, z);
-  return clipAround(
-    page,
-    { left: p.x - 40, right: p.x + 40, top: p.y - 80, bottom: p.y + 16 },
-    0,
-  );
-}
-
-interface CapturePhaseFilter {
-  unitId: number;
-  phase: 'attack' | 'rest';
-}
-
-async function capture(
-  page: Page,
-  clip: Clip,
-  phase?: CapturePhaseFilter,
-): Promise<Buffer> {
-  const b64 = await page.evaluate(
-    async ({ c, phaseOpt }: { c: Clip; phaseOpt?: CapturePhaseFilter }) => {
-      const canvas = document.querySelector(
-        'canvas[aria-label="Game view"]',
-      ) as HTMLCanvasElement | null;
-      const scene = window.__bordev?.renderer?.scene;
-      if (!canvas) throw new Error('Game view canvas not found');
-      if (!scene || scene.isDisposed) {
-        throw new Error('Scene unavailable or disposed');
-      }
-      return new Promise<string>((resolve, reject) => {
-        let done = false;
-        const timeoutMs = phaseOpt ? 10_000 : 2_000;
-        const observer = scene.onAfterRenderObservable.add(() => {
-          if (done) return;
-          try {
-            if (phaseOpt) {
-              const sim = window.__bordev?.sim;
-              const world = sim?.world;
-              if (!sim || !world) {
-                throw new Error('Simulation or world unavailable');
-              }
-              const unit = world.getEntity(phaseOpt.unitId);
-              if (!unit || unit.kind !== 'unit') {
-                throw new Error(
-                  `Unit ${phaseOpt.unitId} vanished or not a unit`,
-                );
-              }
-              const tick = world.tick;
-              if (phaseOpt.phase === 'attack') {
-                const start = unit.combat?.attackStartedTick;
-                if (start === undefined) return;
-                const elapsed = tick - start;
-                if (elapsed < 8 || elapsed > 11) return;
-              } else {
-                if (unit.combat?.attackStartedTick !== undefined) return;
-                const cd = unit.attackCooldownUntilTick;
-                if (cd === undefined) return;
-                const untilNext = cd - tick;
-                if (untilNext < 8 || untilNext > 16) return;
-              }
-            }
-
-            done = true;
-            clearTimeout(timer);
-            scene.onAfterRenderObservable.remove(observer);
-
-            const r = canvas.getBoundingClientRect();
-            const scaleX = canvas.width / r.width;
-            const scaleY = canvas.height / r.height;
-            const sx = Math.max(0, (c.x - r.left) * scaleX);
-            const sy = Math.max(0, (c.y - r.top) * scaleY);
-            const sw = Math.min(canvas.width - sx, c.width * scaleX);
-            const sh = Math.min(canvas.height - sy, c.height * scaleY);
-            const crop = document.createElement('canvas');
-            crop.width = Math.max(1, Math.round(sw));
-            crop.height = Math.max(1, Math.round(sh));
-            const ctx = crop.getContext('2d');
-            if (!ctx) {
-              throw new Error('Failed to get 2d context for crop canvas');
-            }
-            ctx.drawImage(
-              canvas,
-              sx,
-              sy,
-              sw,
-              sh,
-              0,
-              0,
-              crop.width,
-              crop.height,
-            );
-            resolve(crop.toDataURL('image/png'));
-          } catch (error) {
-            done = true;
-            clearTimeout(timer);
-            scene.onAfterRenderObservable.remove(observer);
-            reject(error instanceof Error ? error : new Error(String(error)));
-          }
-        });
-        const timer = window.setTimeout(() => {
-          if (done) return;
-          done = true;
-          scene.onAfterRenderObservable.remove(observer);
-          reject(
-            new Error(
-              `Capture timed out after ${timeoutMs}ms${
-                phaseOpt
-                  ? ` waiting for ${phaseOpt.phase} phase (unit ${phaseOpt.unitId})`
-                  : ''
-              }`,
-            ),
-          );
-        }, timeoutMs);
-      });
-    },
-    { c: clip, phaseOpt: phase },
-  );
-  const base64Data = b64.replace(/^data:image\/\w+;base64,/, '');
-  return Buffer.from(base64Data, 'base64');
-}
-
-/**
- * Number of pixels whose colour differs between two same-sized screenshots, excluding an
- * optional clip-local rectangle (used to mask a unit standing in front of a building).
- */
-async function countDifferingPixels(
-  page: Page,
-  a: Buffer,
-  b: Buffer,
-  ignore: Clip | null = null,
-): Promise<number> {
-  return page.evaluate(
-    async ({ aB64, bB64, ignoreRect }) => {
-      const decode = async (b64: string): Promise<ImageData> => {
-        const bin = atob(b64);
-        const bytes = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-        const bitmap = await createImageBitmap(
-          new Blob([bytes], { type: 'image/png' }),
-        );
-        const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-        const ctx = canvas.getContext('2d');
-        if (!ctx) throw new Error('2D context unavailable');
-        ctx.drawImage(bitmap, 0, 0);
-        return ctx.getImageData(0, 0, bitmap.width, bitmap.height);
-      };
-      const [imgA, imgB] = await Promise.all([decode(aB64), decode(bB64)]);
-      if (imgA.width !== imgB.width || imgA.height !== imgB.height) {
-        throw new Error('Screenshots differ in size');
-      }
-      let count = 0;
-      for (let y = 0; y < imgA.height; y++) {
-        for (let x = 0; x < imgA.width; x++) {
-          if (
-            ignoreRect &&
-            x >= ignoreRect.x &&
-            x < ignoreRect.x + ignoreRect.width &&
-            y >= ignoreRect.y &&
-            y < ignoreRect.y + ignoreRect.height
-          ) {
-            continue;
-          }
-          const i = (y * imgA.width + x) * 4;
-          if (
-            Math.abs(imgA.data[i] - imgB.data[i]) > 12 ||
-            Math.abs(imgA.data[i + 1] - imgB.data[i + 1]) > 12 ||
-            Math.abs(imgA.data[i + 2] - imgB.data[i + 2]) > 12
-          ) {
-            count++;
-          }
-        }
-      }
-      return count;
-    },
-    {
-      aB64: a.toString('base64'),
-      bB64: b.toString('base64'),
-      ignoreRect: ignore,
-    },
-  );
-}
-
-/** Real mouse click on a screen point of the entity that the renderer's hit test resolves to it. */
-async function clickEntity(
-  page: Page,
-  id: number,
-  button: 'left' | 'right',
-): Promise<{ x: number; y: number }> {
-  const field = await playfield(page);
-  const pt = await pickablePoint(page, id);
-  expect(pt.x).toBeGreaterThan(field.left + 16);
-  expect(pt.x).toBeLessThan(field.right - 16);
-  expect(pt.y).toBeGreaterThanOrEqual(field.top);
-  expect(pt.y).toBeLessThanOrEqual(field.bottom);
-  await page.mouse.click(pt.x, pt.y, { button });
-  return pt;
-}
-
-async function selectOnly(page: Page, id: number): Promise<void> {
-  await clickEntity(page, id, 'left');
-  await page.waitForFunction((entityId) => {
-    const sel = window.__bordev?.session.input.selection.ids;
-    return sel !== undefined && sel.length === 1 && sel[0] === entityId;
-  }, id);
-}
-
-/** Real mouse click on a ground point inside the playfield, away from its edges. */
-async function clickGround(
-  page: Page,
-  x: number,
-  z: number,
-  button: 'left' | 'right',
-): Promise<void> {
-  const field = await playfield(page);
-  const pt = await worldToScreen(page, x, z);
-  expect(pt.x).toBeGreaterThan(field.left + 24);
-  expect(pt.x).toBeLessThan(field.right - 24);
-  expect(pt.y).toBeGreaterThan(field.top + 8);
-  expect(pt.y).toBeLessThan(field.bottom - 8);
-  await page.mouse.click(pt.x, pt.y, { button });
-}
 
 /** Waits until the unit's current order has finished (no order or idle). */
 async function waitUnitIdle(
@@ -473,15 +157,11 @@ async function waitUnitIdle(
 /** Installs a requestAnimationFrame sampler (runs after each real render) for the scenario. */
 async function startProbe(
   page: Page,
-  watch: { buildingId?: number; unitId?: number },
+  watch: { buildingId?: number },
 ): Promise<void> {
-  await page.evaluate(({ buildingId, unitId }) => {
+  await page.evaluate(({ buildingId }) => {
     const probe: M7Probe = {
       buildingHp: [],
-      unitHp: [],
-      drawnStoneFrames: 0,
-      drawnArrowFrames: 0,
-      maxDrawnProjectiles: 0,
       firstStoneOriginDistance: null,
     };
     window.__m7Probe = probe;
@@ -490,9 +170,6 @@ async function startProbe(
       const bordev = window.__bordev;
       const world = bordev?.sim?.world;
       if (world) {
-        const drawn = bordev?.renderer?.projectiles?.count ?? 0;
-        probe.maxDrawnProjectiles = Math.max(probe.maxDrawnProjectiles, drawn);
-
         const building =
           buildingId === undefined ? undefined : world.getEntity(buildingId);
         if (building && building.kind === 'building') {
@@ -500,19 +177,10 @@ async function startProbe(
             probe.buildingHp.push(building.hp);
           }
         }
-        const unit = unitId === undefined ? undefined : world.getEntity(unitId);
-        if (unit && unit.kind === 'unit') {
-          if (probe.unitHp[probe.unitHp.length - 1] !== unit.hp) {
-            probe.unitHp.push(unit.hp);
-          }
-        }
 
-        let stone = false;
-        let arrow = false;
         for (const e of world.entities) {
           if (!e || e.kind !== 'projectile') continue;
           if (e.visualKind === 'stone') {
-            stone = true;
             if (
               probe.firstStoneOriginDistance === null &&
               building &&
@@ -530,12 +198,8 @@ async function startProbe(
               );
               probe.firstStoneOriginDistance = Math.hypot(dx, dz);
             }
-          } else {
-            arrow = true;
           }
         }
-        if (drawn > 0 && stone) probe.drawnStoneFrames++;
-        if (drawn > 0 && arrow) probe.drawnArrowFrames++;
       }
       requestAnimationFrame(sample);
     };
@@ -553,10 +217,14 @@ async function readProbe(page: Page): Promise<M7Probe> {
 
 /** Holds immobility checks for a unit that must be under a real hold order. */
 async function expectHoldImmobile(page: Page, id: number): Promise<void> {
-  await page.waitForFunction((unitId) => {
-    const u = window.__bordev?.sim?.world.getEntity(unitId);
-    return !!u && u.kind === 'unit' && u.order?.kind === 'hold';
-  }, id);
+  await page.waitForFunction(
+    (unitId) => {
+      const u = window.__bordev?.sim?.world.getEntity(unitId);
+      return !!u && u.kind === 'unit' && u.order?.kind === 'hold';
+    },
+    id,
+    { timeout: 10_000 },
+  );
   const readPos = () =>
     page.evaluate((unitId) => {
       const u = window.__bordev?.sim?.world.getEntity(unitId);
@@ -608,6 +276,7 @@ test('1. real right-click enemy attack kills the peasant; the corpse stays drawn
       );
     },
     { k: knightId, e: enemyId },
+    { timeout: 10_000 },
   );
 
   // Real-time combat: wait for the enemy to be removed from live entities and kept as remains.
@@ -656,10 +325,8 @@ test('1. real right-click enemy attack kills the peasant; the corpse stays drawn
       (d) => (window.__bordev?.sim?.world.tick ?? 0) - d,
       corpse.deathTick,
     );
-  const ageBefore = await ticksSinceDeath();
   const withCorpse = await capture(page, clip);
   const ageAfter = await ticksSinceDeath();
-  expect(ageBefore).toBeGreaterThanOrEqual(0);
   expect(ageAfter).toBeLessThan(160); // before the 8 s fade begins
 
   // Corpse cannot be picked or selected at its actual location.
@@ -678,11 +345,9 @@ test('1. real right-click enemy attack kills the peasant; the corpse stays drawn
   await page.mouse.click(probePoint.x, probePoint.y, { button: 'left' });
   await page.waitForFunction(
     () => window.__bordev?.session.input.selection.ids.length === 0,
+    undefined,
+    { timeout: 10_000 },
   );
-  const selected = await page.evaluate(() => [
-    ...(window.__bordev?.session.input.selection.ids ?? []),
-  ]);
-  expect(selected).not.toContain(enemyId);
 
   // Corpse lifetime ends: remains are culled and the drawn sprite is gone.
   await page.waitForFunction(
@@ -735,6 +400,7 @@ test('2. a melee swing renders a distinct attack frame from rest frames', async 
       );
     },
     { k: knightId, c: cottageId },
+    { timeout: 10_000 },
   );
 
   // Wait for the first real swing so the knight stands in its contact position.
@@ -765,8 +431,6 @@ test('2. a melee swing renders a distinct attack frame from rest frames', async 
       await capture(page, knightClip, { unitId: knightId, phase: 'rest' }),
     );
   }
-  expect(attackShots.length).toBe(2);
-  expect(restShots.length).toBe(2);
 
   const restSpread = await countDifferingPixels(
     page,
@@ -831,6 +495,7 @@ test('3. command-card Attack-Move engages an enemy en route, resumes, then comma
       );
     },
     { k: knightId, dx: dest.x, dz: dest.z },
+    { timeout: 10_000 },
   );
   expect(
     await page.evaluate(() => window.__bordev?.session.input.orders.mode),
@@ -864,6 +529,22 @@ test('3. command-card Attack-Move engages an enemy en route, resumes, then comma
     { timeout: 60_000 },
   );
 
+  // Order the knight to move so Hold must stop real motion
+  await clickGround(page, 67.5, 15.5, 'right');
+  await page.waitForFunction(
+    ({ k, dx, dz }) => {
+      const u = window.__bordev?.sim?.world.getEntity(k);
+      return (
+        !!u &&
+        u.kind === 'unit' &&
+        u.order?.kind === 'move' &&
+        Math.hypot(u.x - dx, u.z - dz) > 0.5
+      );
+    },
+    { k: knightId, dx: dest.x, dz: dest.z },
+    { timeout: 10_000 },
+  );
+
   const holdCard = page.getByTestId('command-hold');
   await expect(holdCard).toBeVisible();
   await expect(holdCard).not.toHaveAttribute('aria-disabled', 'true');
@@ -892,6 +573,8 @@ test('4. hotkey R attack-move and hotkey E hold give exact immobility', async ({
   await page.keyboard.press('KeyR');
   await page.waitForFunction(
     () => window.__bordev?.session.input.orders.mode === 'attackMove',
+    undefined,
+    { timeout: 10_000 },
   );
 
   const dest = { x: 75.5, z: 7.5 };
@@ -907,13 +590,14 @@ test('4. hotkey R attack-move and hotkey E hold give exact immobility', async ({
       );
     },
     { s: spearmanId, dx: dest.x, dz: dest.z },
+    { timeout: 10_000 },
   );
 
   // Let it really travel before holding, so hold must stop actual motion.
   await page.waitForFunction((s) => {
     const u = window.__bordev?.sim?.world.getEntity(s);
     return !!u && u.kind === 'unit' && Math.hypot(u.x - 67.5, u.z - 15.5) > 1;
-  }, spearmanId);
+  }, spearmanId, { timeout: 30_000 });
   await page.keyboard.press('KeyE');
   await expectHoldImmobile(page, spearmanId);
 
@@ -921,7 +605,7 @@ test('4. hotkey R attack-move and hotkey E hold give exact immobility', async ({
   expect(pageErrors).toEqual([]);
 });
 
-test('5. trebuchet from outside tower range: stone projectiles are drawn; tower 1000/550/100/dead with damaged and rubble frames', async ({
+test('5. trebuchet from outside tower range: stone projectiles are visible in flight; tower 1000/550/100/dead with damaged and rubble frames', async ({
   page,
 }) => {
   test.setTimeout(300_000);
@@ -971,7 +655,43 @@ test('5. trebuchet from outside tower range: stone projectiles are drawn; tower 
       );
     },
     { t: trebId, tower: towerId },
+    { timeout: 10_000 },
   );
+
+  // The stone arc peaks ~370 px above its ground track at zoom 1, so frame it: the flight midpoint
+  // is about (71.3, 11.7); a camera target 4.2 tiles toward -x/-z projects that midpoint ~200 px
+  // below the canvas centre, which keeps the mid-flight stone well inside the playfield.
+  await page.evaluate(() => {
+    const cam = window.__bordev?.session.renderer.camera;
+    if (!cam) throw new Error('Renderer camera is not available');
+    cam.centerOn(67.1, 7.5);
+  });
+  await nextFrames(page, 2);
+
+  // Capture the stone in flight at its actual drawn position, then the same clip once no projectile is in flight
+  const { image: stoneInFlight, clip: stoneClip } =
+    await captureInFlightProjectile(page, 'stone', 36);
+  await page.waitForFunction(
+    () =>
+      !window.__bordev?.sim?.world.entities.some(
+        (e) => !!e && e.kind === 'projectile',
+      ),
+    undefined,
+    { timeout: 30_000 },
+  );
+  await nextFrames(page, 2);
+  const stoneCleared = await capture(page, stoneClip);
+  expect(
+    await countDifferingPixels(page, stoneInFlight, stoneCleared),
+  ).toBeGreaterThan(MIN_FRAME_DIFF_PIXELS);
+
+  // Restore the original framing so the tower clip captured above stays valid.
+  await page.evaluate(() => {
+    const cam = window.__bordev?.session.renderer.camera;
+    if (!cam) throw new Error('Renderer camera is not available');
+    cam.centerOn(70.5, 12.5);
+  });
+  await nextFrames(page, 2);
 
   // Damaged frame at 100 HP (after two 450-damage hits, before the third).
   await page.waitForFunction(
@@ -1056,12 +776,9 @@ test('5. trebuchet from outside tower range: stone projectiles are drawn; tower 
 
   const probe = await readProbe(page);
   expect(probe.buildingHp).toEqual([1000, 550, 100]);
-  expect(probe.drawnStoneFrames).toBeGreaterThan(0);
-  expect(probe.maxDrawnProjectiles).toBeGreaterThan(0);
   expect(probe.firstStoneOriginDistance).not.toBeNull();
   expect(probe.firstStoneOriginDistance!).toBeGreaterThan(7);
   expect(probe.firstStoneOriginDistance!).toBeLessThanOrEqual(12.5);
-
   expect(consoleErrors).toEqual([]);
   expect(pageErrors).toEqual([]);
 });
@@ -1087,30 +804,30 @@ test('6. an enemy tower fires visible arrows at a peasant sent into its range', 
   ]);
   await waitForRender(page, [peasantId, towerId]);
 
-  await startProbe(page, { unitId: peasantId });
   await selectOnly(page, peasantId);
   // Real move click 3.9 tiles from the tower footprint, inside its range 7.
   await clickGround(page, 72, 10.5, 'right');
 
-  await page.waitForFunction(
-    () => {
-      const world = window.__bordev?.sim?.world;
-      return (
-        !!world &&
-        world.entities.some(
-          (e) => !!e && e.kind === 'projectile' && e.visualKind === 'arrow',
-        )
-      );
-    },
-    undefined,
-    { timeout: 90_000 },
-  );
-  await page.waitForFunction(
-    () => (window.__bordev?.renderer?.projectiles?.count ?? 0) > 0,
-    undefined,
-    { timeout: 30_000 },
-  );
+  // Dynamically capture arrow in flight at its actual projected screen position
+  const { image: arrowInFlight, clip: arrowClip } =
+    await captureInFlightProjectile(page, 'arrow', 36);
 
+  // Wait until the arrow has impacted and is no longer in flight (before next shot)
+  await page.waitForFunction(
+    () =>
+      !window.__bordev?.sim?.world.entities.some(
+        (e) => !!e && e.kind === 'projectile',
+      ),
+    undefined,
+    { timeout: 10_000 },
+  );
+  await nextFrames(page, 2);
+
+  // Capture the SAME clip when no projectile is in flight and diff
+  const arrowCleared = await capture(page, arrowClip);
+  expect(
+    await countDifferingPixels(page, arrowInFlight, arrowCleared),
+  ).toBeGreaterThan(MIN_FRAME_DIFF_PIXELS);
   await page.waitForFunction(
     (p) => {
       const u = window.__bordev?.sim?.world.getEntity(p);
@@ -1119,11 +836,6 @@ test('6. an enemy tower fires visible arrows at a peasant sent into its range', 
     peasantId,
     { timeout: 60_000 },
   );
-
-  const probe = await readProbe(page);
-  expect(probe.drawnArrowFrames).toBeGreaterThan(0);
-  expect(probe.maxDrawnProjectiles).toBeGreaterThan(0);
-
   expect(consoleErrors).toEqual([]);
   expect(pageErrors).toEqual([]);
 });
@@ -1185,6 +897,8 @@ test('7. gate renders the open frame for a friendly unit within 1 tile and the c
   await clickGround(page, 63, 14.5, 'left');
   await page.waitForFunction(
     () => window.__bordev?.session.input.selection.ids.length === 0,
+    undefined,
+    { timeout: 10_000 },
   );
   await nextFrames(page, 3);
   const openShot = await capture(page, gateClip);
@@ -1215,6 +929,8 @@ test('7. gate renders the open frame for a friendly unit within 1 tile and the c
   await clickGround(page, 63, 14.5, 'left');
   await page.waitForFunction(
     () => window.__bordev?.session.input.selection.ids.length === 0,
+    undefined,
+    { timeout: 10_000 },
   );
   await nextFrames(page, 3);
   const closedAfter = await capture(page, gateClip);

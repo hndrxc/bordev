@@ -62,6 +62,7 @@ export class World {
     this.pathQueue = new PathQueue(this.grid);
 
     this.initPlayers(playerFactions);
+    this.syncAlliances();
     this.initMines();
     this.initDoodads();
     this.initStartingBases();
@@ -73,6 +74,30 @@ export class World {
 
   getEntity(id: number): Entity | undefined {
     return this.entities[id];
+  }
+
+  setTeam(player: number, team: number): void {
+    const pState = this.players[player];
+    if (!pState || pState.team === team) {
+      return;
+    }
+    pState.team = team;
+    this.syncAlliances();
+  }
+
+  private syncAlliances(): void {
+    const numPlayers = this.players.length;
+    for (let i = 0; i < numPlayers; i++) {
+      const p = this.players[i];
+      const allies: number[] = [];
+      for (let j = 0; j < numPlayers; j++) {
+        const other = this.players[j];
+        if (other.id !== p.id && other.team === p.team) {
+          allies.push(other.id);
+        }
+      }
+      this.grid.setAllies(p.id, allies);
+    }
   }
 
   private allocateId(): number {
@@ -193,7 +218,7 @@ export class World {
 
     let width = bData.width;
     let height = bData.height;
-    const isGate = bData.isGate ?? type.includes('gate');
+    const isGate = bData.isGate === true;
     const resolvedOrientation =
       orientation ??
       (isGate && bData.gateOrientations ? 'horizontal' : undefined);
@@ -361,12 +386,9 @@ export class World {
     input: Omit<ProjectileEntity, 'id' | 'kind'>,
   ): ProjectileEntity {
     const id = this.allocateId();
-    const projectile: ProjectileEntity = {
-      id,
-      kind: 'projectile',
-      ...input,
-    };
-
+    const projectile = input as ProjectileEntity;
+    projectile.id = id;
+    projectile.kind = 'projectile';
     if (id < this.entities.length) {
       this.entities[id] = projectile;
     } else {

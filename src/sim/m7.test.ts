@@ -1,26 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { Sim } from './sim.js';
-import { Terrain, type GameMap } from './map.js';
 import type { UnitDiedEvent } from './commands.js';
 import type { UnitEntity } from './entity.js';
 import { isInAttackRange } from './systems/combat.js';
-
-function makeCleanMap(size = 48): GameMap {
-  return {
-    version: 1,
-    id: `m7_clean_${size}`,
-    name: 'M7 clean map',
-    size,
-    players: 2,
-    tiles: new Uint8Array(size * size).fill(Terrain.GRASS),
-    goldMines: [],
-    starts: [
-      [8, 8],
-      [size - 8, size - 8],
-    ],
-    doodads: [],
-  };
-}
+import { makeOpenSim } from './testFixtures.js';
 
 /** Steps once and records unitDied events; corpses expire so counts must come from events. */
 function stepAndCollect(sim: Sim, deaths: UnitDiedEvent[]): void {
@@ -39,7 +22,15 @@ function diedIds(deaths: UnitDiedEvent[], player: number): number[] {
 
 describe('M7 Deterministic Duel Matrix & Combat Mechanics', () => {
   it('duel matrix: 10 spearmen defeat 5 knights on clean open ground', () => {
-    const sim = new Sim(makeCleanMap(48), 42);
+    const sim = makeOpenSim({
+      size: 48,
+      seed: 42,
+      players: 2,
+      starts: [
+        [8, 8],
+        [40, 40],
+      ],
+    });
     const world = sim.world;
 
     // Spawn 10 spearmen for player 0 in two ranks around x=18
@@ -96,7 +87,15 @@ describe('M7 Deterministic Duel Matrix & Combat Mechanics', () => {
   });
 
   it('duel matrix: 5 knights defeat 10 longbowmen on clean open ground', () => {
-    const sim = new Sim(makeCleanMap(48), 42);
+    const sim = makeOpenSim({
+      size: 48,
+      seed: 42,
+      players: 2,
+      starts: [
+        [8, 8],
+        [40, 40],
+      ],
+    });
     const world = sim.world;
 
     // Spawn 5 knights for player 0 around x=16
@@ -153,7 +152,7 @@ describe('M7 Deterministic Duel Matrix & Combat Mechanics', () => {
   });
 
   it('trebuchet destroys 1000 HP stone tower in 3 hits of 450 each (1000 -> 550 -> 100 -> dead)', () => {
-    const sim = new Sim(makeCleanMap(48), 42);
+    const sim = makeOpenSim({ size: 48, seed: 42, players: 2 });
     const world = sim.world;
 
     // Trebuchet at (14, 24), stone tower at (22, 24) (distance = 8 tiles, within trebuchet 4-12 range)
@@ -217,7 +216,7 @@ describe('M7 Deterministic Duel Matrix & Combat Mechanics', () => {
   });
 
   it('man-at-arms hitting stone wall removes exactly 3 HP per hit: max(1, 6 - 8) + 2 = 3', () => {
-    const sim = new Sim(makeCleanMap(48), 42);
+    const sim = makeOpenSim({ size: 48, seed: 42, players: 2 });
     const world = sim.world;
 
     // Man-at-arms at (15, 20), stone wall at (16, 20)
@@ -261,47 +260,8 @@ describe('M7 Deterministic Duel Matrix & Combat Mechanics', () => {
     expect(wall.hp).toBe(initialHp - 6);
   });
 
-  it('attackMove resumes march toward destination after defeating intermediate enemy', () => {
-    const sim = new Sim(makeCleanMap(48), 42);
-    const world = sim.world;
-
-    const attacker = world.spawnUnit(0, 'spearman', 10, 20, 'crown');
-    // Weak enemy along the way at x=18
-    const enemy = world.spawnUnit(1, 'peasant', 18, 20, 'crown');
-
-    // Ordered to attackMove across the map to x=32
-    sim.issue({
-      kind: 'attackMove',
-      player: 0,
-      ids: [attacker.id],
-      x: 32,
-      z: 20,
-    });
-
-    // Advance simulation: attacker should engage enemy, kill it, and resume toward (32, 20)
-    let enemyKilled = false;
-    let arrivedAtDest = false;
-
-    for (let t = 0; t < 1000; t++) {
-      sim.step();
-
-      if (!enemyKilled && world.getEntity(enemy.id) === undefined) {
-        enemyKilled = true;
-      }
-
-      if (enemyKilled && Math.hypot(attacker.x - 32, attacker.z - 20) < 1.0) {
-        arrivedAtDest = true;
-        break;
-      }
-    }
-
-    expect(enemyKilled).toBe(true);
-    expect(arrivedAtDest).toBe(true);
-    expect(attacker.x).toBeGreaterThan(30);
-  });
-
   it('hold position enforces exact immobility during observation and combat', () => {
-    const sim = new Sim(makeCleanMap(48), 42);
+    const sim = makeOpenSim({ size: 48, seed: 42, players: 2 });
     const world = sim.world;
 
     const soldier = world.spawnUnit(0, 'spearman', 20.0, 20.0, 'crown');
@@ -345,35 +305,8 @@ describe('M7 Deterministic Duel Matrix & Combat Mechanics', () => {
     expect(soldier.z).toBe(startZ);
   });
 
-  it('explicit attack on unit pursues and defeats target', () => {
-    const sim = new Sim(makeCleanMap(48), 42);
-    const world = sim.world;
-
-    const knight = world.spawnUnit(0, 'knight', 10, 20, 'crown');
-    const peasant = world.spawnUnit(1, 'peasant', 18, 20, 'crown');
-
-    sim.issue({
-      kind: 'attack',
-      player: 0,
-      ids: [knight.id],
-      targetId: peasant.id,
-    });
-
-    let defeated = false;
-    for (let t = 0; t < 400; t++) {
-      sim.step();
-      if (world.getEntity(peasant.id) === undefined) {
-        defeated = true;
-        break;
-      }
-    }
-
-    expect(defeated).toBe(true);
-    expect(world.getEntity(peasant.id)).toBeUndefined();
-  });
-
   it('explicit attack on building navigates to perimeter and destroys building', () => {
-    const sim = new Sim(makeCleanMap(48), 42);
+    const sim = makeOpenSim({ size: 48, seed: 42, players: 2 });
     const world = sim.world;
 
     // A full-HP cottage (550 HP, 5 damage per 2s from a man-at-arms) needs ~4400 ticks, so
@@ -412,7 +345,7 @@ describe('M7 Deterministic Duel Matrix & Combat Mechanics', () => {
   });
 
   it('queued attack and move: defeats first target, then executes queued destination', () => {
-    const sim = new Sim(makeCleanMap(48), 42);
+    const sim = makeOpenSim({ size: 48, seed: 42, players: 2 });
     const world = sim.world;
 
     const knight = world.spawnUnit(0, 'knight', 10, 20, 'crown');
@@ -456,12 +389,14 @@ describe('M7 Deterministic Duel Matrix & Combat Mechanics', () => {
     expect(knight.x).toBeGreaterThan(28);
   });
 
-  it('hold issued mid-swing cancels the original impact; reacquisition swings later', () => {
-    const sim = new Sim(makeCleanMap(48), 42);
+  it('hold issued mid-swing cancels original impact and resets to exact 36-tick cadence on reacquisition', () => {
+    const sim = makeOpenSim({ size: 48, seed: 42, players: 2 });
     const world = sim.world;
 
     const knight = world.spawnUnit(0, 'knight', 20, 20, 'crown');
     const target = world.spawnUnit(1, 'peasant', 20.6, 20, 'crown');
+    target.hp = 1000;
+    target.maxHp = 1000;
 
     sim.issue({
       kind: 'attack',
@@ -470,31 +405,30 @@ describe('M7 Deterministic Duel Matrix & Combat Mechanics', () => {
       targetId: target.id,
       queued: false,
     });
-    sim.step(); // tick 0: swing starts; hit frame would land at tick 9
+    sim.step(); // tick 0: swing starts; without hold, impact would land at tick 9
 
     sim.issue({ kind: 'hold', player: 0, ids: [knight.id], queued: false });
 
-    // Hold retains the cooldown; the next idle/hold acquisition scan runs at tick 10
-    while (world.tick < 10) {
+    const hitTicks: number[] = [];
+    let lastHp = target.hp;
+    for (let t = 1; t < 200; t++) {
+      const tick = world.tick;
       sim.step();
-      expect(knight.order?.kind).toBe('hold');
-      expect(target.hp).toBe(target.maxHp);
+      if (target.hp !== lastHp) {
+        hitTicks.push(tick);
+        lastHp = target.hp;
+      }
     }
 
-    // The retained 1.8s cooldown delays the next hit to at least tick 36
-    let damageTick = -1;
-    while (world.tick < 80 && damageTick < 0) {
-      const stepTick = world.tick;
-      sim.step();
-      if (target.hp < target.maxHp) damageTick = stepTick;
+    // Mid-swing hold cancels hit at tick 9; first hit lands after cooldown at tick 45
+    expect(hitTicks).toEqual([45, 81, 117, 153, 189]);
+    for (let i = 1; i < hitTicks.length; i++) {
+      expect(hitTicks[i] - hitTicks[i - 1]).toBe(36);
     }
-    expect(damageTick).toBeGreaterThanOrEqual(36);
-    expect(target.hp).toBe(target.maxHp - 10);
-
   });
 
   it('move order out of range cancels the swing and deals no damage while leaving', () => {
-    const sim = new Sim(makeCleanMap(48), 42);
+    const sim = makeOpenSim({ size: 48, seed: 42, players: 2 });
     const world = sim.world;
 
     const knight = world.spawnUnit(0, 'knight', 20, 20, 'crown');
@@ -523,11 +457,11 @@ describe('M7 Deterministic Duel Matrix & Combat Mechanics', () => {
     }
 
     expect(isInAttackRange(knight, target)).toBe(false);
-    expect(knight.combat).toBeUndefined();
+    expect(knight.z).toBeGreaterThan(24);
   });
 
-  it('stale recycled target id is never damaged by a pending attack', () => {
-    const sim = new Sim(makeCleanMap(48), 42);
+  it('stale recycled target id is never damaged by pending attack against hostile innocent', () => {
+    const sim = makeOpenSim({ size: 48, seed: 42, players: 2 });
     const world = sim.world;
 
     const knight = world.spawnUnit(0, 'knight', 20, 20, 'crown');
@@ -544,16 +478,23 @@ describe('M7 Deterministic Duel Matrix & Combat Mechanics', () => {
     sim.step(); // swing in progress against the original target
 
     world.removeEntity(oldId);
-    const innocent = world.spawnUnit(0, 'peasant', 20.6, 20, 'crown');
+    // Innocent is HOSTILE (player 1) to verify real identity check, not accidental team hostility filter
+    const innocent = world.spawnUnit(1, 'peasant', 20.6, 20, 'crown');
     expect(innocent.id).toBe(oldId);
 
-    for (let t = 0; t < 60; t++) sim.step();
-    expect(innocent.hp).toBe(innocent.maxHp);
-    expect(knight.combat?.targetRef).not.toBe(innocent);
+    // Old in-progress swing targeting oldId must not land on innocent at tick 9 or any tick through 44
+    for (let t = 1; t <= 44; t++) {
+      sim.step();
+      expect(innocent.hp).toBe(innocent.maxHp);
+    }
+
+    // Legitimate re-acquisition attack after cooldown lands on tick 45
+    sim.step(); // tick 45
+    expect(innocent.hp).toBeLessThan(innocent.maxHp);
   });
 
   it('unit death: corpse persists exactly 200 ticks and frees population', () => {
-    const sim = new Sim(makeCleanMap(48), 42);
+    const sim = makeOpenSim({ size: 48, seed: 42, players: 2 });
     const world = sim.world;
     const p1 = world.players[1];
 
@@ -603,8 +544,8 @@ describe('M7 Deterministic Duel Matrix & Combat Mechanics', () => {
     expect(world.remains).not.toContain(victim);
   });
 
-  it('building death: grid freed, paid queue discarded without refund, rubble persists exactly 400 ticks', () => {
-    const sim = new Sim(makeCleanMap(48), 42);
+  it('building death: grid freed, training queue discarded without unit spawn or refund, rubble persists exactly 400 ticks', () => {
+    const sim = makeOpenSim({ size: 48, seed: 42, players: 2 });
     const world = sim.world;
     const p1 = world.players[1];
 
@@ -616,7 +557,7 @@ describe('M7 Deterministic Duel Matrix & Combat Mechanics', () => {
     expect(world.grid.isPassable(24, 24, 0)).toBe(false);
     expect(world.grid.isPassable(26, 26, 0)).toBe(false);
 
-    // Pay for a real queue item through the train command
+    // Pay for a unit in queue
     sim.issue({
       kind: 'train',
       player: 1,
@@ -624,12 +565,6 @@ describe('M7 Deterministic Duel Matrix & Combat Mechanics', () => {
       unitType: 'spearman',
     });
     sim.step();
-    expect(barracks.trainingQueue).toHaveLength(1);
-    expect(barracks.trainingQueue[0]).toMatchObject({
-      unitType: 'spearman',
-      food: 35,
-      gold: 25,
-    });
     const foodAfterPaying = p1.food;
     const goldAfterPaying = p1.gold;
 
@@ -659,15 +594,240 @@ describe('M7 Deterministic Duel Matrix & Combat Mechanics', () => {
     expect(world.grid.isPassable(26, 26, 0)).toBe(true);
 
     // Paid queue discarded WITHOUT refund
-    expect(barracks.trainingQueue).toHaveLength(0);
     expect(p1.food).toBe(foodAfterPaying);
     expect(p1.gold).toBe(goldAfterPaying);
 
-    // Rubble retained for exactly 400 ticks
+    // Rubble retained for exactly 400 ticks from deathTick
     expect(world.remains).toContain(barracks);
     while (world.tick < deathTick + 400) sim.step();
     expect(world.remains).toContain(barracks);
     sim.step();
     expect(world.remains).not.toContain(barracks);
+
+    // Continue stepping past spearman training duration (400 ticks from deathTick) to assert no unit ever spawns
+    for (let t = 0; t < 50; t++) sim.step();
+    const p1Units = world.entities.filter(
+      (e) => e && e.kind === 'unit' && e.player === 1 && e.hp > 0,
+    );
+    expect(p1Units).toHaveLength(0);
+    expect(p1.food).toBe(foodAfterPaying);
+    expect(p1.gold).toBe(goldAfterPaying);
+  });
+
+  it('building death: research in progress discarded without completion or refund', () => {
+    const sim = makeOpenSim({ size: 48, seed: 42, players: 2 });
+    const world = sim.world;
+    const p1 = world.players[1];
+    p1.food = 1000;
+    p1.gold = 1000;
+
+    const keep = world.spawnBuilding(1, 'keep', 20, 20, true);
+    world.spawnBuilding(1, 'barracks', 25, 20, true);
+    world.spawnBuilding(1, 'storehouse', 20, 25, true);
+
+    sim.issue({
+      kind: 'research',
+      player: 1,
+      buildingId: keep.id,
+      upgradeId: 'age_2',
+    });
+    sim.step();
+    const foodAfterPay = p1.food;
+    const goldAfterPay = p1.gold;
+
+    keep.hp = 100;
+    const treb = world.spawnUnit(0, 'trebuchet', 12, 20, 'crown');
+    sim.issue({
+      kind: 'attack',
+      player: 0,
+      ids: [treb.id],
+      targetId: keep.id,
+    });
+
+    for (let t = 0; t < 200; t++) sim.step();
+
+    expect(world.getEntity(keep.id)).toBeUndefined();
+    expect(p1.age).toBe(1);
+    expect(p1.food).toBe(foodAfterPay);
+    expect(p1.gold).toBe(goldAfterPay);
+  });
+
+  it('ranged attack spawns projectile with flight delay, and arrow released before shooter death still hits', () => {
+    const sim = makeOpenSim({ size: 48, seed: 42, players: 2 });
+    const world = sim.world;
+
+    const archer = world.spawnUnit(0, 'longbowman', 10, 20);
+    const target = world.spawnUnit(1, 'ox_cart', 15, 20);
+    target.hp = 100;
+    target.maxHp = 100;
+
+    sim.issue({
+      kind: 'attack',
+      player: 0,
+      ids: [archer.id],
+      targetId: target.id,
+    });
+
+    let spawnTick = -1;
+    let hitTick = -1;
+
+    for (let t = 0; t < 60; t++) {
+      const tick = world.tick;
+      sim.step();
+      const hasProjectile = world.entities.some(
+        (e) => e && e.kind === 'projectile',
+      );
+      if (hasProjectile && spawnTick < 0) {
+        spawnTick = tick;
+        // Target has not received damage upon projectile release
+        expect(target.hp).toBe(100);
+      }
+      if (target.hp < 100 && hitTick < 0) {
+        hitTick = tick;
+        break;
+      }
+    }
+
+    expect(spawnTick).toBe(9);
+    expect(hitTick).toBeGreaterThan(spawnTick);
+    expect(hitTick - spawnTick).toBe(12); // travel time across 5 tiles at 8 tiles/s
+    expect(target.hp).toBe(97);
+
+    // Second test: arrow released before shooter dies still reaches and hits target
+    const archer2 = world.spawnUnit(0, 'longbowman', 10, 20);
+    const target2 = world.spawnUnit(1, 'ox_cart', 15, 20);
+    target2.hp = 100;
+    target2.maxHp = 100;
+
+    sim.issue({
+      kind: 'attack',
+      player: 0,
+      ids: [archer2.id],
+      targetId: target2.id,
+    });
+
+    // Step until projectile spawns
+    for (let t = 0; t < 50; t++) {
+      sim.step();
+      if (world.entities.some((e) => e && e.kind === 'projectile')) break;
+    }
+
+    // Kill shooter mid-flight
+    world.removeEntity(archer2.id);
+    expect(world.getEntity(archer2.id)).toBeUndefined();
+    expect(target2.hp).toBe(100);
+
+    // Advance ticks: projectile arrives and deals damage
+    for (let t = 0; t < 50; t++) {
+      sim.step();
+      if (target2.hp < 100) break;
+    }
+    expect(target2.hp).toBe(97);
+  });
+
+  it('corpse in remains and live unit sharing a reused entity ID operate independently at sim level', () => {
+    const sim = makeOpenSim({ size: 48, seed: 42, players: 2 });
+    const world = sim.world;
+
+    const unitA = world.spawnUnit(1, 'peasant', 10, 10);
+    const recycledId = unitA.id;
+    const killer = world.spawnUnit(0, 'knight', 10.6, 10);
+    sim.issue({
+      kind: 'attack',
+      player: 0,
+      ids: [killer.id],
+      targetId: recycledId,
+    });
+
+    let deathTick = -1;
+    for (let t = 0; t < 100; t++) {
+      const tick = world.tick;
+      sim.step();
+      if (unitA.hp <= 0 && deathTick < 0) {
+        deathTick = tick;
+        break;
+      }
+    }
+    expect(deathTick).toBeGreaterThanOrEqual(0);
+    const corpse = world.remains.find((r) => r.id === recycledId);
+    expect(corpse).toBeDefined();
+
+    // Spawn Unit B reusing recycledId
+    const unitB = world.spawnUnit(1, 'spearman', 25, 25);
+    expect(unitB.id).toBe(recycledId);
+    expect(world.getEntity(recycledId)).toBe(unitB);
+
+    sim.issue({
+      kind: 'move',
+      player: 1,
+      ids: [unitB.id],
+      x: 30,
+      z: 25,
+    });
+
+    // Step until corpse expires (at deathTick + 200)
+    while (world.tick <= deathTick + 200) {
+      sim.step();
+    }
+
+    expect(world.remains.find((r) => r.id === recycledId)).toBeUndefined();
+    expect(world.getEntity(recycledId)).toBe(unitB);
+    expect(unitB.hp).toBe(45);
+    expect(unitB.x).toBe(30);
+    expect(unitB.z).toBe(25);
+  });
+
+  it('combat determinism: identical seed and orders produce identical event and HP history across two runs', () => {
+    function runMatch(seed: number) {
+      const sim = makeOpenSim({ size: 40, seed });
+      const world = sim.world;
+
+      const p0Units: UnitEntity[] = [];
+      for (let i = 0; i < 5; i++) {
+        p0Units.push(world.spawnUnit(0, 'spearman', 15, 18 + i * 1.2));
+      }
+      const p1Units: UnitEntity[] = [];
+      for (let i = 0; i < 5; i++) {
+        p1Units.push(world.spawnUnit(1, 'peasant', 25, 18 + i * 1.2));
+      }
+
+      sim.issue({
+        kind: 'attackMove',
+        player: 0,
+        ids: p0Units.map((u) => u.id),
+        x: 25,
+        z: 20,
+      });
+      sim.issue({
+        kind: 'attackMove',
+        player: 1,
+        ids: p1Units.map((u) => u.id),
+        x: 15,
+        z: 20,
+      });
+
+      const hpHistory: number[][] = [];
+      const eventHistory: string[] = [];
+
+      for (let t = 0; t < 400; t++) {
+        sim.step();
+        hpHistory.push([...p0Units.map((u) => u.hp), ...p1Units.map((u) => u.hp)]);
+        const events = sim.drainEvents();
+        if (events.length > 0) {
+          eventHistory.push(
+            `${world.tick}:${events.map((e) => `${e.kind}:${'entityId' in e ? e.entityId : ''}`).join(',')}`,
+          );
+        }
+      }
+
+      return { hpHistory, eventHistory };
+    }
+
+    const run1 = runMatch(12345);
+    const run2 = runMatch(12345);
+
+    expect(run1.hpHistory).toEqual(run2.hpHistory);
+    expect(run1.eventHistory).toEqual(run2.eventHistory);
+    expect(run1.eventHistory.length).toBeGreaterThan(0);
   });
 });

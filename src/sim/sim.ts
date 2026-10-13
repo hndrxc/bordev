@@ -92,9 +92,19 @@ export class Sim {
     this.world.tick++;
   }
 
-  drainEvents(): SimEvent[] {
-    const drained = [...this.world.events];
-    this.world.events.length = 0;
+  drainEvents(target?: SimEvent[]): SimEvent[] {
+    const events = this.world.events;
+    if (target) {
+      target.length = 0;
+      const len = events.length;
+      for (let i = 0; i < len; i++) {
+        target.push(events[i]);
+      }
+      events.length = 0;
+      return target;
+    }
+    const drained = [...events];
+    events.length = 0;
     return drained;
   }
 

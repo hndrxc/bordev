@@ -7,7 +7,8 @@ import {
   TREBUCHET_PROJECTILE_SPEED,
 } from '../../data/combat.js';
 import { getBuildingData } from '../../data/buildings.js';
-import { applyDamage } from './damage.js';
+import { applyDamage, areHostile } from './damage.js';
+import { isRangedAttacker } from './reach.js';
 
 function getCombatantCenterX(combatant: Combatant): number {
   return combatant.kind === 'building'
@@ -40,9 +41,7 @@ export function spawnProjectile(
   }
 
   const isStone =
-    (source.kind === 'unit' && source.type === 'trebuchet') ||
-    attackType === 'siege';
-
+    source.kind === 'unit' && attackType === 'siege' && isRangedAttacker(source);
   const visualKind: 'arrow' | 'stone' = isStone ? 'stone' : 'arrow';
   const speed =
     visualKind === 'stone' ? TREBUCHET_PROJECTILE_SPEED : PROJECTILE_SPEED;
@@ -104,15 +103,7 @@ export function updateProjectiles(world: World): void {
     }
 
     // 3. Ownership / alliance check: clean up harmlessly if target is friendly or allied
-    const targetPlayer = world.players[target.player];
-    const projPlayer = world.players[projectile.player];
-    const isAlly =
-      target.player === projectile.player ||
-      (targetPlayer !== undefined &&
-        projPlayer !== undefined &&
-        targetPlayer.team === projPlayer.team);
-
-    if (isAlly) {
+    if (!areHostile(world, projectile, target)) {
       world.removeEntity(projectile.id);
       continue;
     }

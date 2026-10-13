@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { type GameMap, Terrain } from '../map.js';
+import { makeOpenMap } from '../testFixtures.js';
 import { World } from '../world.js';
 import { Rng } from '../rng.js';
 import {
@@ -7,46 +7,20 @@ import {
   TREBUCHET_PROJECTILE_SPEED,
 } from '../../data/combat.js';
 import { spawnProjectile, updateProjectiles } from './projectiles.js';
-import { calculateDamage } from './damage.js';
+import { applyDamage } from './damage.js';
+import { Sim } from '../sim.js';
 
-function makeTestWorld(size = 32): World {
-  const map: GameMap = {
-    version: 1,
-    id: 'projectile_test_map',
-    name: 'Projectile Test Map',
-    size,
-    players: 2,
-    tiles: new Uint8Array(size * size).fill(Terrain.GRASS),
-    goldMines: [],
-    starts: [
-      [4, 4],
-      [size - 8, size - 8],
-    ],
-    doodads: [],
-  };
-  const world = new World(map, new Rng(42), { 0: 'crown', 1: 'crown' });
-  // Clean up starting units/buildings for an isolated test environment
-  for (let i = 0; i < world.entities.length; i++) {
-    const ent = world.entities[i];
-    if (ent) world.removeEntity(ent.id);
-  }
-  world.events.length = 0;
-
-  for (const p of world.players) {
-    if (!p) continue;
-    p.food = 1000;
-    p.gold = 1000;
-    p.age = 1;
-    p.eliminated = false;
-  }
-
-  return world;
+function createHarnessWorld(size = 32): World {
+  return new World(makeOpenMap({ size }), new Rng(42), {
+    0: 'crown',
+    1: 'crown',
+  });
 }
 
 describe('systems/projectiles', () => {
   describe('travel time & launch behavior', () => {
     it('arrow travels at speed 8 and applies damage only on arrival, not at launch', () => {
-      const world = makeTestWorld();
+      const world = createHarnessWorld();
       // Shooter at (10, 10), target at (18, 10) -> distance exactly 8 tiles
       const archer = world.spawnUnit(0, 'longbowman', 10, 10);
       const enemy = world.spawnUnit(1, 'spearman', 18, 10);
@@ -80,10 +54,9 @@ describe('systems/projectiles', () => {
     });
 
     it('trebuchet stone travels at speed 5 and takes exact ticks to arrival', () => {
-      const world = makeTestWorld();
-      // Trebuchet at (10, 10), enemy building at (20, 10) -> distance 10 tiles to center
+      const world = createHarnessWorld();
+      // Trebuchet at (10, 10), enemy building at (19, 9) -> distance 10 tiles to center (20, 10)
       const treb = world.spawnUnit(0, 'trebuchet', 10, 10);
-      // 2x2 building at (19, 9) has center at (19 + 1, 9 + 1) = (20, 10)
       const targetBuilding = world.spawnBuilding(1, 'chapel', 19, 9);
       const initialHp = targetBuilding.hp;
       const damage = 450;
@@ -106,7 +79,7 @@ describe('systems/projectiles', () => {
     });
 
     it('populates previous positions for render interpolation and flight progress monotonically increases', () => {
-      const world = makeTestWorld();
+      const world = createHarnessWorld();
       const archer = world.spawnUnit(0, 'longbowman', 10, 10);
       const enemy = world.spawnUnit(1, 'spearman', 18, 10);
 
@@ -132,7 +105,7 @@ describe('systems/projectiles', () => {
 
   describe('moving target homing', () => {
     it('homes towards a moving target and never misses', () => {
-      const world = makeTestWorld();
+      const world = createHarnessWorld();
       const archer = world.spawnUnit(0, 'longbowman', 10, 10);
       const target = world.spawnUnit(1, 'spearman', 14, 10);
       const initialHp = target.hp;
@@ -160,7 +133,7 @@ describe('systems/projectiles', () => {
 
   describe('recycled ID safety & target removal', () => {
     it('does not damage newly spawned unit with recycled ID if original target was removed mid-flight', () => {
-      const world = makeTestWorld();
+      const world = createHarnessWorld();
       const archer = world.spawnUnit(0, 'longbowman', 10, 10);
       const target1 = world.spawnUnit(1, 'spearman', 20, 10);
       const originalTargetId = target1.id;
@@ -173,7 +146,7 @@ describe('systems/projectiles', () => {
       }
       expect(world.getEntity(proj.id)).toBeDefined();
 
-      // Original target is killed / removed mid-flight by another cause
+      // Original target is removed mid-flight
       world.removeEntity(target1.id);
 
       // Spawn a new entity which deterministically recycles the released ID
@@ -181,16 +154,15 @@ describe('systems/projectiles', () => {
       expect(newUnit.id).toBe(originalTargetId);
       const newUnitInitialHp = newUnit.hp;
 
-      // Update projectiles: projectile must detect targetRef !== world.getEntity(targetId)
-      // and safely clean up without damaging the new unit!
+      // Update projectiles: projectile detects target identity mismatch and safely cleans up
       updateProjectiles(world);
 
       expect(world.getEntity(proj.id)).toBeUndefined();
       expect(newUnit.hp).toBe(newUnitInitialHp);
     });
 
-    it('cleans up projectile if target died / entered remains before impact', () => {
-      const world = makeTestWorld();
+    it('cleans up projectile without error if target died and entered remains before impact (rewritten from SimTests#12)', () => {
+      const world = createHarnessWorld();
       const archer = world.spawnUnit(0, 'longbowman', 10, 10);
       const target = world.spawnUnit(1, 'spearman', 20, 10);
 
@@ -199,60 +171,117 @@ describe('systems/projectiles', () => {
       updateProjectiles(world);
       expect(world.getEntity(proj.id)).toBeDefined();
 
-      // Target dies (hp set to 0 and deathTick set)
-      target.hp = 0;
-      target.deathTick = 100;
+      // Target legitimately dies from combat/damage and is moved to remains
+      applyDamage(world, target, 999);
+      expect(world.remains.includes(target)).toBe(true);
+      expect(world.getEntity(target.id)).toBeUndefined();
 
+      // Update projectiles: projectile must vanish without error
       updateProjectiles(world);
       expect(world.getEntity(proj.id)).toBeUndefined();
+      expect(target.hp).toBe(0);
     });
 
-    it('cleans up projectile harmlessly if target changes ownership to ally/same player', () => {
-      const world = makeTestWorld();
+    it('safely reuses freed projectile entity IDs for subsequent entity allocations', () => {
+      const world = createHarnessWorld();
       const archer = world.spawnUnit(0, 'longbowman', 10, 10);
-      const target = world.spawnUnit(1, 'spearman', 20, 10);
-      const initialHp = target.hp;
+      const target = world.spawnUnit(1, 'spearman', 18, 10);
 
-      const proj = spawnProjectile(world, archer, target, 10);
+      const proj1 = spawnProjectile(world, archer, target, 5);
+      const freedId = proj1.id;
 
+      // Advance until proj1 reaches target and completes
+      for (let t = 0; t < 20; t++) {
+        updateProjectiles(world);
+      }
+      expect(world.getEntity(freedId)).toBeUndefined();
+
+      // Spawn a second projectile which reuses freedId
+      const proj2 = spawnProjectile(world, archer, target, 10);
+      expect(proj2.id).toBe(freedId);
+      expect(proj2.flightProgress).toBe(0);
+      expect(proj2.damage).toBe(10);
+
+      // Ensure proj2 updates cleanly
       updateProjectiles(world);
-      expect(world.getEntity(proj.id)).toBeDefined();
-
-      // Ownership changes to ally / same player
-      target.player = 0;
-
-      updateProjectiles(world);
-      expect(world.getEntity(proj.id)).toBeUndefined();
-      expect(target.hp).toBe(initialHp);
+      expect(proj2.flightProgress).toBeGreaterThan(0);
     });
   });
 
-  describe('siege armor ignored via actual impact', () => {
-    it('trebuchet stone bypasses stone tower armor on impact', () => {
-      const world = makeTestWorld();
-      const treb = world.spawnUnit(0, 'trebuchet', 10, 10);
-      // Stone tower has 1000 HP, 8 pierce armor, 3 melee armor
-      const tower = world.spawnBuilding(1, 'stone_tower', 18, 9);
-      expect(tower.pierceArmor).toBe(8);
+  describe('shooter death and fixed damage', () => {
+    it('damage is fixed at release and arrows still hit after the shooter dies', () => {
+      const world = createHarnessWorld();
+      const archer = world.spawnUnit(0, 'longbowman', 10, 10);
+      const target = world.spawnUnit(1, 'spearman', 18, 10);
+      const initialHp = target.hp;
+      const damage = 12;
 
-      // Trebuchet calculates damage using siege attackType (ignoring armor)
-      const dmg = calculateDamage(treb, tower);
-      // Trebuchet base attack 200 + bonus building 250 = 450 (armor ignored!)
-      expect(dmg).toBe(450);
+      const proj = spawnProjectile(world, archer, target, damage);
+      const projId = proj.id;
 
-      spawnProjectile(world, treb, tower, dmg);
+      // Shooter killed mid-flight by another combatant
+      applyDamage(world, archer, 999);
+      expect(world.getEntity(archer.id)).toBeUndefined();
 
-      // Before impact: full 1000 HP
-      const initialHp = tower.hp;
-      expect(initialHp).toBe(1000);
-
-      // Run until projectile impacts (distance ~10 tiles at 5 tiles/s = 40 ticks)
-      for (let t = 0; t < 40; t++) {
+      // Projectile still in flight
+      for (let t = 0; t < 19; t++) {
         updateProjectiles(world);
+        expect(world.getEntity(projId)).toBeDefined();
+        expect(target.hp).toBe(initialHp);
       }
 
-      // Exactly 450 damage applied on impact (ignoring the 8 pierce armor)
-      expect(tower.hp).toBe(550);
+      // 20th tick: arrow impacts and applies the full fixed damage
+      updateProjectiles(world);
+      expect(world.getEntity(projId)).toBeUndefined();
+      expect(target.hp).toBe(initialHp - damage);
+    });
+  });
+
+  describe('siege attack classification: stones vs rams', () => {
+    it('trebuchets fire stone projectiles, but battering rams strike in melee reach and never spawn projectiles', () => {
+      const sim = new Sim(makeOpenMap({ size: 32 }), 1, {
+        0: 'clans',
+        1: 'crown',
+      });
+      const world = sim.world;
+
+      // 1. Trebuchet (ranged siege) fires stone projectile
+      const treb = world.spawnUnit(1, 'trebuchet', 10, 10);
+      const warShrine = world.spawnBuilding(0, 'war_shrine', 20, 10);
+      const stoneProj = spawnProjectile(world, treb, warShrine, 450);
+      expect(stoneProj.visualKind).toBe('stone');
+      expect(stoneProj.speed).toBe(TREBUCHET_PROJECTILE_SPEED);
+      world.removeEntity(stoneProj.id);
+      world.removeEntity(treb.id);
+      world.removeEntity(warShrine.id);
+      // 2. Clans battering ram (range 0 siege) attacks in melee reach without spawning projectiles
+      const ram = world.spawnUnit(0, 'battering_ram', 10, 10);
+      const targetBldg = world.spawnBuilding(1, 'chapel', 11, 10);
+      const initialBldgHp = targetBldg.hp;
+
+      sim.issue({
+        kind: 'attack',
+        player: 0,
+        ids: [ram.id],
+        targetId: targetBldg.id,
+        queued: false,
+      });
+
+      let projectileObserved = false;
+      for (let t = 0; t < 60; t++) {
+        sim.step();
+        for (let i = 0; i < world.entities.length; i++) {
+          const e = world.entities[i];
+          if (e && e.kind === 'projectile') {
+            projectileObserved = true;
+          }
+        }
+      }
+
+      // Ram damaged the building directly
+      expect(targetBldg.hp).toBeLessThan(initialBldgHp);
+      // No projectile was ever spawned by the ram attack
+      expect(projectileObserved).toBe(false);
     });
   });
 });

@@ -4,26 +4,16 @@ Defensive watchtower with stone foundation plinth, arched entrance door,
 tapered stone shaft with quoins and arrow slits, corbelled battlements,
 crenellations, and Crown team pennant flag.
 """
-import math
 from lib import anim, buildings
-from lib.model import box, cylinder, flag, ico, beam
+from lib.model import box, flag, ico, beam
 
 
 _parts = None
 
 
 def stone_tower():
-    parts = buildings.states("Crown stone tower", 1)
+    parts = buildings.states("Crown stone tower", 1, scaffold_height=1.95)
     base, walls, top = parts["levels"]
-
-    # Extended scaffolding for the tall tower structure
-    for x in (-0.46, 0.46):
-        for y in (-0.46, 0.46):
-            beam("Tower scaffold upright", (x, y, 0.02), (x, y, 2.30), 0.034, "WOOD_LIGHT", parts["scaffold"])
-        for z in (0.95, 1.65):
-            beam("Tower scaffold crossbar", (x, -0.46, z), (x, 0.46, z), 0.029, "WOOD_LIGHT", parts["scaffold"])
-            box("Tower scaffold board", (x, 0, z), (0.19, 0.90, 0.035), "WOOD", parts["scaffold"])
-        beam("Tower scaffold brace", (x, -0.46, 0.05), (x, 0.46, 1.60), 0.025, "WOOD", parts["scaffold"])
 
     # --- Base (Foundations & Ground Entrance) ---
     box("Tower foundation plinth", (0, 0, 0.09), (0.94, 0.94, 0.18), "STONE_DARK", base, 0.03)
@@ -41,13 +31,11 @@ def stone_tower():
     box("Mid stringcourse", (0, 0, 1.58), (0.80, 0.80, 0.08), "STONE_LIGHT", walls)
     box("Tower upper shaft", (0, 0, 1.88), (0.74, 0.74, 0.54), "STONE", walls, 0.02)
 
-    # Arrow slits on south and west faces
-    box("Arrow slit south lower", (0, -0.385, 1.12), (0.07, 0.02, 0.34), "DARK", walls)
-    box("Slit lintel south lower", (0, -0.395, 1.31), (0.13, 0.04, 0.05), "STONE_LIGHT", walls)
-    box("Arrow slit west lower", (-0.385, 0, 1.12), (0.02, 0.07, 0.34), "DARK", walls)
-    box("Slit lintel west lower", (-0.395, 0, 1.31), (0.04, 0.13, 0.05), "STONE_LIGHT", walls)
-    box("Arrow slit south upper", (0, -0.375, 1.88), (0.06, 0.02, 0.28), "DARK", walls)
-    box("Arrow slit west upper", (-0.375, 0, 1.88), (0.02, 0.06, 0.28), "DARK", walls)
+    # Arrow slits on south and east faces (lower shaft)
+    box("Arrow slit south lower", (0, -0.385, 1.05), (0.07, 0.02, 0.34), "DARK", walls)
+    box("Slit lintel south lower", (0, -0.395, 1.24), (0.13, 0.04, 0.05), "STONE_LIGHT", walls)
+    box("Arrow slit east lower", (0.385, 0, 1.05), (0.02, 0.07, 0.34), "DARK", walls)
+    box("Slit lintel east lower", (0.395, 0, 1.24), (0.04, 0.13, 0.05), "STONE_LIGHT", walls)
 
     # Corbel brackets widening to the battlement platform
     box("Corbel base band", (0, 0, 2.18), (0.86, 0.86, 0.08), "STONE_LIGHT", walls)
@@ -57,11 +45,11 @@ def stone_tower():
         box("Corbel bracket W", (-0.40, offset, 2.14), (0.07, 0.07, 0.09), "STONE_LIGHT", walls)
         box("Corbel bracket E", (0.40, offset, 2.14), (0.07, 0.07, 0.09), "STONE_LIGHT", walls)
 
-    # Team banners on south and west faces
-    box("Tower team banner south", (0, -0.39, 1.48), (0.26, 0.02, 0.52), "TEAM", walls)
-    box("Banner gold chevron south", (0, -0.402, 1.54), (0.18, 0.012, 0.04), "GOLD", walls)
-    box("Tower team banner west", (-0.39, 0, 1.48), (0.02, 0.26, 0.52), "TEAM", walls)
-    box("Banner gold chevron west", (-0.402, 0, 1.54), (0.012, 0.18, 0.04), "GOLD", walls)
+    # Team banners on south and east faces (upper shaft, clear of stringcourse and corbels)
+    box("Tower team banner south", (0, -0.385, 1.88), (0.26, 0.02, 0.44), "TEAM", walls)
+    box("Banner gold chevron south", (0, -0.398, 1.94), (0.18, 0.012, 0.04), "GOLD", walls)
+    box("Tower team banner east", (0.385, 0, 1.88), (0.02, 0.26, 0.44), "TEAM", walls)
+    box("Banner gold chevron east", (0.398, 0, 1.94), (0.012, 0.18, 0.04), "GOLD", walls)
 
     # --- Top (Battlement platform, Parapets & Merlons) ---
     box("Tower floor", (0, 0, 2.24), (0.90, 0.90, 0.05), "STONE_DARK", top)

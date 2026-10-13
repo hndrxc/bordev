@@ -12,6 +12,7 @@ import {
   isWorkerType,
 } from '../data/roles';
 import type { OrderMarker } from '../render/Overlays';
+import { areHostile } from '../sim/systems/damage';
 
 export type { OrderMarker };
 
@@ -368,24 +369,53 @@ export class OrderController {
     const targetEntity =
       targetId !== undefined ? sim.world.getEntity(targetId) : undefined;
 
-    // 2. Enemy target -> attack (Combat M7)
+    // 2. Enemy target -> attack (Combat M7 / C7)
     const isEnemy =
       targetEntity &&
       (targetEntity.kind === 'unit' || targetEntity.kind === 'building') &&
-      targetEntity.player !== 0 &&
-      (sim.world.players[targetEntity.player]?.team ?? targetEntity.player) !==
-        (sim.world.players[0]?.team ?? 0);
+      targetEntity.hp > 0 &&
+      targetEntity.deathTick === undefined &&
+      areHostile(sim.world, { player: 0 }, targetEntity);
 
     if (isEnemy && targetEntity) {
-      if (ownUnitIds.length > 0) {
-        this.session.issue({
-          kind: 'attack',
-          player: 0,
-          ids: ownUnitIds,
-          targetId: targetEntity.id,
-          queued,
-        });
-        this.addMarker(targetEntity.x, targetEntity.z, 'attackMove');
+      if (ownUnits.length > 0) {
+        const attackerIds: number[] = [];
+        const nonAttackerIds: number[] = [];
+        for (let i = 0; i < ownUnits.length; i++) {
+          const u = ownUnits[i];
+          if (u.attack !== undefined && u.attack > 0) {
+            attackerIds.push(u.id);
+          } else {
+            nonAttackerIds.push(u.id);
+          }
+        }
+
+        if (attackerIds.length > 0) {
+          this.session.issue({
+            kind: 'attack',
+            player: 0,
+            ids: attackerIds,
+            targetId: targetEntity.id,
+            queued,
+          });
+        }
+
+        if (nonAttackerIds.length > 0) {
+          this.session.issue({
+            kind: 'move',
+            player: 0,
+            ids: nonAttackerIds,
+            x: targetEntity.x,
+            z: targetEntity.z,
+            queued,
+          });
+        }
+
+        if (attackerIds.length > 0) {
+          this.addMarker(targetEntity.x, targetEntity.z, 'attackMove');
+        } else if (nonAttackerIds.length > 0) {
+          this.addMarker(targetEntity.x, targetEntity.z, 'move');
+        }
       }
       return;
     }

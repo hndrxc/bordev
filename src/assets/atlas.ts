@@ -11,6 +11,7 @@ export interface ArtManifestEntry {
   script: string;
   frame: number;
   dirs: 1 | 8;
+  facings?: number[];
   anims: Record<string, ArtAnimation>;
 }
 
@@ -22,6 +23,7 @@ export interface AtlasPage {
 
 export interface AtlasAnimation extends ArtAnimation {
   dirs: 1 | 8;
+  facings?: number[];
 }
 
 export interface AtlasFrame {
@@ -39,6 +41,7 @@ export interface Atlas {
   id: string;
   pages: AtlasPage[];
   fps: 12;
+  facings?: number[];
   anims: Record<string, AtlasAnimation>;
   frames: Record<string, AtlasFrame>;
 }
@@ -68,6 +71,29 @@ function directions(value: unknown, path: string): 1 | 8 {
   if (value !== 1 && value !== 8) throw new Error(`${path}: expected 1 or 8`);
   return value;
 }
+function validateFacings(value: unknown, dirs: number, path: string): number[] {
+  if (dirs !== 8) {
+    throw new Error(`${path}: only allowed with dirs 8 (got dirs ${dirs})`);
+  }
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error(`${path}: expected a nonempty array of numbers`);
+  }
+  for (let i = 0; i < value.length; i++) {
+    const f = value[i];
+    if (typeof f !== 'number' || !Number.isSafeInteger(f) || f < 0 || f >= dirs) {
+      throw new Error(`${path}[${i}]: facing out of range, expected integer in 0..${dirs - 1}`);
+    }
+    if (i > 0) {
+      if (f === value[i - 1]) {
+        throw new Error(`${path}: duplicate facing ${f}`);
+      }
+      if (f < value[i - 1]) {
+        throw new Error(`${path}: facings must be in ascending order`);
+      }
+    }
+  }
+  return value as number[];
+}
 
 function animation(value: unknown, path: string): Record<string, unknown> {
   const result = object(value, path);
@@ -95,7 +121,10 @@ export function parseArtManifest(value: unknown): ArtManifestEntry[] {
       throw new Error(`${path}.script: expected assets/<name>.py`);
     }
     integer(entry.frame, `${path}.frame`, 1);
-    directions(entry.dirs, `${path}.dirs`);
+    const dirs = directions(entry.dirs, `${path}.dirs`);
+    if (entry.facings !== undefined) {
+      validateFacings(entry.facings, dirs, `${path}.facings`);
+    }
     const anims = object(entry.anims, `${path}.anims`);
     if (Object.keys(anims).length === 0) throw new Error(`${path}.anims: expected animations`);
     for (const [name, spec] of Object.entries(anims)) {
@@ -134,13 +163,21 @@ export function parseAtlas(value: unknown): Atlas {
   }
   const anims = object(atlas.anims, 'atlas.anims');
   if (Object.keys(anims).length === 0) throw new Error('atlas.anims: expected animations');
+  let facings: number[] | undefined;
+  if (atlas.facings !== undefined) {
+    facings = validateFacings(atlas.facings, 8, 'atlas.facings');
+  }
   const expected = new Set<string>();
   for (const [name, value] of Object.entries(anims)) {
     identifier(name, 'atlas.anims key');
     const spec = animation(value, `atlas.anims.${name}`);
     const dirs = directions(spec.dirs, `atlas.anims.${name}.dirs`);
+    if (facings !== undefined && dirs !== 8) {
+      throw new Error(`atlas.anims.${name}.dirs: facings only allowed with dirs 8 (got dirs ${dirs})`);
+    }
     const count = spec.frames as number;
-    for (let dir = 0; dir < dirs; dir++) {
+    const targetDirs = facings ?? Array.from({ length: dirs }, (_, i) => i);
+    for (const dir of targetDirs) {
       for (let frame = 0; frame < count; frame++) expected.add(`${name}/${dir}/${frame}`);
     }
   }

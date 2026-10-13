@@ -36,6 +36,18 @@ export class PathQueue {
     this.scratch = new AStarScratch(grid.size);
   }
 
+  get componentManager(): ComponentManager {
+    return this.components;
+  }
+
+  getComponentLabels(player: number): Int32Array {
+    if (this.grid.revision !== this.lastGridRevision) {
+      this.lastGridRevision = this.grid.revision;
+      this.components.invalidate();
+    }
+    return this.components.getLabels(this.grid, player);
+  }
+
   get pendingCount(): number {
     return this.queue.length;
   }

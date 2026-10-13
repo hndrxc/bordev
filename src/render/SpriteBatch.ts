@@ -23,6 +23,7 @@ export interface RenderSprite {
   tint: readonly [number, number, number];
   alpha: number;
   radius?: number;
+  shadowAlpha?: number;
 }
 
 const BODY_SHADER_KEY = 'bordevSpriteBody';
@@ -49,6 +50,7 @@ attribute vec3 iPos;
 attribute vec4 iUV;
 attribute vec4 iSize;
 attribute vec4 iTint;
+attribute float iShadowAlpha;
 
 uniform mat4 viewProjection;
 uniform vec3 uRightBasis;
@@ -87,18 +89,77 @@ void main() {
     vec4 mask = texture2D(maskTexture, vUV);
     vec3 team = vTint.rgb;
     vec3 color = mix(base.rgb, clamp(base.rgb * team * 1.25, 0.0, 1.0), mask.r);
-    float alpha = base.a * vTint.a;
+    float alpha = vTint.a;
     if (alpha < 0.005) {
         discard;
     }
-    gl_FragColor = vec4(color, alpha);
+    if (alpha < 0.999) {
+        vec2 c = floor(mod(gl_FragCoord.xy, 4.0));
+        float val = 0.0;
+        if (c.y < 2.0) {
+            if (c.y < 1.0) {
+                val = (c.x < 2.0) ? ((c.x < 1.0) ? 0.0 : 8.0) : ((c.x < 3.0) ? 2.0 : 10.0);
+            } else {
+                val = (c.x < 2.0) ? ((c.x < 1.0) ? 12.0 : 4.0) : ((c.x < 3.0) ? 14.0 : 6.0);
+            }
+        } else {
+            if (c.y < 3.0) {
+                val = (c.x < 2.0) ? ((c.x < 1.0) ? 3.0 : 11.0) : ((c.x < 3.0) ? 1.0 : 9.0);
+            } else {
+                val = (c.x < 2.0) ? ((c.x < 1.0) ? 15.0 : 7.0) : ((c.x < 3.0) ? 13.0 : 5.0);
+            }
+        }
+        if ((val + 0.5) / 16.0 >= alpha) {
+            discard;
+        }
+    }
+    gl_FragColor = vec4(color, 1.0);
 }
 `;
   }
 
   if (!Effect.ShadersStore[`${SHADOW_SHADER_KEY}VertexShader`]) {
-    Effect.ShadersStore[`${SHADOW_SHADER_KEY}VertexShader`] =
-      Effect.ShadersStore[`${BODY_SHADER_KEY}VertexShader`];
+    Effect.ShadersStore[`${SHADOW_SHADER_KEY}VertexShader`] = `
+precision highp float;
+attribute vec3 position;
+attribute vec2 uv;
+attribute vec4 world0;
+attribute vec4 world1;
+attribute vec4 world2;
+attribute vec4 world3;
+attribute vec3 iPos;
+attribute vec4 iUV;
+attribute vec4 iSize;
+attribute vec4 iTint;
+attribute float iShadowAlpha;
+
+uniform mat4 viewProjection;
+uniform vec3 uRightBasis;
+uniform vec3 uUpBasis;
+uniform float uPPU;
+
+varying vec2 vUV;
+varying vec4 vTint;
+varying float vShadowAlpha;
+
+void main() {
+    if (iShadowAlpha <= 0.0) {
+        gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+        vUV = vec2(0.0);
+        vTint = vec4(0.0);
+        vShadowAlpha = 0.0;
+        return;
+    }
+    mat4 finalWorld = mat4(world0, world1, world2, world3);
+    float dx = (uv.x * iSize.x - iSize.z) / uPPU;
+    float dy = (iSize.w - uv.y * iSize.y) / uPPU;
+    vec3 worldPos = iPos + dx * uRightBasis + dy * uUpBasis;
+    gl_Position = viewProjection * (finalWorld * vec4(worldPos, 1.0));
+    vUV = iUV.xy + uv * iUV.zw;
+    vTint = iTint;
+    vShadowAlpha = iShadowAlpha;
+}
+`;
   }
 
   if (!Effect.ShadersStore[`${SHADOW_SHADER_KEY}FragmentShader`]) {
@@ -106,12 +167,16 @@ void main() {
 precision highp float;
 varying vec2 vUV;
 varying vec4 vTint;
+varying float vShadowAlpha;
 
 uniform sampler2D shadowTexture;
 
 void main() {
+    if (vShadowAlpha <= 0.0) {
+        discard;
+    }
     vec4 shadow = texture2D(shadowTexture, vUV);
-    float alpha = shadow.a * vTint.a;
+    float alpha = shadow.a * vTint.a * vShadowAlpha;
     if (alpha < 0.005) {
         discard;
     }
@@ -161,6 +226,7 @@ export class SpriteBatch {
           'iUV',
           'iSize',
           'iTint',
+          'iShadowAlpha',
         ],
         uniforms: ['viewProjection', 'uRightBasis', 'uUpBasis', 'uPPU'],
         samplers: ['bodyTexture', 'maskTexture'],
@@ -208,6 +274,7 @@ export class SpriteBatch {
             'iUV',
             'iSize',
             'iTint',
+            'iShadowAlpha',
           ],
           uniforms: ['viewProjection', 'uRightBasis', 'uUpBasis', 'uPPU'],
           samplers: ['shadowTexture'],
@@ -243,6 +310,7 @@ export class SpriteBatch {
       { name: 'iUV', stride: 4 },
       { name: 'iSize', stride: 4 },
       { name: 'iTint', stride: 4 },
+      { name: 'iShadowAlpha', stride: 1 },
     ];
 
     this.pool = new ThinInstancePool({
@@ -256,14 +324,18 @@ export class SpriteBatch {
     this.pool.beginFrame();
   }
 
-  add(frame: AtlasFrame, sprite: RenderSprite): void {
+  add(
+    frame: AtlasFrame,
+    sprite: RenderSprite,
+    shadowAlpha: number = 1.0,
+  ): void {
     const index = this.pool.alloc();
 
     const pos = this.pool.getBuffer('iPos');
     const uv = this.pool.getBuffer('iUV');
     const size = this.pool.getBuffer('iSize');
     const tint = this.pool.getBuffer('iTint');
-
+    const shadowAlphaBuf = this.pool.getBuffer('iShadowAlpha');
     // iPos: world anchor coordinates
     const offsetPos = index * 3;
     pos[offsetPos + 0] = sprite.x;
@@ -290,6 +362,10 @@ export class SpriteBatch {
     tint[offsetTint + 1] = sprite.tint[1];
     tint[offsetTint + 2] = sprite.tint[2];
     tint[offsetTint + 3] = sprite.alpha;
+
+    // iShadowAlpha: per-instance shadow suppression
+    shadowAlphaBuf[index] =
+      sprite.shadowAlpha !== undefined ? sprite.shadowAlpha : shadowAlpha;
   }
 
   endFrame(): void {

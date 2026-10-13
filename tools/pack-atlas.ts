@@ -46,8 +46,9 @@ interface Sprite {
 
 function frameKeys(entry: ArtManifestEntry): string[] {
   const keys: string[] = [];
+  const dirs = entry.facings ?? Array.from({ length: entry.dirs }, (_, i) => i);
   for (const anim of Object.keys(entry.anims).sort()) {
-    for (let dir = 0; dir < entry.dirs; dir++) {
+    for (const dir of dirs) {
       for (let frame = 0; frame < entry.anims[anim].frames; frame++) {
         keys.push(`${anim}/${dir}/${frame}`);
       }
@@ -306,6 +307,7 @@ export async function packAsset(
     id: entry.id,
     pages,
     fps: 12,
+    ...(entry.facings !== undefined ? { facings: entry.facings } : {}),
     anims: Object.fromEntries(
       Object.keys(entry.anims)
         .sort()

@@ -241,7 +241,6 @@ export interface UnderAttackEvent {
   kind: 'underAttack';
   entityId: number;
   player: number;
-  attackerEntityId?: number;
   x: number;
   z: number;
 }

@@ -57,6 +57,7 @@ function createMockSnapshot(
     radius: unitRaw.radius,
     hp: unitRaw.hp,
     maxHp: unitRaw.maxHp,
+    remains: false,
     raw: unitRaw,
     ...overrides,
   };
@@ -184,5 +185,86 @@ describe('OverlayGeometryBuilder', () => {
 
     const barFrame3 = builder.getHealthBar(0);
     expect(barFrame3.barY).toBe(initialBarY);
+  });
+
+  it('corpse in remains sharing recycled ID with selected live unit produces exactly one ellipse and one health bar (regression for Render#2)', () => {
+    const builder = new OverlayGeometryBuilder();
+
+    const liveUnitRaw = createMockUnitEntity({
+      id: 5,
+      x: 10,
+      z: 10,
+      hp: 80,
+      maxHp: 100,
+    });
+
+    const corpseRaw = createMockUnitEntity({
+      id: 5,
+      x: 25,
+      z: 25,
+      hp: 0,
+      maxHp: 100,
+      deathTick: 50,
+    });
+
+    const liveInterpolated: InterpolatedEntity = {
+      id: 5,
+      kind: 'unit',
+      player: 0,
+      x: 10,
+      z: 10,
+      simX: 10,
+      simZ: 10,
+      previousX: 10,
+      previousZ: 10,
+      radius: 0.35,
+      hp: 80,
+      maxHp: 100,
+      remains: false,
+      raw: liveUnitRaw,
+    };
+
+    const corpseInterpolated: InterpolatedEntity = {
+      id: 5,
+      kind: 'unit',
+      player: 0,
+      x: 25,
+      z: 25,
+      simX: 25,
+      simZ: 25,
+      previousX: 25,
+      previousZ: 25,
+      radius: 0.35,
+      hp: 0,
+      maxHp: 100,
+      remains: true,
+      deathTick: 50,
+      raw: corpseRaw,
+    };
+
+    const snapshot: SessionSnapshot = {
+      tick: 100,
+      alpha: 0,
+      simTime: 5.0,
+      entities: [liveInterpolated, corpseInterpolated],
+    };
+
+    builder.build({
+      snapshot,
+      selectedIds: [5],
+      timeSeconds: 0,
+    });
+
+    expect(builder.ellipseCount).toBe(1);
+    expect(builder.healthBarCount).toBe(1);
+
+    const ellipse = builder.getEllipse(0);
+    expect(ellipse.x).toBe(10);
+    expect(ellipse.z).toBe(10);
+
+    const healthBar = builder.getHealthBar(0);
+    expect(healthBar.posX).toBe(10);
+    expect(healthBar.posZ).toBe(10);
+    expect(healthBar.hpFrac).toBeCloseTo(0.8, 5);
   });
 });

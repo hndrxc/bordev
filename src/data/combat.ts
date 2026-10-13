@@ -1,6 +1,8 @@
 export const PROJECTILE_SPEED = 8;
 export const TREBUCHET_PROJECTILE_SPEED = 5;
 
+export const ATTACK_ANIM_FPS = 12;
+
 export const MELEE_HIT_FRAME = 5;
 export const MELEE_TOTAL_FRAMES = 8;
 export const MELEE_REACH_BUFFER = 0.3;

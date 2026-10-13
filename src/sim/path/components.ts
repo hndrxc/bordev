@@ -11,11 +11,33 @@ const DIRS_8: readonly [number, number][] = [
   [-1, -1],
 ];
 
+let scratchQueue = new Int32Array(0);
+let scratchVisited = new Uint8Array(0);
+
+function getScratchQueue(total: number): Int32Array {
+  if (scratchQueue.length < total) {
+    scratchQueue = new Int32Array(total);
+  }
+  return scratchQueue;
+}
+
+function getScratchBuffers(total: number): { queue: Int32Array; visited: Uint8Array } {
+  if (scratchQueue.length < total) {
+    scratchQueue = new Int32Array(total);
+    scratchVisited = new Uint8Array(total);
+  } else if (scratchVisited.length < total) {
+    scratchVisited = new Uint8Array(total);
+  } else {
+    scratchVisited.fill(0);
+  }
+  return { queue: scratchQueue, visited: scratchVisited };
+}
+
 export function computeComponentLabels(grid: Grid, player: number): Int32Array {
   const size = grid.size;
   const total = size * size;
   const labels = new Int32Array(total);
-  const queue = new Int32Array(total);
+  const queue = getScratchQueue(total);
   let nextCompId = 1;
 
   for (let i = 0; i < total; i++) {
@@ -96,8 +118,7 @@ export function findStartComponent(
   }
 
   // Start tile is impassable; search outward for nearest passable tile
-  const queue = new Int32Array(size * size);
-  const visited = new Uint8Array(size * size);
+  const { queue, visited } = getScratchBuffers(size * size);
   let head = 0;
   let tail = 0;
   queue[tail++] = startIdx;
@@ -159,8 +180,7 @@ export function findNearestTileInComponent(
     return { tx: clampedTx, tz: clampedTz, x: safeTargetX, z: safeTargetZ };
   }
 
-  const queue = new Int32Array(total);
-  const visited = new Uint8Array(total);
+  const { queue, visited } = getScratchBuffers(total);
   let head = 0;
   let tail = 0;
 

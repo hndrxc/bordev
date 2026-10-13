@@ -272,7 +272,6 @@ export function advanceUnitOrder(world: World, unit: UnitEntity): void {
       if (target) {
         unit.combat = {
           targetRef: target,
-          targetId: target.id,
         };
         return;
       }

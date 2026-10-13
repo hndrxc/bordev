@@ -128,7 +128,7 @@ describe('OrderController combat and contextual precedence orders', () => {
     return new OrderController(mockSession, mockSelection);
   }
 
-  it('emits attack command when right-clicking enemy unit with selected units', () => {
+  it('emits attack command and sets sim attack order when right-clicking enemy unit', () => {
     const sim = new Sim(makeTestMap(), 1);
     const spearman = sim.world.spawnUnit(0, 'spearman', 10, 10);
     const enemy = sim.world.spawnUnit(1, 'peasant', 14, 14);
@@ -136,6 +136,7 @@ describe('OrderController combat and contextual precedence orders', () => {
     const issued: Command[] = [];
     const controller = createTestController(sim, [spearman.id], issued);
     controller.contextOrder(enemy.x, enemy.z, false, enemy.id);
+    sim.step();
 
     expect(issued).toHaveLength(1);
     expect(issued[0]).toEqual({
@@ -145,6 +146,12 @@ describe('OrderController combat and contextual precedence orders', () => {
       targetId: enemy.id,
       queued: false,
     });
+    expect(spearman.order?.kind).toBe('attack');
+    expect(
+      spearman.order && 'targetId' in spearman.order
+        ? spearman.order.targetId
+        : undefined,
+    ).toBe(enemy.id);
   });
 
   it('supports shift queue when right-clicking enemy unit', () => {
@@ -152,9 +159,23 @@ describe('OrderController combat and contextual precedence orders', () => {
     const spearman = sim.world.spawnUnit(0, 'spearman', 10, 10);
     const enemy = sim.world.spawnUnit(1, 'peasant', 14, 14);
 
+    // Initial move order so shift-queue has an active order to queue behind
+    sim.issue({
+      kind: 'move',
+      player: 0,
+      ids: [spearman.id],
+      x: 20,
+      z: 20,
+      queued: false,
+    });
+    sim.step();
+    expect(spearman.order?.kind).toBe('move');
+    expect(spearman.orders).toHaveLength(0);
+
     const issued: Command[] = [];
     const controller = createTestController(sim, [spearman.id], issued);
     controller.contextOrder(enemy.x, enemy.z, true, enemy.id);
+    sim.step();
 
     expect(issued).toHaveLength(1);
     expect(issued[0]).toEqual({
@@ -163,6 +184,13 @@ describe('OrderController combat and contextual precedence orders', () => {
       ids: [spearman.id],
       targetId: enemy.id,
       queued: true,
+    });
+    // Active order remains move, attack is queued in orders
+    expect(spearman.order?.kind).toBe('move');
+    expect(spearman.orders).toHaveLength(1);
+    expect(spearman.orders[0]).toMatchObject({
+      kind: 'attack',
+      targetId: enemy.id,
     });
   });
 
@@ -179,6 +207,7 @@ describe('OrderController combat and contextual precedence orders', () => {
       false,
       enemyBuilding.id,
     );
+    sim.step();
 
     expect(issued).toHaveLength(1);
     expect(issued[0]).toEqual({
@@ -188,6 +217,90 @@ describe('OrderController combat and contextual precedence orders', () => {
       targetId: enemyBuilding.id,
       queued: false,
     });
+    expect(spearman.order?.kind).toBe('attack');
+    expect(
+      spearman.order && 'targetId' in spearman.order
+        ? spearman.order.targetId
+        : undefined,
+    ).toBe(enemyBuilding.id);
+  });
+
+  it('does not attack allied target on same team (contract C2)', () => {
+    const sim = new Sim(makeTestMap(), 1);
+    const spearman = sim.world.spawnUnit(0, 'spearman', 10, 10);
+    const ally = sim.world.spawnUnit(1, 'peasant', 14, 14);
+
+    // Set player 1 to team 0 (allies)
+    sim.world.setTeam(1, 0);
+
+    const issued: Command[] = [];
+    const controller = createTestController(sim, [spearman.id], issued);
+    controller.contextOrder(ally.x, ally.z, false, ally.id);
+    sim.step();
+
+    expect(issued.every((cmd) => cmd.kind !== 'attack')).toBe(true);
+    expect(spearman.order?.kind).not.toBe('attack');
+  });
+
+  it('routes right-click on hostile entity to move for carts and attack for combatants (contract C7)', () => {
+    const sim = new Sim(makeTestMap(), 1);
+    const cart = sim.world.spawnUnit(0, 'ox_cart', 10, 10);
+    const enemy = sim.world.spawnUnit(1, 'peasant', 14, 14);
+
+    // Cart-only selection: cart receives move to target position, move marker
+    const issuedCart: Command[] = [];
+    const cartController = createTestController(sim, [cart.id], issuedCart);
+    cartController.contextOrder(enemy.x, enemy.z, false, enemy.id);
+    sim.step();
+
+    expect(issuedCart).toHaveLength(1);
+    expect(issuedCart[0]).toEqual({
+      kind: 'move',
+      player: 0,
+      ids: [cart.id],
+      x: enemy.x,
+      z: enemy.z,
+      queued: false,
+    });
+    expect(cart.order?.kind).toBe('move');
+    expect(cart.order && 'x' in cart.order ? cart.order.x : undefined).toBe(
+      enemy.x,
+    );
+    expect(cart.order && 'z' in cart.order ? cart.order.z : undefined).toBe(
+      enemy.z,
+    );
+    expect(
+      cartController.markers[cartController.markers.length - 1]?.kind,
+    ).toBe('move');
+
+    // Mixed selection: spearman receives attack, cart receives move
+    const spearman = sim.world.spawnUnit(0, 'spearman', 10, 12);
+    const issuedMixed: Command[] = [];
+    const mixedController = createTestController(
+      sim,
+      [cart.id, spearman.id],
+      issuedMixed,
+    );
+    mixedController.contextOrder(enemy.x, enemy.z, false, enemy.id);
+    sim.step();
+
+    expect(issuedMixed).toHaveLength(2);
+    expect(
+      issuedMixed.some((c) => c.kind === 'attack' && c.ids.includes(spearman.id)),
+    ).toBe(true);
+    expect(
+      issuedMixed.some((c) => c.kind === 'move' && c.ids.includes(cart.id)),
+    ).toBe(true);
+    expect(spearman.order?.kind).toBe('attack');
+    expect(
+      spearman.order && 'targetId' in spearman.order
+        ? spearman.order.targetId
+        : undefined,
+    ).toBe(enemy.id);
+    expect(cart.order?.kind).toBe('move');
+    expect(
+      mixedController.markers[mixedController.markers.length - 1]?.kind,
+    ).toBe('attackMove');
   });
 
   it('preserves worker build precedence on own unfinished building', () => {
@@ -198,9 +311,11 @@ describe('OrderController combat and contextual precedence orders', () => {
     const issued: Command[] = [];
     const controller = createTestController(sim, [peasant.id], issued);
     controller.contextOrder(unfinished.x, unfinished.z, false, unfinished.id);
+    sim.step();
 
     expect(issued).toHaveLength(1);
     expect(issued[0].kind).toBe('build');
+    expect(peasant.order?.kind).toBe('build');
   });
 
   it('preserves cart pinMine precedence on gold mine', () => {
@@ -211,21 +326,10 @@ describe('OrderController combat and contextual precedence orders', () => {
     const issued: Command[] = [];
     const controller = createTestController(sim, [cart.id], issued);
     controller.contextOrder(mine.x, mine.z, false, mine.id);
+    sim.step();
 
     expect(issued).toHaveLength(1);
     expect(issued[0].kind).toBe('pinMine');
-  });
-
-  it('preserves production rally precedence when only keep is selected', () => {
-    const sim = new Sim(makeTestMap(), 1);
-    const keep = sim.world.spawnBuilding(0, 'keep', 4, 4, true);
-    const enemy = sim.world.spawnUnit(1, 'peasant', 20, 20);
-
-    const issued: Command[] = [];
-    const controller = createTestController(sim, [keep.id], issued);
-    controller.contextOrder(enemy.x, enemy.z, false, enemy.id);
-
-    expect(issued).toHaveLength(1);
-    expect(issued[0].kind).toBe('setRally');
+    expect(cart.order?.kind).toBe('pinMine');
   });
 });

@@ -21,7 +21,11 @@ def main():
     entry, module = io.load_asset(args.asset)
     if args.only_anim is not None and args.only_anim not in entry["anims"]:
         parser.error(f"Unknown animation {args.only_anim!r} for {args.asset}")
-    if args.only_dir is not None and not 0 <= args.only_dir < entry["dirs"]:
+    facings = entry.get("facings")
+    if facings is not None:
+        if args.only_dir is not None and args.only_dir not in facings:
+            parser.error(f"Direction must be in {facings}")
+    elif args.only_dir is not None and not 0 <= args.only_dir < entry["dirs"]:
         parser.error(f"Direction must be in 0..{entry['dirs'] - 1}")
     start = time.monotonic()
     calibration = entry["kind"] == "calibration"
@@ -55,10 +59,11 @@ def main():
     objects = [model, *model.children_recursive]
     initial_rotation = model.rotation_euler.z
     renders = 0
+    directions = facings if facings is not None else list(range(entry["dirs"]))
     for name, animation in entry["anims"].items():
         if args.only_anim is not None and name != args.only_anim:
             continue
-        for direction in range(entry["dirs"]):
+        for direction in directions:
             if args.only_dir is not None and direction != args.only_dir:
                 continue
             for frame in range(animation["frames"]):

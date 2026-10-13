@@ -201,11 +201,15 @@ test('every public atlas validates and contains all manifest frames with aligned
         ]),
       ),
     );
+    const dirCount = entry.facings ? entry.facings.length : entry.dirs;
     const frameCount = Object.values(entry.anims).reduce(
-      (total, anim) => total + anim.frames * entry.dirs,
+      (total, anim) => total + anim.frames * dirCount,
       0,
     );
     expect(Object.keys(atlas.frames)).toHaveLength(frameCount);
+    if (entry.facings) {
+      expect(atlas.facings).toEqual(entry.facings);
+    }
     const shadow = entry.kind === 'building' || entry.kind === 'doodad';
     for (const [pageIndex, page] of atlas.pages.entries()) {
       expect(page.shadow !== undefined).toBe(shadow);
@@ -499,4 +503,95 @@ test('schema rejects missing facings, invalid page references, unsafe filenames 
   expect(() => parseAtlas(anchor)).toThrow('finite anchor');
   // A raised sprite can legitimately have its ground origin outside the trimmed image.
   expect(parseAtlas(atlas).frames['idle/0/0'].ay).toBe(12);
+  // Schema accepts valid facings atlas and validates exact frames
+  const facingsAtlas: Atlas = {
+    version: 1,
+    id: 'facings_schema',
+    fps: 12,
+    facings: [0, 6],
+    pages: [{ image: 'schema_0.png', mask: 'schema_0_mask.png' }],
+    anims: { idle: { frames: 1, dirs: 8, loop: true } },
+    frames: {
+      'idle/0/0': { page: 0, x: 2, y: 2, w: 8, h: 8, ax: 4, ay: 12 },
+      'idle/6/0': { page: 0, x: 12, y: 2, w: 8, h: 8, ax: 4, ay: 12 },
+    },
+  };
+  expect(parseAtlas(facingsAtlas).facings).toEqual([0, 6]);
+
+  const missingFacing = structuredClone(facingsAtlas);
+  delete missingFacing.frames['idle/6/0'];
+  expect(() => parseAtlas(missingFacing)).toThrow('missing idle/6/0');
+
+  const extraFacing = structuredClone(facingsAtlas);
+  extraFacing.frames['idle/2/0'] = { page: 0, x: 22, y: 2, w: 8, h: 8, ax: 4, ay: 12 };
+  expect(() => parseAtlas(extraFacing)).toThrow('unexpected frame');
+
+  const outOfRange = structuredClone(facingsAtlas);
+  outOfRange.facings = [0, 8];
+  expect(() => parseAtlas(outOfRange)).toThrow('out of range');
+
+  const negative = structuredClone(facingsAtlas);
+  negative.facings = [-1, 6];
+  expect(() => parseAtlas(negative)).toThrow('out of range');
+
+  const duplicate = structuredClone(facingsAtlas);
+  duplicate.facings = [0, 0];
+  expect(() => parseAtlas(duplicate)).toThrow('duplicate');
+
+  const nonAscending = structuredClone(facingsAtlas);
+  nonAscending.facings = [6, 0];
+  expect(() => parseAtlas(nonAscending)).toThrow('ascending');
+
+  const dirsOne = structuredClone(facingsAtlas);
+  dirsOne.anims.idle.dirs = 1;
+  expect(() => parseAtlas(dirsOne)).toThrow('dirs 8');
+
+  // Manifest parser validates facings
+  const validManifest = [{
+    id: 'test_gate',
+    kind: 'building' as const,
+    script: 'assets/test_gate.py',
+    frame: 512,
+    dirs: 8 as const,
+    facings: [0, 6],
+    anims: { idle: { frames: 1, loop: true } },
+  }];
+  expect(parseArtManifest(validManifest)[0].facings).toEqual([0, 6]);
+
+  const manifestDirsOne: unknown[] = [{ ...validManifest[0], dirs: 1 }];
+  expect(() => parseArtManifest(manifestDirsOne)).toThrow('dirs 8');
+
+  const manifestOutOfRange = structuredClone(validManifest);
+  manifestOutOfRange[0].facings = [0, 8];
+  expect(() => parseArtManifest(manifestOutOfRange)).toThrow('out of range');
+
+  const manifestDuplicate = structuredClone(validManifest);
+  manifestDuplicate[0].facings = [0, 0];
+  expect(() => parseArtManifest(manifestDuplicate)).toThrow('duplicate');
+});
+
+test('packAsset packs only declared facings when facings is specified', async () => {
+  const context = await fixture('facings_pack', 32, 1, 'building');
+  context.entry.dirs = 8;
+  context.entry.facings = [0, 6];
+  for (const pass of ['body', 'mask', 'shadow']) {
+    for (const dir of [0, 6]) {
+      const dirPath = join(
+        context.rendersDir,
+        context.entry.id,
+        pass,
+        'idle',
+        String(dir),
+      );
+      await mkdir(dirPath, { recursive: true });
+      await sharp({
+        create: { width: 64, height: 64, channels: 4, background: '#00ff00ff' },
+      })
+        .png()
+        .toFile(join(dirPath, '0.png'));
+    }
+  }
+  const { atlas } = await packAsset(context.entry, context);
+  expect(atlas.facings).toEqual([0, 6]);
+  expect(Object.keys(atlas.frames).sort()).toEqual(['idle/0/0', 'idle/6/0']);
 });

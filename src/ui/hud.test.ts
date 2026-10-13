@@ -37,6 +37,8 @@ function createFakeSession(options?: {
     width?: number;
     height?: number;
     player?: number;
+    remains?: boolean;
+    deathTick?: number;
   }[];
   viewportInsets?: { top: number; bottom: number };
   view?: IsoView;
@@ -232,6 +234,56 @@ describe('HUD Store & Minimap', () => {
     // Unit is not modified
     expect(units[2].x).toBe(15);
     expect(units[2].z).toBe(15);
+  });
+
+  it('does not plot corpses, rubble, or dead entities in remains on minimap (regression for Render#4)', () => {
+    const session = createFakeSession({
+      snapshotEntities: [
+        {
+          id: 1,
+          kind: 'unit',
+          type: 'spearman',
+          x: 20,
+          z: 20,
+          player: 0,
+          remains: false,
+        },
+        {
+          id: 2,
+          kind: 'unit',
+          type: 'spearman',
+          x: 30,
+          z: 30,
+          player: 0,
+          remains: true,
+        },
+        {
+          id: 3,
+          kind: 'building',
+          type: 'barracks',
+          x: 40,
+          z: 40,
+          width: 3,
+          height: 3,
+          player: 1,
+          remains: true,
+        },
+        {
+          id: 4,
+          kind: 'unit',
+          type: 'peasant',
+          x: 50,
+          z: 50,
+          player: 0,
+          deathTick: 12,
+        },
+      ],
+    });
+
+    publishHud(session);
+    const units = useHudStore.getState().minimap.units;
+    expect(units).toHaveLength(1);
+    expect(units[0]).toEqual({ x: 20, z: 20, player: 0, kind: 'unit' });
   });
 
   it('viewport outline uses insets and bottom edge moves up when bottom inset grows', () => {

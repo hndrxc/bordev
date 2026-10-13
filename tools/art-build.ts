@@ -72,9 +72,10 @@ function framePaths(asset: ArtManifestEntry): string[] {
   const passes = asset.kind === 'building' || asset.kind === 'doodad'
     ? ['body', 'mask', 'shadow'] : ['body', 'mask'];
   const files: string[] = [];
+  const dirs = asset.facings ?? Array.from({ length: asset.dirs }, (_, i) => i);
   for (const pass of passes) {
     for (const [animation, spec] of Object.entries(asset.anims)) {
-      for (let dir = 0; dir < asset.dirs; dir++) {
+      for (const dir of dirs) {
         for (let frame = 0; frame < spec.frames; frame++) {
           files.push(`build/renders/${asset.id}/${pass}/${animation}/${dir}/${frame}.png`);
         }

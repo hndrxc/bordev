@@ -118,20 +118,23 @@ def character_clips(parts, worker=False):
     return clip_set(parts["root"], descriptors, pose)
 
 
-def building_clips(parts):
+def building_clips(parts, extra_anims=None, on_pose=None):
     levels = parts["levels"]
+    descriptors = {**BUILDING_ANIMS, **extra_anims} if extra_anims else BUILDING_ANIMS
 
     def pose(name, frame, count):
         visibility(parts["scaffold"], name == "construct")
         visibility(parts["rubble"], name == "rubble")
-        visibility(parts["damage"], name == "damaged")
+        visibility(parts["damage"], name in ("damaged", "damaged_open"))
         for index, level in enumerate(levels):
             visible = name != "rubble"
             if name == "construct":
                 visible = index <= frame
-            if name == "damaged" and index == len(levels) - 1:
+            if name in ("damaged", "damaged_open") and index == len(levels) - 1:
                 level.rotation_euler.y = 0.055
                 level.location.z -= 0.045
             visibility(level, visible)
+        if on_pose is not None:
+            on_pose(name, frame, count)
 
-    return clip_set(parts["root"], BUILDING_ANIMS, pose)
+    return clip_set(parts["root"], descriptors, pose)

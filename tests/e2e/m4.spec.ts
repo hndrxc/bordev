@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import {
+  clearDebugWalkers,
   setupM4Session,
   worldToScreen,
   waitForTicks,
@@ -1369,19 +1370,7 @@ test('5. contextual orders: enemy combat, gold mining, farm economy, repair, ral
     centerOn: { x: 22, z: 22 },
   });
   // Remove legacy M4 debug units so they do not auto-acquire and attack test fixtures
-  await page.evaluate(() => {
-    const bordev = window.__bordev;
-    const sim = bordev?.sim;
-    const probes = bordev?.renderer?.debugProbes;
-    if (sim && probes) {
-      for (const id of probes.allDebugUnitIds) {
-        if (sim.world.getEntity(id)?.kind === 'unit') {
-          sim.world.removeEntity(id);
-        }
-      }
-    }
-  });
-  await waitForTicks(page, 2);
+  await clearDebugWalkers(page);
 
   const field = await playfield(page);
   const statusEl = page.getByTestId('hud-status');
@@ -1724,12 +1713,13 @@ test('5. contextual orders: enemy combat, gold mining, farm economy, repair, ral
     { timeout: 10_000 },
   );
 
-  // 6. Right-click enemy unit with own unit selected -> combat message
-  // Spawn enemy at (27, 24) south-east of Keep in clear ground
+  // 6. Right-click enemy unit with cart selected -> cart receives move toward enemy, move marker, no status (C7)
+  // Spawn enemy at (23, 13) north-east of Keep in clear ground outside Keep attack range 6
   const enemyId = await page.evaluate(() => {
     const sim = window.__bordev?.sim;
     if (!sim) throw new Error('Sim missing');
-    const e = sim.world.spawnUnit(1, 'spearman', 27, 24, 'crown');
+    const e = sim.world.spawnUnit(1, 'spearman', 23, 13, 'crown');
+    sim.issue({ kind: 'hold', player: 1, ids: [e.id] });
     return e.id;
   });
 
@@ -1749,28 +1739,85 @@ test('5. contextual orders: enemy combat, gold mining, farm economy, repair, ral
   expect(enemyPt.y).toBeGreaterThanOrEqual(field.top);
   expect(enemyPt.y).toBeLessThanOrEqual(field.bottom);
 
+  // Record enemy position at click time
+  const targetPos = await page.evaluate((id) => {
+    const u = window.__bordev?.sim?.world.getEntity(id);
+    return u ? { x: u.x, z: u.z } : null;
+  }, enemyId);
+  expect(targetPos).not.toBeNull();
+
+  // Cart is currently selected: right-clicking enemy issues move order to enemy position at click time
+  await page.mouse.click(enemyPt.x, enemyPt.y, { button: 'right' });
+  await page.waitForFunction(
+    ({ c, pos }) => {
+      const sim = window.__bordev?.sim;
+      const cart = sim?.world.getEntity(c);
+      return (
+        !!cart &&
+        cart.kind === 'unit' &&
+        cart.order?.kind === 'move' &&
+        Math.hypot(
+          (cart.order.x ?? 1e9) - pos.x,
+          (cart.order.z ?? 1e9) - pos.z,
+        ) < 0.1
+      );
+    },
+    { c: cartId, pos: targetPos! },
+    { timeout: 5_000 },
+  );
+  const cartMarker = await page.evaluate(() => {
+    const markers = window.__bordev?.session.input.orders.markers ?? [];
+    return markers.length > 0 ? markers[markers.length - 1].kind : null;
+  });
+  expect(cartMarker).toBe('move');
+  await expect(statusEl).toBeHidden();
+
   // Select own peasant to issue attack command
   await page.evaluate((id) => {
     window.__bordev?.session.input.selection.set([id]);
   }, peasantId);
 
-  // Right-click enemy unit with own peasant selected -> real combat attack order
-  await page.mouse.click(enemyPt.x, enemyPt.y, { button: 'right' });
-  await page.waitForFunction(
-    (id) => {
-      const sim = window.__bordev?.sim;
-      const u = sim?.world.getEntity(id);
-      return u && u.kind === 'unit' && u.order?.kind === 'attack';
+  // Recompute enemy pickable point now that cart may be moving toward it
+  const attackEnemyPt = await pickablePoint(page, enemyId);
+  const pickedEnemy = await page.evaluate(
+    ({ x, y }) => {
+      const canvas = document.querySelector('canvas[aria-label="Game view"]');
+      const r = canvas?.getBoundingClientRect();
+      const offsetX = r?.left ?? 0;
+      const offsetY = r?.top ?? 0;
+      return window.__bordev?.renderer?.pickEntity(x - offsetX, y - offsetY);
     },
-    peasantId,
-    { timeout: 5_000 },
+    { x: attackEnemyPt.x, y: attackEnemyPt.y },
+  );
+  expect(pickedEnemy).toBe(enemyId);
+
+  // Right-click enemy unit with own peasant selected -> real combat attack order
+  await page.mouse.click(attackEnemyPt.x, attackEnemyPt.y, { button: 'right' });
+  await page.waitForFunction(
+    ({ p, e }) => {
+      const sim = window.__bordev?.sim;
+      const u = sim?.world.getEntity(p);
+      return (
+        !!u &&
+        u.kind === 'unit' &&
+        u.order?.kind === 'attack' &&
+        u.order.targetId === e
+      );
+    },
+    { p: peasantId, e: enemyId },
+    { timeout: 10_000 },
   );
 
-  // 7. Status line auto-clears ~4 s after appearing (verify auto-clear cleanly)
-  await page.evaluate(() => {
-    window.__bordev?.showStatus?.('Contextual order active');
-  });
-  await expect(statusEl).toHaveText('Contextual order active');
+  // 7. Status line auto-clears ~4 s after appearing (driven by real UI input on disabled rally slot)
+  const rallyKeepPt = await pickablePoint(page, keep.id);
+  await page.mouse.click(rallyKeepPt.x, rallyKeepPt.y, { button: 'left' });
+  const rallyBtn = page.getByTestId('command-set-rally');
+  await expect(rallyBtn).toBeVisible();
+  // Press physical hotkey T for the Set Rally slot (key T in commandSlots.ts)
+  await page.keyboard.press('KeyT');
+  await expect(statusEl).toHaveText(
+    'Right-click ground, a unit or a building to set rally',
+  );
   await expect(statusEl).toBeHidden({ timeout: 6_000 });
 
   expect(consoleErrors, 'console errors during contextual orders test').toEqual(

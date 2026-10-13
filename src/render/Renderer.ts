@@ -19,7 +19,18 @@ import { SpriteBatch, type RenderSprite } from './SpriteBatch';
 import { Terrain } from './Terrain';
 import { UnitShadows } from './UnitShadows';
 import { Projectiles } from './Projectiles';
+import {
+  ATTACK_ANIM_FPS,
+  MELEE_TOTAL_FRAMES,
+  CORPSE_DURATION_SEC,
+  CORPSE_FADE_SEC,
+  RUBBLE_DURATION_SEC,
+} from '../data/combat';
+import { SIM_DT } from '../sim/sim';
 
+const FALLBACK_ATTACK_DURATION_TICKS = Math.ceil(
+  MELEE_TOTAL_FRAMES / ATTACK_ANIM_FPS / SIM_DT,
+);
 export interface RendererStats {
   drawCalls: number;
   totalVertices: number;
@@ -182,7 +193,22 @@ interface UnitFrameEntry {
 interface UnitAnimationData {
   table: UnitFrameEntry[][];
   fps: number;
-  isLoop: boolean;
+}
+
+type BuildingAnimKey =
+  | 'idle'
+  | 'damaged'
+  | 'rubble'
+  | 'open'
+  | 'damaged_open';
+
+interface BuildingTable {
+  readonly idle: readonly (StaticEntityDescriptor | undefined)[];
+  readonly damaged: readonly (StaticEntityDescriptor | undefined)[];
+  readonly rubble: readonly (StaticEntityDescriptor | undefined)[];
+  readonly open: readonly (StaticEntityDescriptor | undefined)[];
+  readonly damaged_open: readonly (StaticEntityDescriptor | undefined)[];
+  readonly construct: readonly (StaticEntityDescriptor[] | undefined)[];
 }
 
 export interface CachedEntityRect extends EntityScreenRect {
@@ -230,12 +256,7 @@ export function pickFrontmost(
 
   for (let i = 0; i < count; i++) {
     const rect = rects[i];
-    if (
-      rect.kind === 'doodad' ||
-      rect.kind === 'corpse' ||
-      rect.kind === 'rubble' ||
-      rect.kind === 'projectile'
-    ) {
+    if (rect.kind === 'doodad') {
       continue;
     }
     if (
@@ -273,21 +294,12 @@ export class Renderer {
     string,
     StaticEntityDescriptor
   >();
-  private readonly buildingDescriptors = new Map<
-    string,
-    StaticEntityDescriptor
-  >();
-  private readonly buildingConstructDescriptors = new Map<
-    string,
-    StaticEntityDescriptor[]
-  >();
+  private readonly buildingTables = new Map<string, BuildingTable>();
+  private defaultBuildingTable: BuildingTable | undefined = undefined;
   private readonly unitAssetAnims = new Map<
     string,
     Record<string, UnitAnimationData>
   >();
-  private readonly unitAnimTables = new Map<string, UnitFrameEntry[][]>();
-  private readonly unitAnimFps = new Map<string, number>();
-  private readonly unitAnimLoop = new Map<string, boolean>();
   private readonly unitWalkTables = new Map<string, UnitFrameEntry[][]>();
   private readonly unitFps = new Map<string, number>();
   // Single reusable scratch object to avoid per-entity allocations in the hot render loop
@@ -326,7 +338,9 @@ export class Renderer {
       return cached.spriteTopPx;
     }
     if (this.currentSnapshot) {
-      const ent = this.currentSnapshot.entities.find((e) => e.id === id);
+      const ent = this.currentSnapshot.entities.find(
+        (e) => e.id === id && !e.remains,
+      );
       if (ent) {
         const asset = getAssetForEntity(ent);
         return this.assetSpriteTopPx.get(asset);
@@ -523,12 +537,19 @@ export class Renderer {
         assetId === 'crown_stone_gate' ||
         assetId === 'crown_stone_tower' ||
         assetId === 'gold_mine';
-      for (const [key, frame] of Object.entries(loaded.atlas.frames)) {
-        if (isBuilding && !key.startsWith('idle/')) {
-          continue;
+      if (isBuilding) {
+        const usedDirs = assetId === 'crown_stone_gate' ? [0, 6] : [0];
+        for (const dir of usedDirs) {
+          const frame = loaded.atlas.frames[`idle/${dir}/0`];
+          if (frame && frame.ay > maxAy) {
+            maxAy = frame.ay;
+          }
         }
-        if (frame.ay > maxAy) {
-          maxAy = frame.ay;
+      } else {
+        for (const frame of Object.values(loaded.atlas.frames)) {
+          if (frame.ay > maxAy) {
+            maxAy = frame.ay;
+          }
         }
       }
       if (maxAy === 0) {
@@ -542,31 +563,7 @@ export class Renderer {
     }
 
     this.staticDescriptors.clear();
-    const staticAssets = [
-      'crown_keep',
-      'crown_cottage',
-      'crown_farm',
-      'crown_storehouse',
-      'crown_chapel',
-      'crown_barracks',
-      'crown_archery_range',
-      'crown_stable',
-      'crown_siege_workshop',
-      'crown_stone_wall',
-      'crown_stone_gate',
-      'crown_stone_tower',
-      'gold_mine',
-      'tree_3',
-      'tree_4',
-      'rock_1',
-      'rock_2',
-      'calib_tile',
-    ];
-
-    for (let c = 0; c < staticAssets.length; c++) {
-      const asset = staticAssets[c];
-      const loaded = this.loadedAtlases.get(asset);
-      if (!loaded) continue;
+    for (const [asset, loaded] of this.loadedAtlases.entries()) {
       const frame = loaded.atlas.frames['idle/0/0'];
       if (!frame) continue;
       const batch = this.batches.get(`${asset}_${frame.page}`);
@@ -577,78 +574,118 @@ export class Renderer {
       });
     }
 
-    this.buildingDescriptors.clear();
-    const buildingAnims = ['idle', 'damaged', 'rubble', 'open'];
+    this.buildingTables.clear();
+    const buildingAnims: BuildingAnimKey[] = [
+      'idle',
+      'damaged',
+      'rubble',
+      'open',
+      'damaged_open',
+    ];
+
     for (const [assetId, loaded] of this.loadedAtlases.entries()) {
+      const idleRow: (StaticEntityDescriptor | undefined)[] = new Array(8);
+      const damagedRow: (StaticEntityDescriptor | undefined)[] = new Array(8);
+      const rubbleRow: (StaticEntityDescriptor | undefined)[] = new Array(8);
+      const openRow: (StaticEntityDescriptor | undefined)[] = new Array(8);
+      const damagedOpenRow: (StaticEntityDescriptor | undefined)[] = new Array(8);
+      const constructRow: (StaticEntityDescriptor[] | undefined)[] = new Array(8);
+
+      const table: BuildingTable = {
+        idle: idleRow,
+        damaged: damagedRow,
+        rubble: rubbleRow,
+        open: openRow,
+        damaged_open: damagedOpenRow,
+        construct: constructRow,
+      };
+
+      const rows: Record<
+        BuildingAnimKey,
+        (StaticEntityDescriptor | undefined)[]
+      > = {
+        idle: idleRow,
+        damaged: damagedRow,
+        rubble: rubbleRow,
+        open: openRow,
+        damaged_open: damagedOpenRow,
+      };
+
       for (const animName of buildingAnims) {
-        if (!loaded.atlas.anims[animName]) continue;
-        for (const dir of [0, 2]) {
-          let frame = loaded.atlas.frames[`${animName}/${dir}/0`];
-          if (!frame && dir !== 0) {
-            frame = loaded.atlas.frames[`${animName}/0/0`];
+        const row = rows[animName];
+        for (let dir = 0; dir < 8; dir++) {
+          let frame: AtlasFrame | undefined;
+          if (animName === 'damaged_open') {
+            frame =
+              loaded.atlas.frames[`damaged_open/${dir}/0`] ??
+              (dir !== 0 ? loaded.atlas.frames['damaged_open/0/0'] : undefined) ??
+              // Graceful fallback to open if damaged_open is absent in atlas
+              loaded.atlas.frames[`open/${dir}/0`] ??
+              (dir !== 0 ? loaded.atlas.frames['open/0/0'] : undefined);
+          } else {
+            frame =
+              loaded.atlas.frames[`${animName}/${dir}/0`] ??
+              (dir !== 0 ? loaded.atlas.frames[`${animName}/0/0`] : undefined);
           }
+
+          // Fallback to idle if non-idle frame is missing
+          if (!frame && animName !== 'idle') {
+            frame =
+              loaded.atlas.frames[`idle/${dir}/0`] ??
+              (dir !== 0 ? loaded.atlas.frames['idle/0/0'] : undefined);
+          }
+
+          // Fallback to static idle/0/0
+          if (!frame) {
+            frame = loaded.atlas.frames['idle/0/0'];
+          }
+
           if (frame) {
             const batch = this.batches.get(`${assetId}_${frame.page}`);
             if (batch) {
-              this.buildingDescriptors.set(`${assetId}_${animName}_${dir}`, {
-                batch,
-                frame,
-              });
+              row[dir] = { batch, frame };
             }
           }
         }
       }
+
+      const constructMeta = loaded.atlas.anims['construct'];
+      if (constructMeta) {
+        for (let dir = 0; dir < 8; dir++) {
+          const constructFrames: StaticEntityDescriptor[] = [];
+          for (let f = 0; f < constructMeta.frames; f++) {
+            const frame =
+              loaded.atlas.frames[`construct/${dir}/${f}`] ??
+              (dir !== 0 ? loaded.atlas.frames[`construct/0/${f}`] : undefined);
+            if (frame) {
+              const batch = this.batches.get(`${assetId}_${frame.page}`);
+              if (batch) {
+                constructFrames.push({ batch, frame });
+              }
+            }
+          }
+          if (constructFrames.length > 0) {
+            constructRow[dir] = constructFrames;
+          }
+        }
+      }
+
+      this.buildingTables.set(assetId, table);
     }
 
-    this.buildingConstructDescriptors.clear();
-    for (const [assetId, loaded] of this.loadedAtlases.entries()) {
-      const constructMeta = loaded.atlas.anims['construct'];
-      if (!constructMeta) continue;
-      for (const dir of [0, 2]) {
-        const constructFrames: StaticEntityDescriptor[] = [];
-        for (let f = 0; f < constructMeta.frames; f++) {
-          let frame = loaded.atlas.frames[`construct/${dir}/${f}`];
-          if (!frame && dir !== 0) {
-            frame = loaded.atlas.frames[`construct/0/${f}`];
-          }
-          if (frame) {
-            const batch = this.batches.get(`${assetId}_${frame.page}`);
-            if (batch) {
-              constructFrames.push({ batch, frame });
-            }
-          }
-        }
-        if (constructFrames.length > 0) {
-          this.buildingConstructDescriptors.set(
-            `${assetId}_${dir}`,
-            constructFrames,
-          );
-          if (dir === 0) {
-            this.buildingConstructDescriptors.set(assetId, constructFrames);
-          }
-        }
-      }
-    }
+    this.defaultBuildingTable = this.buildingTables.get('crown_keep');
 
     this.unitAssetAnims.clear();
-    this.unitAnimTables.clear();
-    this.unitAnimFps.clear();
-    this.unitAnimLoop.clear();
     this.unitWalkTables.clear();
     this.unitFps.clear();
 
     for (const [assetId, loaded] of this.loadedAtlases.entries()) {
-      const defaultFps = loaded.atlas.fps || 12;
+      const defaultFps = loaded.atlas.fps || ATTACK_ANIM_FPS;
       const anims: Record<string, UnitAnimationData> = {};
       for (const [animName, animMeta] of Object.entries(loaded.atlas.anims)) {
         const dirs = animMeta.dirs;
         const frames = animMeta.frames;
         const fps = defaultFps;
-        const isLoop = animMeta.loop ?? true;
-        const key = `${assetId}_${animName}`;
-
-        this.unitAnimFps.set(key, fps);
-        this.unitAnimLoop.set(key, isLoop);
 
         const table: UnitFrameEntry[][] = [];
         for (let dir = 0; dir < 8; dir++) {
@@ -666,9 +703,8 @@ export class Renderer {
           }
           table.push(row);
         }
-        this.unitAnimTables.set(key, table);
 
-        anims[animName] = { table, fps, isLoop };
+        anims[animName] = { table, fps };
 
         if (animName === 'walk') {
           this.unitWalkTables.set(assetId, table);
@@ -679,30 +715,6 @@ export class Renderer {
     }
 
     this.isReady = true;
-  }
-  private getBuildingDescriptor(
-    asset: string,
-    animName: string,
-    dir: number,
-  ): StaticEntityDescriptor | undefined {
-    let desc = this.buildingDescriptors.get(`${asset}_${animName}_${dir}`);
-    if (!desc && dir !== 0) {
-      desc = this.buildingDescriptors.get(`${asset}_${animName}_0`);
-    }
-    if (!desc && animName !== 'idle') {
-      desc =
-        this.buildingDescriptors.get(`${asset}_idle_${dir}`) ??
-        this.buildingDescriptors.get(`${asset}_idle_0`);
-    }
-    if (!desc) {
-      desc = this.staticDescriptors.get(asset);
-    }
-    if (!desc && asset.startsWith('crown_')) {
-      desc =
-        this.buildingDescriptors.get('crown_keep_idle_0') ??
-        this.staticDescriptors.get('crown_keep');
-    }
-    return desc;
   }
 
   private recordEntityScreenRect(
@@ -799,9 +811,7 @@ export class Renderer {
           const anchorZ = ent.z;
           const radius = ent.radius ?? 0.35;
 
-          const isDead =
-            ent.deathTick !== undefined ||
-            (ent.hp !== undefined && ent.hp <= 0);
+          const isDead = ent.remains;
 
           if (!isDead) {
             // Procedural unit ground shadow
@@ -832,14 +842,14 @@ export class Renderer {
           const combat = ent.combat;
           let isAttacking = false;
           let attackElapsedTicks = 0;
-          const attackDurationTicks = combat?.attackDurationTicks ?? 14;
+          const attackDurationTicks =
+            combat?.attackDurationTicks ?? FALLBACK_ATTACK_DURATION_TICKS;
           if (combat?.attackStartedTick !== undefined) {
-            attackElapsedTicks =
-              snapshot.tick - combat.attackStartedTick + snapshot.alpha;
-            if (
-              attackElapsedTicks >= 0 &&
-              attackElapsedTicks < attackDurationTicks
-            ) {
+            attackElapsedTicks = Math.max(
+              0,
+              snapshot.tick - 1 - combat.attackStartedTick + snapshot.alpha,
+            );
+            if (attackElapsedTicks < attackDurationTicks) {
               isAttacking = true;
             }
           }
@@ -865,36 +875,42 @@ export class Renderer {
             const dir = (((ent.facing ?? 0) % 8) + 8) % 8;
             const dirRow = table[dir] ?? table[0];
             if (dirRow && dirRow.length > 0) {
-              const fps = animData?.fps ?? this.unitFps.get(asset) ?? 12;
+              const fps =
+                animData?.fps ?? this.unitFps.get(asset) ?? ATTACK_ANIM_FPS;
               let frameIdx: number;
               let unitAlpha = 1.0;
 
               if (isDead) {
-                const deathTick = ent.deathTick ?? snapshot.tick;
-                const elapsedSec = Math.max(
+                const deathTick = ent.deathTick ?? (snapshot.tick - 1);
+                const elapsedTicks = Math.max(
                   0,
-                  (snapshot.tick - deathTick + snapshot.alpha) * 0.05,
+                  snapshot.tick - 1 - deathTick + snapshot.alpha,
                 );
-                // Clamp to last frame of death animation (8 frames at 12fps = 0.67s, holds thereafter)
+                const elapsedSec = elapsedTicks * SIM_DT;
+                // Clamp to last frame of death animation (holds thereafter)
                 frameIdx = Math.min(
                   dirRow.length - 1,
                   Math.max(0, Math.floor(elapsedSec * fps)),
                 );
-                // Fade during last 2s of 10s corpse duration
-                if (elapsedSec > 8.0) {
-                  unitAlpha = Math.max(0, 1.0 - (elapsedSec - 8.0) / 2.0);
+                // Fade during last CORPSE_FADE_SEC of CORPSE_DURATION_SEC
+                const fadeStartSec = CORPSE_DURATION_SEC - CORPSE_FADE_SEC;
+                if (elapsedSec > fadeStartSec) {
+                  unitAlpha = Math.max(
+                    0,
+                    1.0 - (elapsedSec - fadeStartSec) / CORPSE_FADE_SEC,
+                  );
                 }
               } else if (isAttacking) {
                 // Nonlooping attack swing clamped within duration
                 frameIdx = Math.min(
                   dirRow.length - 1,
-                  Math.max(0, Math.floor(attackElapsedTicks * 0.05 * fps)),
+                  Math.max(0, Math.floor(attackElapsedTicks * SIM_DT * fps)),
                 );
               } else if (isCartLoading) {
                 const cartTicks = ent.cart?.ticks;
                 const elapsed =
                   typeof cartTicks === 'number'
-                    ? Math.max(0, (cartTicks + snapshot.alpha) * 0.05)
+                    ? Math.max(0, (cartTicks + snapshot.alpha) * SIM_DT)
                     : t;
                 frameIdx = Math.min(
                   dirRow.length - 1,
@@ -906,7 +922,7 @@ export class Renderer {
                   startTick !== undefined
                     ? Math.max(
                         0,
-                        (snapshot.tick - startTick + snapshot.alpha) * 0.05,
+                        (snapshot.tick - startTick + snapshot.alpha) * SIM_DT,
                       )
                     : t;
                 frameIdx = Math.floor(elapsed * fps) % dirRow.length;
@@ -930,6 +946,7 @@ export class Renderer {
                       : TINT_NEUTRAL;
                 this.scratchSprite.alpha = unitAlpha;
                 this.scratchSprite.radius = radius;
+                this.scratchSprite.shadowAlpha = isDead ? 0.0 : 1.0;
 
                 entry.batch.add(entry.frame, this.scratchSprite);
                 spriteCount++;
@@ -949,31 +966,33 @@ export class Renderer {
           }
         } else if (kind === 'building') {
           const asset = getAssetForEntity(ent);
-          let desc: StaticEntityDescriptor | undefined;
-          let animName: string;
+          const table =
+            this.buildingTables.get(asset) ?? this.defaultBuildingTable;
           const dir =
             ent.orientation === 'vertical' ||
             (ent.width === 1 && ent.height === 3)
-              ? 2
+              ? 6
               : 0;
 
-          const isDead =
-            ent.deathTick !== undefined ||
-            (ent.hp !== undefined && ent.hp <= 0);
-
+          let desc: StaticEntityDescriptor | undefined;
+          let animName: string;
           let buildingAlpha = 1.0;
 
-          if (isDead) {
+          if (ent.remains) {
             animName = 'rubble';
-            desc = this.getBuildingDescriptor(asset, 'rubble', dir);
-            const deathTick = ent.deathTick ?? snapshot.tick;
-            const elapsed = Math.max(
+            desc = table?.rubble[dir];
+            const deathTick = ent.deathTick ?? (snapshot.tick - 1);
+            const elapsedTicks = Math.max(
               0,
-              (snapshot.tick - deathTick + snapshot.alpha) * 0.05,
+              snapshot.tick - 1 - deathTick + snapshot.alpha,
             );
-            // Rubble duration is 20s, fade last 2s (between 18s and 20s)
-            if (elapsed > 18.0) {
-              buildingAlpha = Math.max(0, 1.0 - (elapsed - 18.0) / 2.0);
+            const elapsedSec = elapsedTicks * SIM_DT;
+            const fadeStartSec = RUBBLE_DURATION_SEC - CORPSE_FADE_SEC;
+            if (elapsedSec > fadeStartSec) {
+              buildingAlpha = Math.max(
+                0,
+                1.0 - (elapsedSec - fadeStartSec) / CORPSE_FADE_SEC,
+              );
             }
           } else if (
             ent.built === false ||
@@ -983,8 +1002,7 @@ export class Renderer {
           ) {
             animName = 'construct';
             const constructFrames =
-              this.buildingConstructDescriptors.get(`${asset}_${dir}`) ??
-              this.buildingConstructDescriptors.get(asset);
+              table?.construct[dir] ?? table?.construct[0];
             if (constructFrames && constructFrames.length > 0) {
               const progress = Math.max(0, Math.min(1, ent.buildProgress ?? 0));
               const frameIdx =
@@ -996,23 +1014,29 @@ export class Renderer {
               desc =
                 constructFrames[Math.min(frameIdx, constructFrames.length - 1)];
             }
-          } else if (ent.gateOpen) {
-            animName = 'open';
-            desc = this.getBuildingDescriptor(asset, 'open', dir);
-          } else if (
-            ent.hp !== undefined &&
-            ent.maxHp !== undefined &&
-            ent.hp < ent.maxHp * 0.5
-          ) {
-            animName = 'damaged';
-            desc = this.getBuildingDescriptor(asset, 'damaged', dir);
           } else {
-            animName = 'idle';
-            desc = this.getBuildingDescriptor(asset, 'idle', dir);
+            const isDamaged =
+              ent.hp !== undefined &&
+              ent.maxHp !== undefined &&
+              ent.hp < ent.maxHp * 0.5;
+
+            if (ent.gateOpen && isDamaged) {
+              animName = 'damaged_open';
+              desc = table?.damaged_open[dir] ?? table?.open[dir];
+            } else if (ent.gateOpen) {
+              animName = 'open';
+              desc = table?.open[dir];
+            } else if (isDamaged) {
+              animName = 'damaged';
+              desc = table?.damaged[dir];
+            } else {
+              animName = 'idle';
+              desc = table?.idle[dir];
+            }
           }
 
           if (!desc) {
-            desc = this.getBuildingDescriptor(asset, 'idle', dir);
+            desc = table?.idle[dir] ?? this.staticDescriptors.get(asset);
           }
 
           if (desc) {
@@ -1031,11 +1055,12 @@ export class Renderer {
                   ? TINT_PLAYER_1
                   : TINT_NEUTRAL;
             this.scratchSprite.alpha = buildingAlpha;
+            this.scratchSprite.shadowAlpha = ent.remains ? 0.0 : 1.0;
 
             desc.batch.add(desc.frame, this.scratchSprite);
             spriteCount++;
 
-            if (!isDead) {
+            if (!ent.remains) {
               shadowCount++;
               this.recordEntityScreenRect(
                 ent.id,
@@ -1061,6 +1086,7 @@ export class Renderer {
             this.scratchSprite.z = posZ;
             this.scratchSprite.tint = TINT_NEUTRAL;
             this.scratchSprite.alpha = 1.0;
+            this.scratchSprite.shadowAlpha = 1.0;
 
             desc.batch.add(desc.frame, this.scratchSprite);
             spriteCount++;
@@ -1089,6 +1115,7 @@ export class Renderer {
             this.scratchSprite.z = posZ;
             this.scratchSprite.tint = TINT_NEUTRAL;
             this.scratchSprite.alpha = 1.0;
+            this.scratchSprite.shadowAlpha = 1.0;
 
             desc.batch.add(desc.frame, this.scratchSprite);
             spriteCount++;
@@ -1171,11 +1198,9 @@ export class Renderer {
     this.batches.clear();
     this.loadedAtlases.clear();
     this.staticDescriptors.clear();
-    this.buildingDescriptors.clear();
-    this.buildingConstructDescriptors.clear();
+    this.buildingTables.clear();
+    this.defaultBuildingTable = undefined;
     this.unitAssetAnims.clear();
-    this.unitAnimFps.clear();
-    this.unitAnimLoop.clear();
     this.unitWalkTables.clear();
     this.unitFps.clear();
     this.assetSpriteTopPx.clear();

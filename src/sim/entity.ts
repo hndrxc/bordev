@@ -20,10 +20,13 @@ export interface CombatState {
   targetRef?: Combatant;
   /** Intended target when targetRef is a temporary blocking wall/gate; undefined when equal to targetRef. */
   goalRef?: Combatant;
-  targetId?: number;
   attackStartedTick?: number;
   attackDurationTicks?: number;
   hitApplied?: boolean;
+  /** Last requested chase path destination coordinates and revision to prevent repath storms. */
+  lastDestX?: number;
+  lastDestZ?: number;
+  lastGridRevision?: number;
 }
 
 export interface UnitOrder {

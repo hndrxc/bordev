@@ -3,6 +3,7 @@ import type { BuildingEntity, Combatant, UnitEntity } from '../entity.js';
 import type { World } from '../world.js';
 import { getBuildingData } from '../../data/buildings.js';
 import {
+  ATTACK_ANIM_FPS,
   MELEE_HIT_FRAME,
   MELEE_REACH_BUFFER,
   MELEE_TOTAL_FRAMES,
@@ -24,23 +25,23 @@ import {
   resolveAttackOrderTarget,
 } from './damage.js';
 import { spawnProjectile } from './projectiles.js';
-import { findBlockingWall } from './gates.js';
+import { canEngage, resolveAttackTarget } from './breach.js';
+import {
+  distanceToCombatant,
+  distanceToFootprint,
+  isRangedAttacker,
+} from './reach.js';
+
+let meleeSwingTicks = 0;
+function getMeleeSwingTicks(): number {
+  if (meleeSwingTicks === 0) {
+    meleeSwingTicks = Math.ceil(MELEE_TOTAL_FRAMES / ATTACK_ANIM_FPS / SIM_DT);
+  }
+  return meleeSwingTicks;
+}
 
 export function clearCombat(unit: Combatant): void {
   unit.combat = undefined;
-}
-
-export function distanceToFootprint(
-  px: number,
-  pz: number,
-  bx: number,
-  bz: number,
-  width: number,
-  height: number,
-): number {
-  const cx = Math.max(bx, Math.min(px, bx + width));
-  const cz = Math.max(bz, Math.min(pz, bz + height));
-  return Math.hypot(px - cx, pz - cz);
 }
 
 export function getCombatantDistance(
@@ -48,50 +49,21 @@ export function getCombatantDistance(
   target: Combatant,
 ): number {
   if (source.kind === 'unit') {
-    if (target.kind === 'unit') {
-      return Math.hypot(source.x - target.x, source.z - target.z);
-    } else {
-      return distanceToFootprint(
-        source.x,
-        source.z,
-        target.x,
-        target.z,
-        target.width,
-        target.height,
-      );
-    }
-  } else {
-    if (target.kind === 'unit') {
-      return distanceToFootprint(
-        target.x,
-        target.z,
-        source.x,
-        source.z,
-        source.width,
-        source.height,
-      );
-    } else {
-      return Math.hypot(
-        Math.max(
-          0,
-          source.x - (target.x + target.width),
-          target.x - (source.x + source.width),
-        ),
-        Math.max(
-          0,
-          source.z - (target.z + target.height),
-          target.z - (source.z + source.height),
-        ),
-      );
-    }
+    return distanceToCombatant(source.x, source.z, target);
   }
-
+  return distanceToFootprint(
+    target.x,
+    target.z,
+    source.x,
+    source.z,
+    source.width,
+    source.height,
+  );
 }
 
 export function isInAttackRange(source: Combatant, target: Combatant): boolean {
   if (source.kind === 'unit') {
-    const isMelee = (source.attackType ?? 'melee') === 'melee';
-    if (isMelee) {
+    if (!isRangedAttacker(source)) {
       if (target.kind === 'unit') {
         const dist = Math.hypot(source.x - target.x, source.z - target.z);
         return dist <= source.radius + target.radius + MELEE_REACH_BUFFER;
@@ -109,7 +81,7 @@ export function isInAttackRange(source: Combatant, target: Combatant): boolean {
     } else {
       const range = source.range ?? 5;
       const minRange = source.minRange ?? 0;
-      const dist = getCombatantDistance(source, target);
+      const dist = distanceToCombatant(source.x, source.z, target);
       return dist <= range && dist >= minRange;
     }
   } else {
@@ -118,25 +90,6 @@ export function isInAttackRange(source: Combatant, target: Combatant): boolean {
     const dist = getCombatantDistance(source, target);
     return dist <= range;
   }
-}
-
-function isRangedUnit(unit: UnitEntity): boolean {
-  return (unit.attackType ?? 'melee') !== 'melee';
-}
-
-/**
- * Wall/gate that must be breached to reach `goal`. Ranged units that can already legally shoot
- * the goal never need a wall, since their projectiles need no path.
- */
-function resolveBlockingWall(
-  world: World,
-  unit: UnitEntity,
-  goal: Combatant,
-): BuildingEntity | undefined {
-  if (isRangedUnit(unit) && isInAttackRange(unit, goal)) {
-    return undefined;
-  }
-  return findBlockingWall(world, unit, goal);
 }
 
 // ---------------------------------------------------------------------------
@@ -187,25 +140,18 @@ function getStructureIndex(world: World): StructureIndex {
   return index;
 }
 
-interface Acquisition {
-  /** What to hit now (the goal, or the wall blocking it). */
-  target: Combatant;
-  /** The enemy actually wanted. */
-  goal: Combatant;
-}
-
-const candidateBuf: Combatant[] = [];
-const candidateDist: number[] = [];
-
 function findNearestEnemy(
   world: World,
   attacker: UnitEntity,
   maxSearchRange: number,
   requireInAttackRange: boolean,
-): Acquisition | undefined {
-  candidateBuf.length = 0;
-  candidateDist.length = 0;
-  const minRange = isRangedUnit(attacker) ? (attacker.minRange ?? 0) : 0;
+): Combatant | undefined {
+  const minRange = isRangedAttacker(attacker) ? (attacker.minRange ?? 0) : 0;
+
+  let bestCandidate: Combatant | undefined;
+  let bestClass = 99;
+  let bestDist = Infinity;
+  let bestId = -1;
 
   const nearbyIds = world.spatialHash.queryNearby(
     attacker.x,
@@ -228,75 +174,83 @@ function findNearestEnemy(
     const dist = Math.hypot(attacker.x - ent.x, attacker.z - ent.z);
     if (dist > maxSearchRange || dist < minRange) continue;
     if (requireInAttackRange && !isInAttackRange(attacker, ent)) continue;
-    candidateBuf.push(ent);
-    candidateDist.push(dist);
-  }
-
-  const index = getStructureIndex(world);
-  const structureIds = index.hash.queryNearby(
-    attacker.x,
-    attacker.z,
-    maxSearchRange + index.maxExtent,
-  );
-  for (let i = 0; i < structureIds.length; i++) {
-    const ent = world.entities[structureIds[i]];
-    if (
-      !ent ||
-      ent.kind !== 'building' ||
-      !areHostile(world, attacker, ent) ||
-      !ent.built ||
-      ent.hp <= 0 ||
-      ent.deathTick !== undefined
-    ) {
+    if (!isInAttackRange(attacker, ent) && !canEngage(world, attacker, ent)) {
       continue;
     }
-    const dist = distanceToFootprint(
+
+    const cls = 0;
+    if (
+      cls < bestClass ||
+      (cls === bestClass && dist < bestDist - 1e-4) ||
+      (cls === bestClass &&
+        Math.abs(dist - bestDist) <= 1e-4 &&
+        ent.id < bestId)
+    ) {
+      bestCandidate = ent;
+      bestClass = cls;
+      bestDist = dist;
+      bestId = ent.id;
+    }
+  }
+
+  // A hostile unit candidate always beats any building
+  if (bestClass !== 0) {
+    const index = getStructureIndex(world);
+    const structureIds = index.hash.queryNearby(
       attacker.x,
       attacker.z,
-      ent.x,
-      ent.z,
-      ent.width,
-      ent.height,
+      maxSearchRange + index.maxExtent,
     );
-    if (dist > maxSearchRange || dist < minRange) continue;
-    if (requireInAttackRange && !isInAttackRange(attacker, ent)) continue;
-    candidateBuf.push(ent);
-    candidateDist.push(dist);
-  }
-
-  // Reachable enemies beat enclosed ones; an enclosed enemy is only chosen (via its blocking
-  // wall) when no reachable candidate exists. Deterministic: nearest first, ties by id.
-  let fallback: Acquisition | undefined;
-  for (;;) {
-    let best = -1;
-    for (let i = 0; i < candidateBuf.length; i++) {
-      const d = candidateDist[i];
-      if (d === Infinity) continue;
+    for (let i = 0; i < structureIds.length; i++) {
+      const ent = world.entities[structureIds[i]];
       if (
-        best === -1 ||
-        d < candidateDist[best] - 1e-4 ||
-        (Math.abs(d - candidateDist[best]) <= 1e-4 &&
-          candidateBuf[i].id < candidateBuf[best].id)
+        !ent ||
+        ent.kind !== 'building' ||
+        !areHostile(world, attacker, ent) ||
+        !ent.built ||
+        ent.hp <= 0 ||
+        ent.deathTick !== undefined
       ) {
-        best = i;
+        continue;
+      }
+      const bData = getBuildingData(ent.type, ent.faction);
+      if (bData?.isWall || bData?.isGate || ent.isGate) {
+        continue;
+      }
+
+      const dist = distanceToFootprint(
+        attacker.x,
+        attacker.z,
+        ent.x,
+        ent.z,
+        ent.width,
+        ent.height,
+      );
+      if (dist > maxSearchRange || dist < minRange) continue;
+      if (requireInAttackRange && !isInAttackRange(attacker, ent)) continue;
+      if (!isInAttackRange(attacker, ent) && !canEngage(world, attacker, ent)) {
+        continue;
+      }
+
+      const isAttacking = (bData?.attack ?? 0) > 0;
+      const cls = isAttacking ? 1 : 2;
+
+      if (
+        cls < bestClass ||
+        (cls === bestClass && dist < bestDist - 1e-4) ||
+        (cls === bestClass &&
+          Math.abs(dist - bestDist) <= 1e-4 &&
+          ent.id < bestId)
+      ) {
+        bestCandidate = ent;
+        bestClass = cls;
+        bestDist = dist;
+        bestId = ent.id;
       }
     }
-    if (best === -1) break;
-
-    const candidate = candidateBuf[best];
-    candidateDist[best] = Infinity;
-    const wall = resolveBlockingWall(world, attacker, candidate);
-    if (!wall) {
-      return { target: candidate, goal: candidate };
-    }
-    if (
-      fallback === undefined &&
-      (!requireInAttackRange || isInAttackRange(attacker, wall))
-    ) {
-      fallback = { target: wall, goal: candidate };
-    }
   }
-  return fallback;
+
+  return bestCandidate;
 }
 
 function findNearestEnemyForBuilding(
@@ -399,23 +353,26 @@ export function applyAttackCommand(world: World, cmd: AttackCommand): void {
       };
       unit.orders.length = 0;
       unit.orderGeneration++;
-      // A blocking wall is only the temporary combat target.
-      const wall = resolveBlockingWall(world, unit, target);
-      unit.combat = {
-        targetRef: wall ?? target,
-        targetId: (wall ?? target).id,
-        goalRef: wall ? target : undefined,
-      };
-      world.pathQueue.cancel(unit.id);
-      unit.path = undefined;
-      unit.pathTarget = undefined;
-      unit.pathPending = false;
-      unit.formationSlotX = undefined;
-      unit.formationSlotZ = undefined;
-      unit.stuckTicks = 0;
-      unit.stuckProgressX = unit.x;
-      unit.stuckProgressZ = unit.z;
-      unit.stuckLastCheckTick = world.tick;
+      const currentGoal = unit.combat?.goalRef ?? unit.combat?.targetRef;
+      const isSameGoal = unit.combat !== undefined && currentGoal === target;
+
+      if (!isSameGoal) {
+        const wall = resolveAttackTarget(world, unit, target);
+        unit.combat = {
+          targetRef: wall,
+          goalRef: wall !== target ? target : undefined,
+        };
+        world.pathQueue.cancel(unit.id);
+        unit.path = undefined;
+        unit.pathTarget = undefined;
+        unit.pathPending = false;
+        unit.formationSlotX = undefined;
+        unit.formationSlotZ = undefined;
+        unit.stuckTicks = 0;
+        unit.stuckProgressX = unit.x;
+        unit.stuckProgressZ = unit.z;
+        unit.stuckLastCheckTick = world.tick;
+      }
     }
   }
 }
@@ -452,6 +409,130 @@ function onTargetLost(world: World, unit: UnitEntity): void {
   }
 }
 
+const DIRS_8: readonly [number, number][] = [
+  [0, -1],
+  [0, 1],
+  [-1, 0],
+  [1, 0],
+  [-1, -1],
+  [-1, 1],
+  [1, -1],
+  [1, 1],
+];
+
+const BACKOFF_MAX_DEPTH = 32;
+const backoffQueueX = new Int32Array(2048);
+const backoffQueueZ = new Int32Array(2048);
+const backoffQueueDepth = new Int32Array(2048);
+let backoffVisitedToken = 1;
+let backoffVisited: Int32Array | undefined;
+
+function findReachableFiringTile(
+  world: World,
+  unit: UnitEntity,
+  target: Combatant,
+  minRange: number,
+  range: number,
+): { x: number; z: number } | undefined {
+  const grid = world.grid;
+  const size = grid.size;
+  const total = size * size;
+
+  if (!backoffVisited || backoffVisited.length < total) {
+    backoffVisited = new Int32Array(total);
+    backoffVisitedToken = 1;
+  } else if (backoffVisitedToken >= 0x7ffffffe) {
+    backoffVisited.fill(0);
+    backoffVisitedToken = 1;
+  }
+  const token = backoffVisitedToken++;
+
+  const startTx = Math.max(0, Math.min(size - 1, Math.floor(unit.x)));
+  const startTz = Math.max(0, Math.min(size - 1, Math.floor(unit.z)));
+
+  let head = 0;
+  let tail = 0;
+
+  backoffQueueX[tail] = startTx;
+  backoffQueueZ[tail] = startTz;
+  backoffQueueDepth[tail] = 0;
+  tail++;
+  backoffVisited[startTz * size + startTx] = token;
+
+  let bestTile: { x: number; z: number; distToUnit: number } | undefined;
+  let foundAtDepth = -1;
+
+  while (head < tail) {
+    const cx = backoffQueueX[head];
+    const cz = backoffQueueZ[head];
+    const depth = backoffQueueDepth[head];
+    head++;
+
+    if (foundAtDepth !== -1 && depth > foundAtDepth) {
+      break;
+    }
+
+    const centerX = cx + 0.5;
+    const centerZ = cz + 0.5;
+    const distToTarget = distanceToCombatant(centerX, centerZ, target);
+
+    if (
+      distToTarget >= minRange &&
+      distToTarget <= range &&
+      grid.canOccupy(centerX, centerZ, unit.radius, unit.player)
+    ) {
+      const distToUnit = Math.hypot(centerX - unit.x, centerZ - unit.z);
+      if (
+        !bestTile ||
+        distToUnit < bestTile.distToUnit - 1e-4 ||
+        (Math.abs(distToUnit - bestTile.distToUnit) <= 1e-4 &&
+          (cz < bestTile.z || (cz === bestTile.z && cx < bestTile.x)))
+      ) {
+        bestTile = { x: cx, z: cz, distToUnit };
+        foundAtDepth = depth;
+      }
+    }
+
+    if (foundAtDepth !== -1 || depth >= BACKOFF_MAX_DEPTH) {
+      continue;
+    }
+
+    for (let d = 0; d < 8; d++) {
+      const dx = DIRS_8[d][0];
+      const dz = DIRS_8[d][1];
+      const nx = cx + dx;
+      const nz = cz + dz;
+
+      if (nx < 0 || nx >= size || nz < 0 || nz >= size) continue;
+      const nIdx = nz * size + nx;
+      if (backoffVisited[nIdx] === token) continue;
+
+      if (!grid.isPassable(nx, nz, unit.player)) continue;
+      if (dx !== 0 && dz !== 0) {
+        if (
+          !grid.isPassable(cx + dx, cz, unit.player) ||
+          !grid.isPassable(cx, cz + dz, unit.player)
+        ) {
+          continue;
+        }
+      }
+
+      backoffVisited[nIdx] = token;
+      if (tail < backoffQueueX.length) {
+        backoffQueueX[tail] = nx;
+        backoffQueueZ[tail] = nz;
+        backoffQueueDepth[tail] = depth + 1;
+        tail++;
+      }
+    }
+  }
+
+  if (bestTile) {
+    return { x: bestTile.x + 0.5, z: bestTile.z + 0.5 };
+  }
+  return undefined;
+}
+
 function requestChasePath(
   world: World,
   unit: UnitEntity,
@@ -459,17 +540,24 @@ function requestChasePath(
   destZ: number,
   tolerance: number,
 ): void {
+  const combat = unit.combat;
   const needsPath =
     !unit.pathPending &&
-    (!unit.path ||
-      unit.path.length === 0 ||
-      !unit.pathTarget ||
-      Math.hypot(unit.pathTarget.x - destX, unit.pathTarget.z - destZ) >
+    (combat === undefined ||
+      combat.lastDestX === undefined ||
+      combat.lastDestZ === undefined ||
+      combat.lastGridRevision !== world.grid.revision ||
+      Math.hypot(combat.lastDestX - destX, combat.lastDestZ - destZ) >
         tolerance);
   if (needsPath) {
     // Chase destinations are combat-owned: never reuse the order's formation slot.
     unit.formationSlotX = undefined;
     unit.formationSlotZ = undefined;
+    if (combat) {
+      combat.lastDestX = destX;
+      combat.lastDestZ = destZ;
+      combat.lastGridRevision = world.grid.revision;
+    }
     world.pathQueue.request(unit.id, unit.x, unit.z, destX, destZ, unit.player);
     unit.pathPending = true;
   }
@@ -486,26 +574,29 @@ function chaseTarget(world: World, unit: UnitEntity, target: Combatant): void {
     destZ = Math.max(target.z, Math.min(unit.z, target.z + target.height));
   }
 
-  const minRange = isRangedUnit(unit) ? (unit.minRange ?? 0) : 0;
+  const minRange = isRangedAttacker(unit) ? (unit.minRange ?? 0) : 0;
   const dist = Math.hypot(destX - unit.x, destZ - unit.z);
 
   if (minRange > 0 && getCombatantDistance(unit, target) < minRange) {
-    // Too close to fire: never approach. Back off to a legal firing distance if there is room.
-    let ax = unit.x - destX;
-    let az = unit.z - destZ;
-    const len = Math.hypot(ax, az);
-    if (len > 1e-4) {
-      ax /= len;
-      az /= len;
+    const range = unit.range ?? 16;
+    const backoffTile = findReachableFiringTile(
+      world,
+      unit,
+      target,
+      minRange,
+      range,
+    );
+    if (backoffTile) {
+      requestChasePath(world, unit, backoffTile.x, backoffTile.z, 1);
     } else {
-      ax = 1;
-      az = 0;
-    }
-    const backoff = minRange + 0.5 - getCombatantDistance(unit, target);
-    const rx = unit.x + ax * backoff;
-    const rz = unit.z + az * backoff;
-    if (world.grid.canOccupy(rx, rz, unit.radius, unit.player)) {
-      requestChasePath(world, unit, rx, rz, 1);
+      if (unit.order?.kind === 'attack') {
+        clearCombat(unit);
+        advanceUnitOrder(world, unit);
+        onTargetLost(world, unit);
+      } else {
+        clearCombat(unit);
+        onTargetLost(world, unit);
+      }
     }
     return;
   }
@@ -571,7 +662,7 @@ function updateUnitCombat(world: World, unit: UnitEntity): void {
     }
   }
 
-  // 2. Acquisition (every 10 ticks): idle / stop / attackMove / hold only
+  // 2. Acquisition: idle / stop / attackMove / hold only (staggered by unit id)
   if (!goal) {
     const orderKind = unit.order?.kind ?? 'idle';
     const canAcquire =
@@ -579,30 +670,46 @@ function updateUnitCombat(world: World, unit: UnitEntity): void {
       orderKind === 'stop' ||
       orderKind === 'attackMove' ||
       orderKind === 'hold';
-    if (!canAcquire || world.tick % 10 !== 0) return;
+    if (!canAcquire || (world.tick + unit.id) % 10 !== 0) return;
 
     const searchRange = Math.max(unit.lineOfSight, unit.range ?? 0);
-    const acq = findNearestEnemy(
+    const candidate = findNearestEnemy(
       world,
       unit,
       searchRange,
       orderKind === 'hold',
     );
-    if (!acq) return;
-    goal = acq.goal;
+    if (!candidate) return;
+    goal = candidate;
     // Drop any stale path (e.g. the attackMove destination path) before chasing
     resetPath(world, unit);
-    unit.combat = { targetRef: acq.target, targetId: acq.target.id };
+    unit.combat = { targetRef: goal };
   }
 
-  // 3. Current combat target = goal, or the reachable wall blocking it
+  // 3. Current combat target = goal, or breach wall/gate from resolveAttackTarget
+  const target = resolveAttackTarget(world, unit, goal);
+  if (!target) {
+    // Unreachable
+    if (unit.order?.kind !== 'attack') {
+      unit.combat = undefined;
+      onTargetLost(world, unit);
+      return;
+    }
+    // Explicit attack order: move once toward the nearest reachable point
+    const combat = (unit.combat ??= {});
+    combat.targetRef = undefined;
+    combat.goalRef = goal;
+    chaseTarget(world, unit, goal);
+    return;
+  }
+
   const combat = (unit.combat ??= {});
-  const target = resolveBlockingWall(world, unit, goal) ?? goal;
   if (combat.targetRef !== target) {
     combat.targetRef = target;
-    combat.targetId = target.id;
     combat.attackStartedTick = undefined;
     combat.hitApplied = undefined;
+    combat.lastDestX = undefined;
+    combat.lastDestZ = undefined;
   }
   combat.goalRef = target !== goal ? goal : undefined;
 
@@ -611,6 +718,8 @@ function updateUnitCombat(world: World, unit: UnitEntity): void {
     if (unit.pathPending || (unit.path && unit.path.length > 0)) {
       resetPath(world, unit);
     }
+    combat.lastDestX = undefined;
+    combat.lastDestZ = undefined;
 
     if (target.kind === 'unit') {
       unit.facing = computeFacing(target.x - unit.x, target.z - unit.z);
@@ -623,7 +732,8 @@ function updateUnitCombat(world: World, unit: UnitEntity): void {
 
     if (combat.attackStartedTick !== undefined) {
       const elapsed = world.tick - combat.attackStartedTick;
-      const isHitFrame = Math.floor(elapsed * SIM_DT * 12) >= MELEE_HIT_FRAME;
+      const isHitFrame =
+        Math.floor(elapsed * SIM_DT * ATTACK_ANIM_FPS) >= MELEE_HIT_FRAME;
 
       if (isHitFrame && !combat.hitApplied) {
         combat.hitApplied = true;
@@ -634,7 +744,7 @@ function updateUnitCombat(world: World, unit: UnitEntity): void {
           isInAttackRange(unit, target)
         ) {
           const dmg = calculateDamage(unit, target);
-          if ((unit.attackType ?? 'melee') === 'melee') {
+          if (!isRangedAttacker(unit)) {
             applyDamage(world, target, dmg, unit);
           } else {
             spawnProjectile(world, unit, target, dmg);
@@ -642,8 +752,7 @@ function updateUnitCombat(world: World, unit: UnitEntity): void {
         }
       }
 
-      const clipTicks = Math.ceil(MELEE_TOTAL_FRAMES / 12 / SIM_DT);
-      if (elapsed >= clipTicks) {
+      if (elapsed >= getMeleeSwingTicks()) {
         combat.attackStartedTick = undefined;
         combat.hitApplied = undefined;
       }
@@ -653,7 +762,7 @@ function updateUnitCombat(world: World, unit: UnitEntity): void {
     ) {
       const cooldownTicks = Math.round((unit.cooldown ?? 1.5) / SIM_DT);
       combat.attackStartedTick = world.tick;
-      combat.attackDurationTicks = Math.ceil(MELEE_TOTAL_FRAMES / 12 / SIM_DT);
+      combat.attackDurationTicks = getMeleeSwingTicks();
       combat.hitApplied = false;
       unit.attackCooldownUntilTick = world.tick + cooldownTicks;
     }
@@ -690,26 +799,32 @@ function updateBuildingCombat(world: World, b: BuildingEntity): void {
   const cooldownTicks = Math.round(cooldown / SIM_DT);
 
   let target = b.combat?.targetRef;
-  if (
-    !target ||
-    !isLiveCombatant(world, target) ||
-    !areHostile(world, b, target) ||
-    !isInAttackRange(b, target)
-  ) {
+  const hasValidTarget =
+    target !== undefined &&
+    isLiveCombatant(world, target) &&
+    areHostile(world, b, target) &&
+    isInAttackRange(b, target);
+
+  if (!hasValidTarget) {
+    if ((world.tick + b.id) % 10 !== 0) {
+      return;
+    }
     target = findNearestEnemyForBuilding(world, b, range);
   }
 
   if (target) {
     const dmg = calculateDamage(b, target);
     spawnProjectile(world, b, target, dmg);
-    b.combat = {
-      targetRef: target,
-      targetId: target.id,
-    };
+    if (b.combat) {
+      b.combat.targetRef = target;
+    } else {
+      b.combat = {
+        targetRef: target,
+      };
+    }
     b.attackCooldownUntilTick = world.tick + cooldownTicks;
   }
 }
-
 export function updateCombat(world: World): void {
   // Units first, then building attacks (tower/keep)
   for (let i = 0; i < world.entities.length; i++) {

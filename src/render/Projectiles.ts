@@ -5,7 +5,7 @@ import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
 import { Color3 } from '@babylonjs/core/Maths/math.color';
 import type { Scene } from '@babylonjs/core/scene';
 import { ThinInstancePool } from './ThinInstancePool';
-import type { SessionSnapshot } from '../game/GameSession';
+import type { SessionSnapshot, InterpolatedEntity } from '../game/GameSession';
 
 const PROJECTILE_SHADER_KEY = 'bordevProjectile';
 
@@ -85,7 +85,9 @@ function createArrowMesh(scene: Scene, material: ShaderMaterial): Mesh {
   ];
 
   const normals: number[] = [];
-  VertexData.ComputeNormals(positions, indices, normals);
+  VertexData.ComputeNormals(positions, indices, normals, {
+    useRightHandedSystem: true,
+  });
 
   const vertexData = new VertexData();
   vertexData.positions = positions;
@@ -134,7 +136,9 @@ function createStoneMesh(scene: Scene, material: ShaderMaterial): Mesh {
   ];
 
   const normals: number[] = [];
-  VertexData.ComputeNormals(positions, indices, normals);
+  VertexData.ComputeNormals(positions, indices, normals, {
+    useRightHandedSystem: true,
+  });
 
   const vertexData = new VertexData();
   vertexData.positions = positions;
@@ -153,9 +157,10 @@ export class Projectiles {
   private readonly arrowPool: ThinInstancePool;
   private readonly stonePool: ThinInstancePool;
 
+  private readonly entityById = new Map<number, InterpolatedEntity>();
+
   private activeArrows = 0;
   private activeStones = 0;
-
   constructor(scene: Scene) {
     ensureProjectileShaders();
 
@@ -227,6 +232,13 @@ export class Projectiles {
     const count = entities.length;
     const alpha = snapshot.alpha;
 
+    this.entityById.clear();
+    for (let i = 0; i < count; i++) {
+      const ent = entities[i];
+      if (!ent.remains) {
+        this.entityById.set(ent.id, ent);
+      }
+    }
     for (let i = 0; i < count; i++) {
       const ent = entities[i];
       const raw = ent.raw;
@@ -242,18 +254,26 @@ export class Projectiles {
       const x = ent.x;
       const z = ent.z;
 
-      // Current homing target centre (units interpolated like the projectile, buildings static).
+      // Current homing target centre from interpolated entity if available
       const targetRef = raw.targetRef;
       let tx: number;
       let tz: number;
-      if (targetRef.kind === 'building') {
+      const targetEnt = this.entityById.get(targetRef.id);
+      if (targetEnt) {
+        if (targetEnt.kind === 'building') {
+          tx = targetEnt.x + (targetEnt.width ?? 1) * 0.5;
+          tz = targetEnt.z + (targetEnt.height ?? 1) * 0.5;
+        } else {
+          tx = targetEnt.x;
+          tz = targetEnt.z;
+        }
+      } else if (targetRef.kind === 'building') {
         tx = targetRef.x + targetRef.width * 0.5;
         tz = targetRef.z + targetRef.height * 0.5;
       } else {
-        tx = targetRef.previousX + (targetRef.x - targetRef.previousX) * alpha;
-        tz = targetRef.previousZ + (targetRef.z - targetRef.previousZ) * alpha;
+        tx = targetRef.x;
+        tz = targetRef.z;
       }
-
       // Heading: actual current projectile -> target line (follows a moving target).
       const dx = tx - x;
       const dz = tz - z;
@@ -321,18 +341,19 @@ export class Projectiles {
           upZ = 1;
         }
 
-        let rx = fy * upZ - fz * upY;
-        let ry = fz * upX - fx * upZ;
-        let rz = fx * upY - fy * upX;
+        // r = up × f (right-handed orthonormal basis, det = +1)
+        let rx = upY * fz - upZ * fy;
+        let ry = upZ * fx - upX * fz;
+        let rz = upX * fy - upY * fx;
         const rLen = Math.sqrt(rx * rx + ry * ry + rz * rz);
         rx /= rLen;
         ry /= rLen;
         rz /= rLen;
 
-        const ux = ry * fz - rz * fy;
-        const uy = rz * fx - rx * fz;
-        const uz = rx * fy - ry * fx;
-
+        // u = f × r
+        const ux = fy * rz - fz * ry;
+        const uy = fz * rx - fx * rz;
+        const uz = fx * ry - fy * rx;
         buffer[offset + 0] = rx;
         buffer[offset + 1] = ry;
         buffer[offset + 2] = rz;

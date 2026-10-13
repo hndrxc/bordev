@@ -5,35 +5,118 @@ from lib import anim
 from lib.model import root, box, ico, cylinder, cone, beam, roof, flag, mesh, wheel
 
 
-def states(name, size):
+def states(name, size=None, width=None, depth=None, scaffold_height=None, extra_roots=None):
+    if size is not None:
+        if width is None:
+            width = size
+        if depth is None:
+            depth = size
+    elif width is not None and depth is not None:
+        size = max(width, depth)
+    elif width is not None:
+        size = width
+        depth = width
+    elif depth is not None:
+        size = depth
+        width = depth
+    else:
+        size = 1
+        width = 1
+        depth = 1
+
     parent = root(name)
     levels = [root(label, parent=parent) for label in ("Foundations", "Walls", "Roof and fittings")]
     scaffold = root("Construction scaffold", parent=parent)
     rubble = root("Collapsed rubble", parent=parent)
     damage = root("Damage cracks and scorch", parent=parent)
-    half = size / 2 - 0.08
-    for x in (-half,half):
-        for y in (-half,half):
-            beam("Scaffold upright", (x,y,0.02),(x,y,size*0.58),0.034,"WOOD_LIGHT",scaffold)
-        for z in (size*0.25,size*0.5):
-            beam("Scaffold crossbar", (x,-half,z),(x,half,z),0.029,"WOOD_LIGHT",scaffold)
-            box("Scaffold board", (x,0,z),(0.19,size-0.08,0.035),"WOOD",scaffold)
-        beam("Scaffold brace", (x,-half,0.05),(x,half,size*0.49),0.025,"WOOD",scaffold)
+    half_x = width / 2 - 0.08
+    half_y = depth / 2 - 0.08
+
+    if scaffold_height is None:
+        sh = size * 0.58
+        board_zs = (size * 0.25, size * 0.5)
+        brace_z = size * 0.49
+    else:
+        sh = scaffold_height
+        board_zs = (sh * 0.436, sh * 0.744)
+        brace_z = sh * 0.82
+
+    if width == depth:
+        half = half_x
+        for x in (-half, half):
+            for y in (-half, half):
+                beam("Scaffold upright", (x, y, 0.02), (x, y, sh), 0.034, "WOOD_LIGHT", scaffold)
+            for z in board_zs:
+                beam("Scaffold crossbar", (x, -half, z), (x, half, z), 0.029, "WOOD_LIGHT", scaffold)
+                box("Scaffold board", (x, 0, z), (0.19, size - 0.08, 0.035), "WOOD", scaffold)
+            beam("Scaffold brace", (x, -half, 0.05), (x, half, brace_z), 0.025, "WOOD", scaffold)
+    else:
+        x_posts = (-half_x, -0.58, 0.58, half_x) if width == 3 and depth == 1 else (-half_x, half_x)
+        for x in x_posts:
+            for y in (-half_y, half_y):
+                beam("Scaffold upright", (x, y, 0.02), (x, y, sh), 0.034, "WOOD_LIGHT", scaffold)
+            for z in board_zs:
+                beam("Scaffold crossbar", (x, -half_y, z), (x, half_y, z), 0.028, "WOOD_LIGHT", scaffold)
+        for z in board_zs:
+            for y in (-half_y, half_y):
+                beam("Scaffold long rail", (-half_x, y, z), (half_x, y, z), 0.028, "WOOD_LIGHT", scaffold)
+                box("Scaffold platform", (0, y, z), (width - 0.16, 0.18, 0.035), "WOOD", scaffold)
+
     rng = random.Random(name)
-    for index in range(20 if size > 2 else 12):
-        x, y = rng.uniform(-half*0.85,half*0.85), rng.uniform(-half*0.85,half*0.85)
-        chunk = ico("Rubble masonry", (x,y,0.10+rng.random()*0.1),
-                    (size*0.10,size*0.075,0.12+rng.random()*0.12),
-                    "STONE_DARK" if index%3 == 0 else "STONE",rubble)
-        chunk.rotation_euler.z = rng.random()*math.tau
-    for index in range(4):
-        plank = box("Broken roof timber", (rng.uniform(-half,half),rng.uniform(-half,half),0.21),
-                    (size*0.45,0.08,0.07),"WOOD",rubble)
-        plank.rotation_euler.z = rng.random()*math.pi
-    anim.visibility(scaffold,False)
-    anim.visibility(rubble,False)
-    anim.visibility(damage,False)
-    return {"root":parent,"levels":levels,"scaffold":scaffold,"rubble":rubble,"damage":damage}
+    rubble_count = 20 if size > 2 else 12
+    if width == depth:
+        half = half_x
+        for index in range(rubble_count):
+            x, y = rng.uniform(-half * 0.85, half * 0.85), rng.uniform(-half * 0.85, half * 0.85)
+            chunk = ico("Rubble masonry", (x, y, 0.10 + rng.random() * 0.1),
+                        (size * 0.10, size * 0.075, 0.12 + rng.random() * 0.12),
+                        "STONE_DARK" if index % 3 == 0 else "STONE", rubble)
+            chunk.rotation_euler.z = rng.random() * math.tau
+        for index in range(4):
+            plank = box("Broken roof timber", (rng.uniform(-half, half), rng.uniform(-half, half), 0.21),
+                        (size * 0.45, 0.08, 0.07), "WOOD", rubble)
+            plank.rotation_euler.z = rng.random() * math.pi
+    else:
+        for index in range(rubble_count):
+            x = rng.uniform(-half_x * 0.85, half_x * 0.85)
+            y = rng.uniform(-half_y * 0.85, half_y * 0.85)
+            chunk = ico("Rubble masonry", (x, y, 0.10 + rng.random() * 0.1),
+                        (size * 0.10, size * 0.075, 0.12 + rng.random() * 0.12),
+                        "STONE_DARK" if index % 3 == 0 else "STONE", rubble)
+            chunk.rotation_euler.z = rng.random() * math.tau
+        for index in range(5):
+            plank = box("Broken gate timber", (rng.uniform(-half_x * 0.85, half_x * 0.85), rng.uniform(-half_y * 0.85, half_y * 0.85), 0.18),
+                        (0.65, 0.08, 0.06), "WOOD", rubble)
+            plank.rotation_euler.z = rng.random() * math.pi
+
+    anim.visibility(scaffold, False)
+    anim.visibility(rubble, False)
+    anim.visibility(damage, False)
+
+    res = {
+        "root": parent,
+        "levels": levels,
+        "scaffold": scaffold,
+        "rubble": rubble,
+        "damage": damage,
+    }
+    if extra_roots:
+        if isinstance(extra_roots, dict):
+            for key, label in extra_roots.items():
+                r = root(label, parent=parent)
+                anim.visibility(r, False)
+                res[key] = r
+        elif isinstance(extra_roots, (list, tuple)):
+            for item in extra_roots:
+                if isinstance(item, tuple):
+                    key, label = item
+                else:
+                    key = item
+                    label = item.replace("_", " ").capitalize()
+                r = root(label, parent=parent)
+                anim.visibility(r, False)
+                res[key] = r
+    return res
 
 
 def window(parent, x, y, z, width=0.22, height=0.35):

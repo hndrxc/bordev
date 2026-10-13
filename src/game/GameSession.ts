@@ -4,7 +4,7 @@ import { SIM_DT, Sim } from '../sim/sim';
 import { parseMap } from '../sim/map';
 import { cloneCommand } from '../sim/commands';
 import type { GameMap } from '../sim/map';
-import type { Command } from '../sim/commands';
+import type { Command, SimEvent } from '../sim/commands';
 import type {
   Entity,
   CartState,
@@ -31,6 +31,7 @@ export interface InterpolatedEntity {
   player?: number;
   type?: string;
   faction?: string;
+  remains: boolean;
   x: number;
   z: number;
   simX: number;
@@ -238,7 +239,8 @@ export class GameSession {
     simTime: 0,
     entities: this._snapshotEntities,
   };
-
+  private readonly _drainedEvents: SimEvent[] = [];
+  private _recordedEvents: SimEvent[] | null = null;
   private readonly _debugSceneEnabled: boolean;
   private readonly _maxAccumulator: number;
   private _accumulator = 0;
@@ -363,7 +365,11 @@ export class GameSession {
   showStatus(message: string): void {
     setHudStatus(message);
   }
-
+  recordEvents(): SimEvent[] {
+    const list: SimEvent[] = [];
+    this._recordedEvents = list;
+    return list;
+  }
   issue(cmd: Command): void {
     if (this._disposed) return;
     if (this._sim) {
@@ -375,9 +381,10 @@ export class GameSession {
 
   getInterpolatedEntity(id: number): InterpolatedEntity | undefined {
     if (!this._sim) return undefined;
-    return this._snapshotEntities.find((candidate) => candidate.id === id);
+    return this._snapshotEntities.find(
+      (candidate) => candidate.id === id && !candidate.remains,
+    );
   }
-
   getInterpolatedPosition(id: number): { x: number; z: number } | undefined {
     const entity = this.getInterpolatedEntity(id);
     if (!entity) return undefined;
@@ -437,6 +444,15 @@ export class GameSession {
       this._accumulator -= SIM_DT;
     }
 
+    if (this._sim) {
+      this._sim.drainEvents(this._drainedEvents);
+      if (this._recordedEvents !== null && this._drainedEvents.length > 0) {
+        for (let i = 0; i < this._drainedEvents.length; i++) {
+          this._recordedEvents.push(this._drainedEvents[i]);
+        }
+      }
+    }
+
     this._alpha = Math.max(0, Math.min(1, this._accumulator / SIM_DT));
 
     // Update snapshot with interpolated entity positions
@@ -486,6 +502,7 @@ export class GameSession {
           previousX: 0,
           previousZ: 0,
           raw: e,
+          remains: false,
         };
         pool[count] = slot;
       }
@@ -499,7 +516,7 @@ export class GameSession {
       slot.previousX = e.previousX;
       slot.previousZ = e.previousZ;
       slot.raw = e;
-
+      slot.remains = false;
       slot.player = 'player' in e ? e.player : undefined;
       slot.type = 'type' in e ? e.type : undefined;
       slot.faction = 'faction' in e ? e.faction : undefined;
@@ -564,6 +581,7 @@ export class GameSession {
             previousX: 0,
             previousZ: 0,
             raw: e,
+            remains: true,
           };
           pool[count] = slot;
         }
@@ -577,7 +595,7 @@ export class GameSession {
         slot.previousX = e.previousX ?? e.x;
         slot.previousZ = e.previousZ ?? e.z;
         slot.raw = e;
-
+        slot.remains = true;
         slot.player = e.player;
         slot.type = e.type;
         slot.faction = e.faction;
@@ -683,6 +701,7 @@ export class GameSession {
         stats: () => this.getStats(),
         cheats: this._cheats,
         showStatus: (message: string) => this.showStatus(message),
+        recordEvents: () => this.recordEvents(),
       };
     }
   }
@@ -700,7 +719,7 @@ export class GameSession {
     this.input.dispose();
     this.renderer.dispose();
     resetHud();
-
+    this._recordedEvents = null;
     if (typeof window !== 'undefined' && window.__bordev?.session === this) {
       delete window.__bordev;
     }
@@ -715,6 +734,7 @@ export interface BordevDebugApi {
   stats: () => SessionStats;
   cheats: GameCheats;
   showStatus?: (message: string) => void;
+  recordEvents: () => SimEvent[];
 }
 
 declare global {

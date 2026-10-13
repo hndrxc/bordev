@@ -576,16 +576,15 @@ export function updateConstruction(world: World): void {
       const n = group.builders.length;
       // 3T / (n + 2) rule: progress per second = (n + 2) / (3 * T)
       const progressDelta = ((n + 2) / (3 * nominalT)) * SIM_DT;
-      building.buildProgress = Math.min(
-        1,
-        building.buildProgress + progressDelta,
-      );
+      const oldProgress = building.buildProgress;
+      const newProgress = Math.min(1, oldProgress + progressDelta);
+      building.buildProgress = newProgress;
+      const hpDelta =
+        Math.floor(building.maxHp * newProgress) -
+        Math.floor(building.maxHp * oldProgress);
       building.hp = Math.max(
         1,
-        Math.min(
-          building.maxHp,
-          Math.floor(building.maxHp * building.buildProgress),
-        ),
+        Math.min(building.maxHp, building.hp + hpDelta),
       );
 
       if (building.buildProgress >= 1) {

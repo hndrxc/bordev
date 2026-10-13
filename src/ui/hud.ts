@@ -423,6 +423,7 @@ export function publishHud(session: GameSession): void {
   const minimapUnits: MinimapUnit[] = [];
 
   for (const ent of snapshotEntities) {
+    if (ent.remains || ent.deathTick !== undefined) continue;
     if (ent.kind === 'projectile' || ent.kind === 'doodad') continue;
     const isFootprint = ent.kind === 'building' || ent.kind === 'mine';
     const cx =

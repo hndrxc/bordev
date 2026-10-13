@@ -12,6 +12,7 @@ import {
 } from './construction.js';
 import { Sim, SIM_DT } from '../sim.js';
 import type { BuildingEntity, UnitEntity } from '../entity.js';
+import { applyDamage } from './damage.js';
 function makeTestMap(size = 32): GameMap {
   return {
     version: 1,
@@ -1081,3 +1082,103 @@ describe.each(['move', 'attackMove'] as const)(
     );
   },
 );
+
+describe('M7 Construction — Damage Persistence & Destruction (Damage#1)', () => {
+  it('site being built keeps combat damage and next tick HP does not reset', () => {
+    const sim = new Sim(makeTestMap(48), 42);
+    const world = sim.world;
+    world.players[0].food = 5000;
+    world.players[0].gold = 5000;
+
+    // Barracks has 1200 maxHp
+    const site = world.spawnBuilding(0, 'barracks', 20, 20, false);
+    const builder = world.spawnUnit(0, 'peasant', 19.5, 21.5);
+    sim.issue({
+      kind: 'build',
+      player: 0,
+      ids: [builder.id],
+      queued: false,
+      buildingType: 'barracks',
+      x: 20,
+      z: 20,
+      targetId: site.id,
+    });
+
+    // Advance until site reaches 40% progress (480 HP)
+    for (let i = 0; i < 400; i++) sim.step();
+    expect(site.buildProgress).toBeCloseTo(0.4, 2);
+    expect(site.hp).toBe(481);
+
+    // Apply 50 combat damage: 481 -> 431
+    const enemy = world.spawnUnit(1, 'spearman', 30, 30);
+    applyDamage(world, site, 50, enemy);
+    expect(site.hp).toBe(431);
+
+    // One tick later with builder working: HP must stay <= 432 (retains the 50 damage, not jumping to 482)
+    sim.step();
+    expect(site.hp).toBeLessThanOrEqual(432);
+    expect(site.hp).toBeGreaterThanOrEqual(431);
+  });
+
+  it('lethal damage destroys construction site while builder is working', () => {
+    const sim = new Sim(makeTestMap(48), 42);
+    const world = sim.world;
+    world.players[0].food = 5000;
+    world.players[0].gold = 5000;
+
+    const site = world.spawnBuilding(0, 'barracks', 20, 20, false);
+    const builder = world.spawnUnit(0, 'peasant', 19.5, 21.5);
+    sim.issue({
+      kind: 'build',
+      player: 0,
+      ids: [builder.id],
+      queued: false,
+      buildingType: 'barracks',
+      x: 20,
+      z: 20,
+      targetId: site.id,
+    });
+
+    for (let i = 0; i < 200; i++) sim.step();
+    expect(site.hp).toBeGreaterThan(1);
+
+    const enemy = world.spawnUnit(1, 'spearman', 30, 30);
+    applyDamage(world, site, site.hp, enemy);
+
+    // Lethal damage destroys the site immediately
+    expect(world.getEntity(site.id)).toBeUndefined();
+    expect(world.remains.includes(site)).toBe(true);
+    expect(site.deathTick).toBeDefined();
+
+    // Stepping sim does not resurrect the destroyed site
+    sim.step();
+    expect(world.getEntity(site.id)).toBeUndefined();
+  });
+
+  it('undamaged site still reaches max HP on completion', () => {
+    const sim = new Sim(makeTestMap(48), 42);
+    const world = sim.world;
+    world.players[0].food = 5000;
+    world.players[0].gold = 5000;
+
+    const site = world.spawnBuilding(0, 'cottage', 10, 10, false);
+    const builder = world.spawnUnit(0, 'peasant', 9.5, 10.5);
+    sim.issue({
+      kind: 'build',
+      player: 0,
+      ids: [builder.id],
+      queued: false,
+      buildingType: 'cottage',
+      x: 10,
+      z: 10,
+      targetId: site.id,
+    });
+
+    for (let i = 0; i < 600 && !site.built; i++) {
+      sim.step();
+    }
+
+    expect(site.built).toBe(true);
+    expect(site.hp).toBe(site.maxHp);
+  });
+});

@@ -5,6 +5,9 @@ import type {
 } from '../entity.js';
 import type { World } from '../world.js';
 import { getBuildingData } from '../../data/buildings.js';
+import { CORPSE_DURATION_SEC, RUBBLE_DURATION_SEC } from '../../data/combat.js';
+import { SIM_DT } from '../sim.js';
+import { isInAttackRange } from './combat.js';
 
 /** Different player AND different team. Same-team allies are never hostile. */
 export function areHostile(
@@ -123,7 +126,6 @@ export function applyDamage(
     kind: 'underAttack',
     entityId: target.id,
     player: target.player,
-    attackerEntityId: source?.id,
     x: target.x,
     z: target.z,
   });
@@ -164,15 +166,52 @@ export function applyDamage(
     world.getEntity(source.id) === source &&
     source.hp > 0
   ) {
-    const isIdleOrStop =
-      !target.order ||
-      target.order.kind === 'idle' ||
-      target.order.kind === 'stop';
-    if (isIdleOrStop && (!target.combat || !target.combat.targetRef)) {
-      target.combat = {
-        targetRef: source,
-        targetId: source.id,
-      };
+    const isAttackingSource =
+      source.kind === 'unit' ||
+      (getBuildingData(source.type, source.faction)?.attack ?? 0) > 0;
+
+    if (isAttackingSource) {
+      const orderKind = target.order?.kind ?? 'idle';
+      const isRetaliationOrder =
+        orderKind === 'idle' ||
+        orderKind === 'stop' ||
+        orderKind === 'attackMove' ||
+        (orderKind === 'hold' && isInAttackRange(target, source));
+
+      if (isRetaliationOrder) {
+        const current = target.combat?.targetRef;
+        let shouldSwitch = false;
+
+        if (!current) {
+          shouldSwitch = true;
+        } else {
+          const currentHittable =
+            isLiveCombatant(world, current) &&
+            areHostile(world, target, current) &&
+            isInAttackRange(target, current);
+
+          if (!currentHittable) {
+            shouldSwitch = true;
+          } else if (current.kind === 'building') {
+            if (source.kind === 'unit') {
+              shouldSwitch = true;
+            } else {
+              const currentIsAttacking =
+                (getBuildingData(current.type, current.faction)?.attack ?? 0) >
+                0;
+              if (!currentIsAttacking) {
+                shouldSwitch = true;
+              }
+            }
+          }
+        }
+
+        if (shouldSwitch) {
+          target.combat = {
+            targetRef: source,
+          };
+        }
+      }
     }
   }
 }
@@ -183,7 +222,10 @@ export function updateRemains(world: World): void {
     const remain = remains[i];
     const deathTick = remain.deathTick ?? 0;
     const elapsed = world.tick - deathTick;
-    const maxTicks = remain.kind === 'unit' ? 200 : 400;
+    const maxTicks =
+      remain.kind === 'unit'
+        ? Math.round(CORPSE_DURATION_SEC / SIM_DT)
+        : Math.round(RUBBLE_DURATION_SEC / SIM_DT);
     if (elapsed >= maxTicks) {
       remains.splice(i, 1);
     }

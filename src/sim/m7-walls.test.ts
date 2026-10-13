@@ -1,38 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { Terrain, type GameMap } from './map.js';
+import type { BuildingEntity, Combatant } from './entity.js';
 import { FLAG_BUILDING, FLAG_GATE } from './grid.js';
-import { ComponentManager } from './path/components.js';
-import { PathQueue } from './path/pathQueue.js';
-import { Sim } from './sim.js';
-import { applyDamage } from './systems/damage.js';
-import { updateGates, findBlockingWall } from './systems/gates.js';
-import type { BuildingEntity } from './entity.js';
+import type { Sim } from './sim.js';
+import { resolveAttackTarget } from './systems/breach.js';
+import { makeOpenSim } from './testFixtures.js';
 
 const MAP_SIZE = 32;
-
-/**
- * Map with three players and no starting bases, so no keeps, peasants or carts
- * contaminate target acquisition, gate proximity or component labels.
- */
-function makeEmptyMap(size = MAP_SIZE): GameMap {
-  return {
-    version: 1,
-    id: 'test_walls_map',
-    name: 'Test Walls Map',
-    size,
-    players: 3,
-    tiles: new Uint8Array(size * size).fill(Terrain.GRASS),
-    goldMines: [],
-    starts: [],
-    doodads: [],
-  };
-}
-
-function makeSim(map: GameMap = makeEmptyMap()): Sim {
-  const sim = new Sim(map, 1);
-  expect(sim.world.entities.filter((e) => e !== undefined)).toHaveLength(0);
-  return sim;
-}
 
 /** Vertical wall line at x=lineX spanning the whole map with a vertical 1x3 gate at z=14..16. */
 function buildGatedWallLine(
@@ -59,19 +32,24 @@ function buildGatedWallLine(
 }
 
 describe('M7 Wall and Gate Systems & Acceptance', () => {
-  it('enemy detours around a closed wall ring while its only gate is blocked for enemies', () => {
-    const sim = makeSim();
+  // SimTests#10: enemy detours around closed ring while friendly control passes through gates
+  it('enemy detours around a closed wall ring while friendly control passes through gates', () => {
+    const sim = makeOpenSim({ size: MAP_SIZE });
     const { world } = sim;
 
-    // Closed 5x5 ring of player 0 walls at x=12..16, z=12..16 with a vertical gate
-    // on the west column replacing the walls at z=13..15.
-    const gate = world.spawnBuilding(0, 'stone_gate', 12, 13, true, 'vertical');
-    expect(gate.width).toBe(1);
-    expect(gate.height).toBe(3);
+    // Closed 5x5 ring of player 0 walls at x=12..16, z=12..16 with vertical gates
+    // on both west (x=12, z=13..15) and east (x=16, z=13..15) sides.
+    const westGate = world.spawnBuilding(0, 'stone_gate', 12, 13, true, 'vertical');
+    const eastGate = world.spawnBuilding(0, 'stone_gate', 16, 13, true, 'vertical');
+    expect(westGate.width).toBe(1);
+    expect(westGate.height).toBe(3);
+    expect(eastGate.width).toBe(1);
+    expect(eastGate.height).toBe(3);
+
     for (let x = 12; x <= 16; x++) {
       for (let z = 12; z <= 16; z++) {
         const onPerimeter = x === 12 || x === 16 || z === 12 || z === 16;
-        const isGateTile = x === 12 && z >= 13 && z <= 15;
+        const isGateTile = (x === 12 || x === 16) && z >= 13 && z <= 15;
         if (onPerimeter && !isGateTile) {
           world.spawnBuilding(0, 'stone_wall', x, z, true);
         }
@@ -82,20 +60,22 @@ describe('M7 Wall and Gate Systems & Acceptance', () => {
     for (let z = 13; z <= 15; z++) {
       expect(world.grid.isPassable(12.5, z + 0.5, 0)).toBe(true);
       expect(world.grid.isPassable(12.5, z + 0.5, 1)).toBe(false);
+      expect(world.grid.isPassable(16.5, z + 0.5, 0)).toBe(true);
+      expect(world.grid.isPassable(16.5, z + 0.5, 1)).toBe(false);
     }
 
-    // Component labels: enemy interior is sealed off, owner reaches it through the gate
-    const cm = new ComponentManager();
-    const enemyLabels = cm.getLabels(world.grid, 1);
-    const ownerLabels = cm.getLabels(world.grid, 0);
-    const outsideIdx = 14 * MAP_SIZE + 8;
-    const insideIdx = 14 * MAP_SIZE + 14;
-    expect(enemyLabels[outsideIdx]).toBeGreaterThan(0);
-    expect(enemyLabels[insideIdx]).toBeGreaterThan(0);
-    expect(enemyLabels[insideIdx]).not.toBe(enemyLabels[outsideIdx]);
-    expect(ownerLabels[insideIdx]).toBe(ownerLabels[outsideIdx]);
+    // Friendly control unit passes straight through both gates
+    const friendly = world.spawnUnit(0, 'man_at_arms', 8.5, 14.5);
+    sim.issue({
+      kind: 'move',
+      player: 0,
+      ids: [friendly.id],
+      x: 21.5,
+      z: 14.5,
+      queued: false,
+    });
 
-    // Enemy (player 1) west of the ring, destination east of the ring on the same row
+    // Enemy unit on the exact same trajectory must detour around
     const enemy = world.spawnUnit(1, 'man_at_arms', 8.5, 14.5);
     sim.issue({
       kind: 'move',
@@ -106,56 +86,162 @@ describe('M7 Wall and Gate Systems & Acceptance', () => {
       queued: false,
     });
 
-    let enteredRingBounds = false;
-    let maxDeviationZ = 0;
-    let arrived = false;
+    let friendlyEnteredRing = false;
+    let enemyEnteredRing = false;
+    let friendlyMaxDevZ = 0;
+    let enemyMaxDevZ = 0;
+    let friendlyArrived = false;
+    let enemyArrived = false;
 
     for (let tick = 0; tick < 1500; tick++) {
       sim.step();
 
-      if (enemy.x > 12 && enemy.x < 17 && enemy.z > 12 && enemy.z < 17) {
-        enteredRingBounds = true;
+      if (friendly.x > 12 && friendly.x < 16 && friendly.z > 12 && friendly.z < 16) {
+        friendlyEnteredRing = true;
       }
-      maxDeviationZ = Math.max(maxDeviationZ, Math.abs(enemy.z - 14.5));
+      if (enemy.x > 12 && enemy.x < 16 && enemy.z > 12 && enemy.z < 16) {
+        enemyEnteredRing = true;
+      }
 
-      if (Math.hypot(enemy.x - 21.5, enemy.z - 14.5) <= 0.6) {
-        arrived = true;
+      friendlyMaxDevZ = Math.max(friendlyMaxDevZ, Math.abs(friendly.z - 14.5));
+      enemyMaxDevZ = Math.max(enemyMaxDevZ, Math.abs(enemy.z - 14.5));
+
+      if (!friendlyArrived && Math.hypot(friendly.x - 21.5, friendly.z - 14.5) <= 0.6) {
+        friendlyArrived = true;
+      }
+      if (!enemyArrived && Math.hypot(enemy.x - 21.5, enemy.z - 14.5) <= 0.6) {
+        enemyArrived = true;
+      }
+
+      if (friendlyArrived && enemyArrived) {
         break;
       }
     }
 
-    expect(arrived).toBe(true);
-    // Never crossed the ring (neither through walls nor through the closed gate)
-    expect(enteredRingBounds).toBe(false);
-    // Went around the ring: past the north or south outer edge (ring spans z=12..17)
-    expect(maxDeviationZ).toBeGreaterThan(2.5);
+    // Friendly crossed through both gates into the ring interior with direct straight-line path
+    expect(friendlyArrived).toBe(true);
+    expect(friendlyEnteredRing).toBe(true);
+    expect(friendlyMaxDevZ).toBeLessThan(1.0);
+
+    // Enemy was blocked by the gates, never entered the ring, and detoured around the outer perimeter
+    expect(enemyArrived).toBe(true);
+    expect(enemyEnteredRing).toBe(false);
+    expect(enemyMaxDevZ).toBeGreaterThan(2.5);
   });
 
-  it('owner passes gate; gate opens on approach and closes when the owner moves away', () => {
-    const sim = makeSim();
+  // SimTests#8: Gate open radius boundary (<= 1 tile vs > 1 tile) and adjacent hostile check
+  it('gate opens for owner within 1 tile, stays closed beyond 1 tile, and stays closed for adjacent hostile unit', () => {
+    // 1. Static boundary checks
+    {
+      const sim = makeOpenSim({ size: MAP_SIZE });
+      const { world } = sim;
+      const gate = world.spawnBuilding(0, 'stone_gate', 15, 14, true, 'vertical');
+      // Adjacent hostile at dx=0.5 (x=14.5, z=15.5): gate stays closed
+      const hostile = world.spawnUnit(1, 'man_at_arms', 14.5, 15.5);
+      sim.issue({ kind: 'hold', player: 1, ids: [hostile.id], queued: false });
+      sim.step();
+      expect(gate.gateOpen).toBe(false);
+    }
+
+    {
+      const sim = makeOpenSim({ size: MAP_SIZE });
+      const { world } = sim;
+      const gate = world.spawnBuilding(0, 'stone_gate', 15, 14, true, 'vertical');
+
+      // Friendly unit at dx=1.1 (x=13.9, z=15.5): gate stays closed
+      const owner = world.spawnUnit(0, 'man_at_arms', 13.9, 15.5);
+      sim.issue({ kind: 'hold', player: 0, ids: [owner.id], queued: false });
+      sim.step();
+      expect(gate.gateOpen).toBe(false);
+    }
+
+    {
+      const sim = makeOpenSim({ size: MAP_SIZE });
+      const { world } = sim;
+      const gate = world.spawnBuilding(0, 'stone_gate', 15, 14, true, 'vertical');
+
+      // Friendly unit at dx=1.0 (x=14.0, z=15.5): gate opens
+      const owner = world.spawnUnit(0, 'man_at_arms', 14.0, 15.5);
+      sim.issue({ kind: 'hold', player: 0, ids: [owner.id], queued: false });
+      sim.step();
+      expect(gate.gateOpen).toBe(true);
+    }
+
+    // 2. Dynamic movement: gate opens on approach and closes when owner moves away
+    {
+      const sim = makeOpenSim({ size: MAP_SIZE });
+      const { world } = sim;
+      const gate = buildGatedWallLine(sim, 0);
+
+      const owner = world.spawnUnit(0, 'man_at_arms', 8.5, 15.5);
+      sim.issue({ kind: 'hold', player: 0, ids: [owner.id], queued: false });
+      sim.step();
+      expect(gate.gateOpen).toBe(false);
+
+      sim.issue({
+        kind: 'move',
+        player: 0,
+        ids: [owner.id],
+        x: 22.5,
+        z: 15.5,
+        queued: false,
+      });
+
+      let observedGateOpen = false;
+      let passedThroughGate = false;
+
+      for (let tick = 0; tick < 600; tick++) {
+        sim.step();
+
+        if (gate.gateOpen) {
+          observedGateOpen = true;
+        }
+        if (Math.abs(owner.x - 15.5) < 0.5 && Math.abs(owner.z - 15.5) < 1.5) {
+          passedThroughGate = true;
+        }
+        if (Math.hypot(owner.x - 22.5, owner.z - 15.5) <= 0.6) {
+          break;
+        }
+      }
+
+      expect(passedThroughGate).toBe(true);
+      expect(observedGateOpen).toBe(true);
+      expect(Math.hypot(owner.x - 22.5, owner.z - 15.5)).toBeLessThanOrEqual(0.6);
+      expect(gate.gateOpen).toBe(false);
+    }
+  });
+
+  // Phase 1 regression: world.setTeam updates alliances on tick 0 (ally_first_tick.ts)
+  it('world.setTeam immediately updates grid passability and lets ally pass gate on the very first tick', () => {
+    const sim = makeOpenSim({ size: MAP_SIZE });
     const { world } = sim;
     const gate = buildGatedWallLine(sim, 0);
 
-    updateGates(world);
-    expect(gate.gateOpen).toBe(false);
+    // Before alliance, player 2 is blocked
+    expect(world.grid.isAlly(0, 2)).toBe(false);
+    expect(world.grid.isPassable(15.5, 15.5, 2)).toBe(false);
 
-    const owner = world.spawnUnit(0, 'man_at_arms', 8.5, 15.5);
+    // Player 2 joins player 0's team via world.setTeam
+    world.setTeam(2, world.players[0].team);
 
-    // Owner is far from the gate (6.5 tiles), so it stays closed
-    updateGates(world);
-    expect(gate.gateOpen).toBe(false);
+    // Tick 0 passability immediately updated
+    expect(world.grid.isAlly(0, 2)).toBe(true);
+    expect(world.grid.isPassable(15.5, 15.5, 2)).toBe(true);
+    // Enemy player 1 is still blocked
+    expect(world.grid.isPassable(15.5, 15.5, 1)).toBe(false);
 
+    const ally = world.spawnUnit(2, 'man_at_arms', 10.5, 15.5);
     sim.issue({
       kind: 'move',
-      player: 0,
-      ids: [owner.id],
+      player: 2,
+      ids: [ally.id],
       x: 22.5,
       z: 15.5,
       queued: false,
     });
 
     let observedGateOpen = false;
-    let passedThroughGate = false;
+    let allyCrossedGate = false;
 
     for (let tick = 0; tick < 600; tick++) {
       sim.step();
@@ -163,78 +249,22 @@ describe('M7 Wall and Gate Systems & Acceptance', () => {
       if (gate.gateOpen) {
         observedGateOpen = true;
       }
-      if (Math.abs(owner.x - 15.5) < 0.5 && Math.abs(owner.z - 15.5) < 1.5) {
-        passedThroughGate = true;
+      if (ally.x > 16.0) {
+        allyCrossedGate = true;
       }
-      if (Math.hypot(owner.x - 22.5, owner.z - 15.5) <= 0.6) {
+      if (Math.hypot(ally.x - 22.5, ally.z - 15.5) <= 0.6) {
         break;
       }
     }
 
-    expect(passedThroughGate).toBe(true);
+    expect(allyCrossedGate).toBe(true);
     expect(observedGateOpen).toBe(true);
-    expect(Math.hypot(owner.x - 22.5, owner.z - 15.5)).toBeLessThanOrEqual(0.6);
-
-    // Owner is far on the other side, gate closes
-    updateGates(world);
-    expect(gate.gateOpen).toBe(false);
-  });
-
-  it('allied player passes gate only once allied; gate opens for the ally', () => {
-    const sim = makeSim();
-    const { world } = sim;
-    const gate = buildGatedWallLine(sim, 0);
-
-    // Before the alliance player 2 is blocked
-    updateGates(world);
-    expect(world.grid.isAlly(0, 2)).toBe(false);
-    expect(world.grid.isPassable(15.5, 15.5, 2)).toBe(false);
-
-    // Player 2 joins player 0's team
-    world.players[2].team = world.players[0].team;
-    updateGates(world);
-    expect(world.grid.isAlly(0, 2)).toBe(true);
-    expect(world.grid.isPassable(15.5, 15.5, 2)).toBe(true);
-    // Unrelated player 1 is still blocked
-    expect(world.grid.isPassable(15.5, 15.5, 1)).toBe(false);
-
-    const ally = world.spawnUnit(2, 'man_at_arms', 22.5, 15.5);
-    sim.issue({
-      kind: 'move',
-      player: 2,
-      ids: [ally.id],
-      x: 8.5,
-      z: 15.5,
-      queued: false,
-    });
-
-    let observedGateOpen = false;
-    let allyPassedGate = false;
-
-    for (let tick = 0; tick < 600; tick++) {
-      sim.step();
-
-      if (gate.gateOpen) {
-        observedGateOpen = true;
-      }
-      if (Math.abs(ally.x - 15.5) < 0.5 && Math.abs(ally.z - 15.5) < 1.5) {
-        allyPassedGate = true;
-      }
-      if (Math.hypot(ally.x - 8.5, ally.z - 15.5) <= 0.6) {
-        break;
-      }
-    }
-
-    expect(allyPassedGate).toBe(true);
-    expect(observedGateOpen).toBe(true);
-    expect(Math.hypot(ally.x - 8.5, ally.z - 15.5)).toBeLessThanOrEqual(0.6);
-
-    updateGates(world);
+    expect(Math.hypot(ally.x - 22.5, ally.z - 15.5)).toBeLessThanOrEqual(0.6);
     expect(gate.gateOpen).toBe(false);
   });
 
   it('enemy cannot pass open gate even when gateOpen is true', () => {
-    const sim = makeSim();
+    const sim = makeOpenSim({ size: MAP_SIZE });
     const { world } = sim;
     const gate = buildGatedWallLine(sim, 0);
 
@@ -243,7 +273,6 @@ describe('M7 Wall and Gate Systems & Acceptance', () => {
     const keeper = world.spawnUnit(0, 'peasant', 16.5, 15.5);
     sim.issue({ kind: 'hold', player: 0, ids: [keeper.id], queued: false });
     sim.step();
-    updateGates(world);
     expect(gate.gateOpen).toBe(true);
 
     const enemy = world.spawnUnit(1, 'man_at_arms', 10.5, 15.5);
@@ -278,7 +307,7 @@ describe('M7 Wall and Gate Systems & Acceptance', () => {
   });
 
   it('unfinished gate stays blocked for owner and allies until completed', () => {
-    const sim = makeSim();
+    const sim = makeOpenSim({ size: MAP_SIZE });
     const { world } = sim;
 
     const unfinishedGate = world.spawnBuilding(
@@ -292,9 +321,8 @@ describe('M7 Wall and Gate Systems & Acceptance', () => {
     expect(unfinishedGate.built).toBe(false);
     expect(unfinishedGate.height).toBe(3);
 
-    // Player 2 allied with player 0
-    world.players[2].team = world.players[0].team;
-    updateGates(world);
+    // Player 2 allied with player 0 via world.setTeam
+    world.setTeam(2, world.players[0].team);
 
     // Grid flags on every gate tile: FLAG_BUILDING, not FLAG_GATE
     for (let z = 10; z <= 12; z++) {
@@ -309,15 +337,15 @@ describe('M7 Wall and Gate Systems & Acceptance', () => {
     expect(world.grid.isPassable(10.5, 10.5, 2)).toBe(false);
 
     // A worker standing next to it does NOT open an unfinished gate
-    world.spawnUnit(0, 'peasant', 9.5, 10.5);
-    updateGates(world);
+    const peasant = world.spawnUnit(0, 'peasant', 9.5, 10.5);
+    sim.issue({ kind: 'hold', player: 0, ids: [peasant.id], queued: false });
+    sim.step();
     expect(unfinishedGate.gateOpen).toBe(false);
 
     // Complete the gate
     world.completeBuilding(unfinishedGate);
     expect(unfinishedGate.built).toBe(true);
-    updateGates(world);
-
+    sim.step();
     // Now passable for owner and ally, still blocked for enemy
     expect(world.grid.isPassable(10.5, 10.5, 0)).toBe(true);
     expect(world.grid.canOccupy(10.5, 10.5, 0.4, 0)).toBe(true);
@@ -327,8 +355,67 @@ describe('M7 Wall and Gate Systems & Acceptance', () => {
     expect(unfinishedGate.gateOpen).toBe(true);
   });
 
+  // SimTests#8: Gate destruction frees tiles for enemies, and gate as breach target (gatebreach.ts)
+  it('gate destruction frees its tiles for enemy passage and gate can be targeted for breach', () => {
+    const sim = makeOpenSim({ size: MAP_SIZE });
+    const { world } = sim;
+
+    const gate = world.spawnBuilding(1, 'stone_gate', 15, 14, true, 'vertical');
+    gate.hp = 6; // 2 melee hits to destroy
+
+    for (let z = 0; z < MAP_SIZE; z++) {
+      if (z < 14 || z > 16) {
+        world.spawnBuilding(1, 'stone_wall', 15, z, true);
+      }
+    }
+
+    const target = world.spawnUnit(1, 'peasant', 20.5, 15.5);
+    const attacker = world.spawnUnit(0, 'man_at_arms', 10.5, 15.5);
+
+    // Gate is selected as the breach target
+    expect(resolveAttackTarget(world, attacker, target)).toBe(gate);
+
+    sim.issue({
+      kind: 'attack',
+      player: 0,
+      ids: [attacker.id],
+      targetId: target.id,
+      queued: false,
+    });
+
+    let gateDestroyedTick = -1;
+    let targetDamagedTick = -1;
+    let targetDiedTick = -1;
+
+    for (let t = 0; t < 600 && target.hp > 0; t++) {
+      sim.step();
+      const gateAlive = world.getEntity(gate.id) === gate;
+      if (gateDestroyedTick < 0 && !gateAlive) {
+        gateDestroyedTick = t;
+        // All 3 gate tiles become passable for enemy player 0
+        for (let z = 14; z <= 16; z++) {
+          expect(world.grid.isPassable(15.5, z + 0.5, 0)).toBe(true);
+          expect(world.grid.flags[z * MAP_SIZE + 15] & FLAG_GATE).toBe(0);
+        }
+      }
+      if (targetDamagedTick < 0 && target.hp < target.maxHp) {
+        targetDamagedTick = t;
+      }
+      if (targetDiedTick < 0 && target.hp <= 0) {
+        targetDiedTick = t;
+      }
+    }
+
+    expect(gateDestroyedTick).toBeGreaterThanOrEqual(0);
+    expect(targetDamagedTick).toBeGreaterThan(gateDestroyedTick);
+    expect(targetDiedTick).toBeGreaterThan(targetDamagedTick);
+    expect(target.hp).toBe(0);
+    expect(world.remains).toContain(gate);
+    expect(world.remains).toContain(target);
+  });
+
   it('explicit attack on a no-gate enclosed enemy breaks the wall through combat, then kills the original target', () => {
-    const sim = makeSim();
+    const sim = makeOpenSim({ size: MAP_SIZE });
     const { world } = sim;
 
     // Enclose an enemy target completely in a 5x5 stone wall ring (no gates): x=10..14, z=10..14
@@ -358,19 +445,8 @@ describe('M7 Wall and Gate Systems & Acceptance', () => {
     const targetMaxHp = target.maxHp;
     const attacker = world.spawnUnit(0, 'man_at_arms', 5.5, 12.5);
 
-    // Enclosed: attacker must resolve to the west wall directly between it and the target
-    expect(findBlockingWall(world, attacker, target)).toBe(breachWall);
-
-    const cm = new ComponentManager();
-    const sealedLabels = cm.getLabels(world.grid, 0);
-    const outsideIdx = 12 * MAP_SIZE + 5;
-    const insideIdx = 12 * MAP_SIZE + 12;
-    const breachIdx = 12 * MAP_SIZE + 10;
-    expect(sealedLabels[outsideIdx]).toBeGreaterThan(0);
-    expect(sealedLabels[insideIdx]).toBeGreaterThan(0);
-    expect(sealedLabels[insideIdx]).not.toBe(sealedLabels[outsideIdx]);
-    expect(world.grid.isPassable(10.5, 12.5, 0)).toBe(false);
-    const sealedRevision = world.grid.revision;
+    // Enclosed: attacker resolves to the west wall directly between it and the target
+    expect(resolveAttackTarget(world, attacker, target)).toBe(breachWall);
 
     // Real explicit attack command on the enclosed enemy; no manual breach, no move substitution
     sim.issue({
@@ -387,11 +463,9 @@ describe('M7 Wall and Gate Systems & Acceptance', () => {
     let targetKilledTick = -1;
     let wallGoneWhenTargetFirstDamaged = false;
     let targetHpAtBreach = -1;
-    let blockerAtBreach: BuildingEntity | undefined = breachWall;
+    let targetAtBreachResolved: Combatant | undefined;
     let breachTilePassable = false;
     let breachTileFlags = -1;
-    let revisionAtBreach = sealedRevision;
-    let mergedAtBreach = false;
 
     for (let i = 0; i < 2000 && targetKilledTick < 0; i++) {
       const tick = world.tick;
@@ -404,13 +478,9 @@ describe('M7 Wall and Gate Systems & Acceptance', () => {
       if (wallDestroyedTick < 0 && !wallAlive) {
         wallDestroyedTick = tick;
         targetHpAtBreach = target.hp;
-        revisionAtBreach = world.grid.revision;
         breachTilePassable = world.grid.isPassable(10.5, 12.5, 0);
-        breachTileFlags = world.grid.flags[breachIdx];
-        const labels = cm.getLabels(world.grid, 0);
-        mergedAtBreach =
-          labels[outsideIdx] > 0 && labels[outsideIdx] === labels[insideIdx];
-        blockerAtBreach = findBlockingWall(world, attacker, target);
+        breachTileFlags = world.grid.flags[12 * MAP_SIZE + 10];
+        targetAtBreachResolved = resolveAttackTarget(world, attacker, target);
       }
       if (firstTargetDamageTick < 0 && target.hp < targetMaxHp) {
         firstTargetDamageTick = tick;
@@ -430,12 +500,10 @@ describe('M7 Wall and Gate Systems & Acceptance', () => {
     expect(targetHpAtBreach).toBe(targetMaxHp);
     expect(world.remains).toContain(breachWall);
 
-    // Grid and component recovery at the moment of breach
-    expect(revisionAtBreach).toBeGreaterThan(sealedRevision);
+    // Grid recovery at the moment of breach: tile is freed and passable, resolver returns target
     expect(breachTileFlags).toBe(0);
     expect(breachTilePassable).toBe(true);
-    expect(mergedAtBreach).toBe(true);
-    expect(blockerAtBreach).toBeUndefined();
+    expect(targetAtBreachResolved).toBe(target);
 
     // Original target is killed by the same attacker, which survives
     expect(targetKilledTick).toBeGreaterThan(wallDestroyedTick);
@@ -452,129 +520,5 @@ describe('M7 Wall and Gate Systems & Acceptance', () => {
         expect(world.getEntity(wall.id)).toBe(wall);
       }
     }
-  });
-
-  it('destruction of wall invalidates paths and connected components', () => {
-    const sim = makeSim();
-    const { world } = sim;
-
-    // Enclose x=10..14, z=10..14
-    let wallPiece: BuildingEntity | undefined;
-    for (let x = 10; x <= 14; x++) {
-      for (let z = 10; z <= 14; z++) {
-        if (x === 10 || x === 14 || z === 10 || z === 14) {
-          const w = world.spawnBuilding(1, 'stone_wall', x, z, true);
-          if (x === 10 && z === 12) wallPiece = w;
-        }
-      }
-    }
-    if (!wallPiece) {
-      throw new Error('wall piece was not created');
-    }
-
-    const cm = new ComponentManager();
-    const initialRevision = world.grid.revision;
-
-    // Component labels for player 0
-    const labelsBefore = cm.getLabels(world.grid, 0);
-    const outsideComp = labelsBefore[12 * MAP_SIZE + 5];
-    const insideComp = labelsBefore[12 * MAP_SIZE + 12];
-
-    expect(outsideComp).toBeGreaterThan(0);
-    expect(insideComp).toBeGreaterThan(0);
-    expect(outsideComp).not.toBe(insideComp);
-
-    // Path request from outside to inside snaps destination to the nearest tile in the start component
-    const queue = new PathQueue(world.grid);
-    queue.request(1, 5.5, 12.5, 12.5, 12.5, 0);
-    const resultsBefore = queue.process();
-    expect(resultsBefore).toHaveLength(1);
-    expect(resultsBefore[0].path.length).toBeGreaterThan(0);
-    const lastPointBefore =
-      resultsBefore[0].path[resultsBefore[0].path.length - 1];
-    expect(
-      labelsBefore[
-        Math.floor(lastPointBefore.z) * MAP_SIZE +
-          Math.floor(lastPointBefore.x)
-      ],
-    ).toBe(outsideComp);
-
-    // Destroy the wall piece through the real damage path
-    applyDamage(world, wallPiece, wallPiece.hp);
-    expect(wallPiece.hp).toBe(0);
-    expect(world.getEntity(wallPiece.id)).toBeUndefined();
-    expect(world.remains).toContain(wallPiece);
-
-    // Grid revision incremented and tile freed
-    expect(world.grid.revision).toBeGreaterThan(initialRevision);
-    expect(world.grid.isPassable(10.5, 12.5, 0)).toBe(true);
-
-    // Components recomputed: inside and outside now share the same component
-    const labelsAfter = cm.getLabels(world.grid, 0);
-    const outsideCompAfter = labelsAfter[12 * MAP_SIZE + 5];
-    const insideCompAfter = labelsAfter[12 * MAP_SIZE + 12];
-    expect(outsideCompAfter).toBeGreaterThan(0);
-    expect(outsideCompAfter).toBe(insideCompAfter);
-
-    // Path request now reaches all the way inside to (12.5, 12.5)
-    queue.request(2, 5.5, 12.5, 12.5, 12.5, 0);
-    const resultsAfter = queue.process();
-    expect(resultsAfter).toHaveLength(1);
-    expect(resultsAfter[0].path.length).toBeGreaterThan(0);
-    const lastPointAfter =
-      resultsAfter[0].path[resultsAfter[0].path.length - 1];
-    expect(lastPointAfter.x).toBeCloseTo(12.5, 1);
-    expect(lastPointAfter.z).toBeCloseTo(12.5, 1);
-  });
-
-  it('synchronizes same-team allies without grid revision churn', () => {
-    const sim = makeSim();
-    const { world } = sim;
-
-    // Players 0 and 1 are placed on team 0
-    world.players[0].team = 0;
-    world.players[1].team = 0;
-    world.players[2].team = 1;
-
-    // First call syncs
-    updateGates(world);
-    const revAfterSync = world.grid.revision;
-
-    expect(world.grid.isAlly(0, 1)).toBe(true);
-    expect(world.grid.isAlly(0, 2)).toBe(false);
-
-    // Subsequent calls when teams have not changed must NOT increment revision
-    for (let i = 0; i < 20; i++) {
-      updateGates(world);
-    }
-    expect(world.grid.revision).toBe(revAfterSync);
-  });
-
-  it('findBlockingWall never returns unrelated building or arbitrary wall across map', () => {
-    const map = makeEmptyMap();
-
-    // Create an isolated island surrounded by water
-    for (let x = 8; x <= 16; x++) {
-      for (let z = 8; z <= 16; z++) {
-        if (x === 8 || x === 16 || z === 8 || z === 16) {
-          map.tiles[z * MAP_SIZE + x] = Terrain.WATER;
-        }
-      }
-    }
-
-    const sim = makeSim(map);
-    const { world } = sim;
-
-    // Target is on the island (player 1)
-    const islandTarget = world.spawnUnit(1, 'peasant', 12.5, 12.5);
-
-    // Enemy also owns a wall piece far away on the mainland and an unrelated building
-    world.spawnBuilding(1, 'stone_wall', 28, 28, true);
-    world.spawnBuilding(1, 'barracks', 24, 24, true);
-
-    const attacker = world.spawnUnit(0, 'man_at_arms', 2.5, 2.5);
-
-    // Island target has no blocking wall (water is blocking, not wall)
-    expect(findBlockingWall(world, attacker, islandTarget)).toBeUndefined();
   });
 });

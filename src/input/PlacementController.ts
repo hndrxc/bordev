@@ -85,10 +85,7 @@ export function inferGateOrientation(
 
   for (const ent of world.entities.values()) {
     if (!ent || ent.kind !== 'building') continue;
-    const isWall =
-      ent.type === 'stone_wall' ||
-      ent.type === 'palisade' ||
-      getBuildingData(ent.type)?.isWall === true;
+    const isWall = getBuildingData(ent.type)?.isWall === true;
     if (!isWall) continue;
 
     // Check horizontal run: nearby in same row
@@ -114,11 +111,8 @@ export function getBuildingDimensions(
   if (!bData) {
     return { width: 1, height: 1, isWall: false, isGate: false };
   }
-  const isWall =
-    bData.isWall === true ||
-    buildingType === 'stone_wall' ||
-    buildingType === 'palisade';
-  const isGate = bData.isGate === true || buildingType.includes('gate');
+  const isWall = bData.isWall === true;
+  const isGate = bData.isGate === true;
 
   let width = bData.width;
   let height = bData.height;
