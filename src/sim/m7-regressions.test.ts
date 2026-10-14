@@ -25,6 +25,38 @@ describe('M7 combat regressions', () => {
     expect(isInAttackRange(spear, bait)).toBe(true);
   });
 
+  it('crowded spearmen do not shove their target or lose swings before the hit frame', () => {
+    const sim = makeOpenSim({ size: 40, seed: 7 });
+    const { world } = sim;
+    const bait = world.spawnUnit(1, 'ox_cart', 20, 20);
+    bait.hp = 100000;
+    bait.maxHp = 100000;
+    const spears = [];
+    for (let i = 0; i < 8; i++) {
+      const col = Math.floor(i / 4);
+      const row = i % 4;
+      spears.push(world.spawnUnit(0, 'spearman', 17 - col * 0.5, 18.5 + row * 0.5));
+    }
+    sim.issue({
+      kind: 'attack',
+      player: 0,
+      ids: spears.map((s) => s.id),
+      targetId: bait.id,
+      queued: false,
+    });
+
+    for (let t = 0; t < 400; t++) sim.step();
+
+    // The stationary target is never displaced by the crowd around it.
+    expect(bait.x).toBe(20);
+    expect(bait.z).toBe(20);
+    // Every started swing reaches its hit frame in range: with a 40-tick
+    // cooldown, 8 spearmen land near-maximum hits over 400 ticks (72
+    // observed; the pre-fix crowd landed 31 and shoved the cart away).
+    const hits = (100000 - bait.hp) / CROWN_UNITS.spearman.attack;
+    expect(hits).toBeGreaterThanOrEqual(60);
+  });
+
   it('idle unit retaliates against a tower that shoots it from beyond its own sight', () => {
     const sim = makeOpenSim({ size: 40, seed: 7 });
     const { world } = sim;

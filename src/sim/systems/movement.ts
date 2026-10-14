@@ -521,10 +521,21 @@ export function updateMovement(world: World): void {
           pushZ = Math.sin(angle) * overlap;
         }
 
+        // A unit mid-swing is rooted, and an attacker/target pair is not
+        // displaced either: shoving the attacker or its target before the
+        // hit frame breaks melee range and reads as a hit that never
+        // registers. Overlap between such a pair resolves via separation
+        // steering once the chase ends, not by moving the target.
+        const u1Swinging = u1.combat?.attackStartedTick !== undefined;
+        const u2Swinging = u2.combat?.attackStartedTick !== undefined;
+        const u1AttackingU2 = u1.combat?.targetRef === u2;
+        const u2AttackingU1 = u2.combat?.targetRef === u1;
         const u1Hold = u1.order?.kind === 'hold';
         const u2Hold = u2.order?.kind === 'hold';
 
-        if (u1Hold && u2Hold) {
+        if (u1Swinging || u2Swinging || u1AttackingU2 || u2AttackingU1) {
+          // Neither unit moves while an attack between them is live
+        } else if (u1Hold && u2Hold) {
           // Neither unit moves on hold
         } else if (u1Hold) {
           // u1 stays fixed, u2 takes full displacement
