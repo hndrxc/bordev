@@ -161,7 +161,12 @@ export class OverlayGeometryBuilder {
 
       for (let i = 0; i < count; i++) {
         const ent = entities[i];
-        if (ent.remains || ent.deathTick !== undefined) continue;
+        if (
+          ent.remains ||
+          ent.deathTick !== undefined ||
+          ('ghost' in ent && Boolean(ent.ghost))
+        )
+          continue;
         if (this.selectionStamps[ent.id] !== this.selectionStamp) continue;
 
         const kind = ent.kind;
@@ -270,7 +275,12 @@ export class OverlayGeometryBuilder {
 
       for (let i = 0; i < entCount; i++) {
         const ent = entities[i];
-        if (ent.remains || ent.deathTick !== undefined) continue;
+        if (
+          ent.remains ||
+          ent.deathTick !== undefined ||
+          ('ghost' in ent && Boolean(ent.ghost))
+        )
+          continue;
         if (this.selectionStamps[ent.id] !== this.selectionStamp) continue;
         if (ent.player !== 0) continue;
 

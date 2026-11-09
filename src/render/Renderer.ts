@@ -19,6 +19,7 @@ import { SpriteBatch, type RenderSprite } from './SpriteBatch';
 import { Terrain } from './Terrain';
 import { UnitShadows } from './UnitShadows';
 import { Projectiles } from './Projectiles';
+import { FogTexture } from './FogTexture';
 import {
   ATTACK_ANIM_FPS,
   MELEE_TOTAL_FRAMES,
@@ -195,12 +196,7 @@ interface UnitAnimationData {
   fps: number;
 }
 
-type BuildingAnimKey =
-  | 'idle'
-  | 'damaged'
-  | 'rubble'
-  | 'open'
-  | 'damaged_open';
+type BuildingAnimKey = 'idle' | 'damaged' | 'rubble' | 'open' | 'damaged_open';
 
 interface BuildingTable {
   readonly idle: readonly (StaticEntityDescriptor | undefined)[];
@@ -282,10 +278,12 @@ export class Renderer {
 
   public camera: IsoCamera | null = null;
   public terrain: Terrain | null = null;
+  public fogTexture: FogTexture | null = null;
   public overlays: Overlays | null = null;
   public atlasCache: AtlasCache | null = null;
   public unitShadows: UnitShadows | null = null;
   public projectiles: Projectiles | null = null;
+  private mapSize = 128;
   public debugProbes: DebugSceneProbes | null = null;
 
   private readonly batches = new Map<string, SpriteBatch>();
@@ -312,6 +310,8 @@ export class Renderer {
     tint: TINT_NEUTRAL,
     alpha: 1.0,
     radius: 0.35,
+    shadowAlpha: 1.0,
+    fogged: false,
   };
 
   // Interaction references for overlays
@@ -486,8 +486,10 @@ export class Renderer {
     this.overlays = new Overlays(this.scene, map.size, keepFootprints);
 
     // 3. Terrain: procedural splats and animated water shader
+    this.mapSize = map.size;
     this.terrain = new Terrain(this.scene, map);
-
+    this.fogTexture = new FogTexture(this.scene, map.size);
+    this.terrain.setFogTexture(this.fogTexture.texture);
     // 4. AtlasCache and UnitShadows and Projectiles
     this.atlasCache = new AtlasCache(this.scene);
     this.unitShadows = new UnitShadows(this.scene);
@@ -588,8 +590,12 @@ export class Renderer {
       const damagedRow: (StaticEntityDescriptor | undefined)[] = new Array(8);
       const rubbleRow: (StaticEntityDescriptor | undefined)[] = new Array(8);
       const openRow: (StaticEntityDescriptor | undefined)[] = new Array(8);
-      const damagedOpenRow: (StaticEntityDescriptor | undefined)[] = new Array(8);
-      const constructRow: (StaticEntityDescriptor[] | undefined)[] = new Array(8);
+      const damagedOpenRow: (StaticEntityDescriptor | undefined)[] = new Array(
+        8,
+      );
+      const constructRow: (StaticEntityDescriptor[] | undefined)[] = new Array(
+        8,
+      );
 
       const table: BuildingTable = {
         idle: idleRow,
@@ -618,7 +624,9 @@ export class Renderer {
           if (animName === 'damaged_open') {
             frame =
               loaded.atlas.frames[`damaged_open/${dir}/0`] ??
-              (dir !== 0 ? loaded.atlas.frames['damaged_open/0/0'] : undefined) ??
+              (dir !== 0
+                ? loaded.atlas.frames['damaged_open/0/0']
+                : undefined) ??
               // Graceful fallback to open if damaged_open is absent in atlas
               loaded.atlas.frames[`open/${dir}/0`] ??
               (dir !== 0 ? loaded.atlas.frames['open/0/0'] : undefined);
@@ -779,6 +787,14 @@ export class Renderer {
       this.terrain.update(t);
     }
 
+    if (snapshot && 'fog' in snapshot && snapshot.fog && this.fogTexture) {
+      const fogRev =
+        'fogRevision' in snapshot && typeof snapshot.fogRevision === 'number'
+          ? snapshot.fogRevision
+          : 0;
+      this.fogTexture.update(snapshot.fog as Uint8Array, fogRev);
+    }
+
     this.rectStamp++;
     if (this.rectStamp === 0x7fffffff) {
       this.rectStamp = 1;
@@ -800,7 +816,13 @@ export class Renderer {
 
       const entities = snapshot.entities;
       const entCount = entities.length;
-
+      const snapshotFog =
+        'fog' in snapshot && snapshot.fog instanceof Uint8Array
+          ? snapshot.fog
+          : undefined;
+      const mapSize = snapshotFog
+        ? Math.round(Math.sqrt(snapshotFog.length))
+        : this.mapSize;
       // Entities are submitted in interleaved order (correctness depends on Z-buffer depth)
       for (let i = 0; i < entCount; i++) {
         const ent = entities[i];
@@ -881,7 +903,7 @@ export class Renderer {
               let unitAlpha = 1.0;
 
               if (isDead) {
-                const deathTick = ent.deathTick ?? (snapshot.tick - 1);
+                const deathTick = ent.deathTick ?? snapshot.tick - 1;
                 const elapsedTicks = Math.max(
                   0,
                   snapshot.tick - 1 - deathTick + snapshot.alpha,
@@ -947,7 +969,7 @@ export class Renderer {
                 this.scratchSprite.alpha = unitAlpha;
                 this.scratchSprite.radius = radius;
                 this.scratchSprite.shadowAlpha = isDead ? 0.0 : 1.0;
-
+                this.scratchSprite.fogged = false;
                 entry.batch.add(entry.frame, this.scratchSprite);
                 spriteCount++;
 
@@ -965,6 +987,7 @@ export class Renderer {
             }
           }
         } else if (kind === 'building') {
+          const isGhost = 'ghost' in ent && Boolean(ent.ghost);
           const asset = getAssetForEntity(ent);
           const table =
             this.buildingTables.get(asset) ?? this.defaultBuildingTable;
@@ -981,7 +1004,7 @@ export class Renderer {
           if (ent.remains) {
             animName = 'rubble';
             desc = table?.rubble[dir];
-            const deathTick = ent.deathTick ?? (snapshot.tick - 1);
+            const deathTick = ent.deathTick ?? snapshot.tick - 1;
             const elapsedTicks = Math.max(
               0,
               snapshot.tick - 1 - deathTick + snapshot.alpha,
@@ -1056,23 +1079,27 @@ export class Renderer {
                   : TINT_NEUTRAL;
             this.scratchSprite.alpha = buildingAlpha;
             this.scratchSprite.shadowAlpha = ent.remains ? 0.0 : 1.0;
+            this.scratchSprite.fogged = isGhost;
 
             desc.batch.add(desc.frame, this.scratchSprite);
             spriteCount++;
 
             if (!ent.remains) {
               shadowCount++;
-              this.recordEntityScreenRect(
-                ent.id,
-                'building',
-                posX,
-                posZ,
-                desc.frame,
-                this.assetSpriteTopPx.get(asset) ?? desc.frame.ay,
-              );
+              if (!isGhost) {
+                this.recordEntityScreenRect(
+                  ent.id,
+                  'building',
+                  posX,
+                  posZ,
+                  desc.frame,
+                  this.assetSpriteTopPx.get(asset) ?? desc.frame.ay,
+                );
+              }
             }
           }
         } else if (kind === 'mine') {
+          const isGhost = 'ghost' in ent && Boolean(ent.ghost);
           const asset = getAssetForEntity(ent);
           const desc = this.staticDescriptors.get(asset);
           if (desc) {
@@ -1087,27 +1114,48 @@ export class Renderer {
             this.scratchSprite.tint = TINT_NEUTRAL;
             this.scratchSprite.alpha = 1.0;
             this.scratchSprite.shadowAlpha = 1.0;
+            this.scratchSprite.fogged = isGhost;
 
             desc.batch.add(desc.frame, this.scratchSprite);
             spriteCount++;
             shadowCount++;
 
-            this.recordEntityScreenRect(
-              ent.id,
-              'mine',
-              posX,
-              posZ,
-              desc.frame,
-              this.assetSpriteTopPx.get(asset) ?? desc.frame.ay,
-            );
+            if (!isGhost) {
+              this.recordEntityScreenRect(
+                ent.id,
+                'mine',
+                posX,
+                posZ,
+                desc.frame,
+                this.assetSpriteTopPx.get(asset) ?? desc.frame.ay,
+              );
+            }
           }
         } else if (kind === 'doodad') {
+          const posX = ent.x + 0.5;
+          const posZ = ent.z + 0.5;
+          let isDoodadFogged = false;
+          if (snapshotFog) {
+            const tileX = Math.floor(ent.x);
+            const tileZ = Math.floor(ent.z);
+            if (
+              tileX >= 0 &&
+              tileX < mapSize &&
+              tileZ >= 0 &&
+              tileZ < mapSize
+            ) {
+              const fogVal = snapshotFog[tileZ * mapSize + tileX];
+              if (fogVal === 0) {
+                // Hidden doodads in unexplored shroud are absent
+                continue;
+              }
+              isDoodadFogged = fogVal < 200; // 128 is explored hidden
+            }
+          }
+
           const asset = getAssetForEntity(ent);
           const desc = this.staticDescriptors.get(asset);
           if (desc) {
-            const posX = ent.x + 0.5;
-            const posZ = ent.z + 0.5;
-
             this.scratchSprite.asset = asset;
             this.scratchSprite.animation = 'idle';
             this.scratchSprite.facing = 0;
@@ -1116,6 +1164,7 @@ export class Renderer {
             this.scratchSprite.tint = TINT_NEUTRAL;
             this.scratchSprite.alpha = 1.0;
             this.scratchSprite.shadowAlpha = 1.0;
+            this.scratchSprite.fogged = isDoodadFogged;
 
             desc.batch.add(desc.frame, this.scratchSprite);
             spriteCount++;
@@ -1212,6 +1261,8 @@ export class Renderer {
 
     this.atlasCache?.dispose();
     this.atlasCache = null;
+    this.fogTexture?.dispose();
+    this.fogTexture = null;
     this.terrain?.dispose();
     this.terrain = null;
 

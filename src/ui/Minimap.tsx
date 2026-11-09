@@ -55,7 +55,10 @@ export function worldToMinimap(
 export function Minimap({ session, width = 180, height = 180 }: MinimapProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const terrainCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const terrainImageDataRef = useRef<ImageData | null>(null);
   const cachedTilesRef = useRef<Uint8Array | null>(null);
+  const cachedFogRef = useRef<Uint8Array | null>(null);
+  const cachedFogRevisionRef = useRef<number>(-1);
   const [isDragging, setIsDragging] = useState(false);
   const [dpr, setDpr] = useState(() =>
     typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1,
@@ -64,7 +67,8 @@ export function Minimap({ session, width = 180, height = 180 }: MinimapProps) {
   const minimapData = useHudStore((state) => state.minimap);
   const mapSize = minimapData.mapSize || 128;
   const tiles = minimapData.tiles;
-
+  const fog = minimapData.fog;
+  const fogRevision = minimapData.fogRevision;
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const updateDpr = () => {
@@ -116,22 +120,44 @@ export function Minimap({ session, width = 180, height = 180 }: MinimapProps) {
     for (const u of units) {
       const { mx, my } = worldToMinimap(u.x, u.z, mapSize, width, height);
 
-      if (u.player === 0) {
-        ctx.fillStyle = '#3b82f6'; // Blue (player 0)
-      } else if (u.player === 1) {
-        ctx.fillStyle = '#ef4444'; // Red (player 1)
-      } else {
-        ctx.fillStyle = '#f59e0b'; // Amber (neutral/mine)
-      }
+      if (u.ghost) {
+        ctx.globalAlpha = 0.6;
+        if (u.player === 1) {
+          ctx.fillStyle = '#991b1b'; // Muted dark red
+        } else {
+          ctx.fillStyle = '#92400e'; // Muted amber
+        }
 
-      if (u.kind === 'building') {
-        ctx.fillRect(mx - 2, my - 2, 4, 4);
-      } else if (u.kind === 'mine') {
-        ctx.fillRect(mx - 1.5, my - 1.5, 3, 3);
+        if (u.kind === 'building') {
+          ctx.fillRect(mx - 2, my - 2, 4, 4);
+          ctx.strokeStyle = '#e5e7eb';
+          ctx.lineWidth = 0.5;
+          ctx.strokeRect(mx - 2, my - 2, 4, 4);
+        } else if (u.kind === 'mine') {
+          ctx.fillRect(mx - 1.5, my - 1.5, 3, 3);
+          ctx.strokeStyle = '#e5e7eb';
+          ctx.lineWidth = 0.5;
+          ctx.strokeRect(mx - 1.5, my - 1.5, 3, 3);
+        }
+        ctx.globalAlpha = 1.0;
       } else {
-        ctx.beginPath();
-        ctx.arc(mx, my, 2, 0, Math.PI * 2);
-        ctx.fill();
+        if (u.player === 0) {
+          ctx.fillStyle = '#3b82f6'; // Blue (player 0)
+        } else if (u.player === 1) {
+          ctx.fillStyle = '#ef4444'; // Red (player 1)
+        } else {
+          ctx.fillStyle = '#f59e0b'; // Amber (neutral/mine)
+        }
+
+        if (u.kind === 'building') {
+          ctx.fillRect(mx - 2, my - 2, 4, 4);
+        } else if (u.kind === 'mine') {
+          ctx.fillRect(mx - 1.5, my - 1.5, 3, 3);
+        } else {
+          ctx.beginPath();
+          ctx.arc(mx, my, 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
       }
     }
 
@@ -164,12 +190,37 @@ export function Minimap({ session, width = 180, height = 180 }: MinimapProps) {
 
   // Generate or reuse cached ImageData for terrain
   useEffect(() => {
-    if (!tiles || tiles === cachedTilesRef.current) return;
+    if (!tiles) return;
+    if (
+      tiles === cachedTilesRef.current &&
+      fog === cachedFogRef.current &&
+      fogRevision === cachedFogRevisionRef.current
+    ) {
+      return;
+    }
     cachedTilesRef.current = tiles;
+    cachedFogRef.current = fog;
+    cachedFogRevisionRef.current = fogRevision;
 
     if (typeof document === 'undefined') return;
 
-    const imgData = new ImageData(width, height);
+    let offscreen = terrainCanvasRef.current;
+    if (
+      !offscreen ||
+      offscreen.width !== width ||
+      offscreen.height !== height
+    ) {
+      offscreen = document.createElement('canvas');
+      offscreen.width = width;
+      offscreen.height = height;
+      terrainCanvasRef.current = offscreen;
+    }
+
+    let imgData = terrainImageDataRef.current;
+    if (!imgData || imgData.width !== width || imgData.height !== height) {
+      imgData = new ImageData(width, height);
+      terrainImageDataRef.current = imgData;
+    }
     const data = imgData.data;
 
     for (let py = 0; py < height; py++) {
@@ -183,12 +234,35 @@ export function Minimap({ session, width = 180, height = 180 }: MinimapProps) {
         if (tx >= 0 && tx < mapSize && tz >= 0 && tz < mapSize) {
           const tileX = Math.floor(tx);
           const tileZ = Math.floor(tz);
-          const code = tiles[tileZ * mapSize + tileX];
+          const tileIndex = tileZ * mapSize + tileX;
+          const code = tiles[tileIndex];
           const rgb = TERRAIN_RGB[code] ?? TERRAIN_RGB[0];
-          data[idx] = rgb[0];
-          data[idx + 1] = rgb[1];
-          data[idx + 2] = rgb[2];
-          data[idx + 3] = 255;
+
+          if (fog) {
+            const fogVal = fog[tileIndex];
+            if (fogVal === 0) {
+              data[idx] = 0;
+              data[idx + 1] = 0;
+              data[idx + 2] = 0;
+              data[idx + 3] = 255;
+            } else if (fogVal < 255) {
+              const gray = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
+              data[idx] = Math.round((rgb[0] * 0.5 + gray * 0.5) * 0.5);
+              data[idx + 1] = Math.round((rgb[1] * 0.5 + gray * 0.5) * 0.5);
+              data[idx + 2] = Math.round((rgb[2] * 0.5 + gray * 0.5) * 0.5);
+              data[idx + 3] = 255;
+            } else {
+              data[idx] = rgb[0];
+              data[idx + 1] = rgb[1];
+              data[idx + 2] = rgb[2];
+              data[idx + 3] = 255;
+            }
+          } else {
+            data[idx] = rgb[0];
+            data[idx + 1] = rgb[1];
+            data[idx + 2] = rgb[2];
+            data[idx + 3] = 255;
+          }
         } else {
           data[idx] = VOID_RGB[0];
           data[idx + 1] = VOID_RGB[1];
@@ -198,16 +272,12 @@ export function Minimap({ session, width = 180, height = 180 }: MinimapProps) {
       }
     }
 
-    const offscreen = document.createElement('canvas');
-    offscreen.width = width;
-    offscreen.height = height;
     const offCtx = offscreen.getContext('2d');
     if (offCtx) {
       offCtx.putImageData(imgData, 0, 0);
-      terrainCanvasRef.current = offscreen;
       renderMinimap();
     }
-  }, [tiles, mapSize, width, height, renderMinimap]);
+  }, [tiles, fog, fogRevision, mapSize, width, height, renderMinimap]);
 
   useEffect(() => {
     renderMinimap();

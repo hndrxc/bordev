@@ -24,6 +24,7 @@ export interface RenderSprite {
   alpha: number;
   radius?: number;
   shadowAlpha?: number;
+  fogged?: boolean;
 }
 
 const BODY_SHADER_KEY = 'bordevSpriteBody';
@@ -89,7 +90,7 @@ void main() {
     vec4 mask = texture2D(maskTexture, vUV);
     vec3 team = vTint.rgb;
     vec3 color = mix(base.rgb, clamp(base.rgb * team * 1.25, 0.0, 1.0), mask.r);
-    float alpha = vTint.a;
+    float alpha = abs(vTint.a);
     if (alpha < 0.005) {
         discard;
     }
@@ -112,6 +113,10 @@ void main() {
         if ((val + 0.5) / 16.0 >= alpha) {
             discard;
         }
+    }
+    if (vTint.a < 0.0) {
+        float gray = dot(color, vec3(0.299, 0.587, 0.114));
+        color = mix(color, vec3(gray), 0.5) * 0.5;
     }
     gl_FragColor = vec4(color, 1.0);
 }
@@ -176,9 +181,12 @@ void main() {
         discard;
     }
     vec4 shadow = texture2D(shadowTexture, vUV);
-    float alpha = shadow.a * vTint.a * vShadowAlpha;
+    float alpha = shadow.a * abs(vTint.a) * vShadowAlpha;
     if (alpha < 0.005) {
         discard;
+    }
+    if (vTint.a < 0.0) {
+        alpha *= 0.5;
     }
     gl_FragColor = vec4(0.0, 0.0, 0.0, alpha);
 }
@@ -361,7 +369,9 @@ export class SpriteBatch {
     tint[offsetTint + 0] = sprite.tint[0];
     tint[offsetTint + 1] = sprite.tint[1];
     tint[offsetTint + 2] = sprite.tint[2];
-    tint[offsetTint + 3] = sprite.alpha;
+    tint[offsetTint + 3] = sprite.fogged
+      ? -Math.max(1e-4, sprite.alpha)
+      : sprite.alpha;
 
     // iShadowAlpha: per-instance shadow suppression
     shadowAlphaBuf[index] =

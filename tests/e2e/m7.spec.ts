@@ -110,6 +110,24 @@ async function spawnBuilding(page: Page, spec: EntitySpec): Promise<number> {
     return building.id;
   }, spec);
 }
+/** Spawns a genuine owned stationary LOS observer unit (peasant or longbowman on hold) to reveal staged battleground. */
+async function spawnObserver(
+  page: Page,
+  x: number,
+  z: number,
+  type: 'peasant' | 'longbowman' = 'peasant',
+): Promise<number> {
+  return page.evaluate(
+    ({ ox, oz, oType }) => {
+      const world = window.__bordev?.sim?.world;
+      if (!world) throw new Error('Simulation not initialized');
+      const unit = world.spawnUnit(0, oType, ox, oz, 'crown');
+      unit.order = { kind: 'hold' };
+      return unit.id;
+    },
+    { ox: x, oz: z, oType: type },
+  );
+}
 
 /** Fails fast if the footprint is not free grass before the building is created. */
 async function expectFootprintPassable(
@@ -136,7 +154,6 @@ async function expectFootprintPassable(
   );
   expect(blocked).toBe(0);
 }
-
 
 /** Waits until the unit's current order has finished (no order or idle). */
 async function waitUnitIdle(
@@ -253,6 +270,7 @@ test('1. real right-click enemy attack kills the peasant; the corpse stays drawn
     { player: 0, type: 'knight', x: 67, z: 16 },
     { player: 1, type: 'peasant', x: 74, z: 9 },
   ]);
+  await spawnObserver(page, 78, 9, 'peasant');
   await waitForRender(page, [knightId, enemyId]);
 
   await selectOnly(page, knightId);
@@ -385,6 +403,7 @@ test('2. a melee swing renders a distinct attack frame from rest frames', async 
   const [knightId] = await spawnUnits(page, [
     { player: 0, type: 'knight', x: 67.5, z: 15.5 },
   ]);
+  await spawnObserver(page, 78, 8, 'peasant');
   await waitForRender(page, [knightId, cottageId]);
 
   await selectOnly(page, knightId);
@@ -470,6 +489,7 @@ test('3. command-card Attack-Move engages an enemy en route, resumes, then comma
     { player: 0, type: 'knight', x: 67.5, z: 15.5 },
     { player: 1, type: 'peasant', x: 73, z: 10 },
   ]);
+  await spawnObserver(page, 78, 10, 'peasant');
   await waitForRender(page, [knightId, enemyId]);
   await selectOnly(page, knightId);
 
@@ -594,10 +614,14 @@ test('4. hotkey R attack-move and hotkey E hold give exact immobility', async ({
   );
 
   // Let it really travel before holding, so hold must stop actual motion.
-  await page.waitForFunction((s) => {
-    const u = window.__bordev?.sim?.world.getEntity(s);
-    return !!u && u.kind === 'unit' && Math.hypot(u.x - 67.5, u.z - 15.5) > 1;
-  }, spearmanId, { timeout: 30_000 });
+  await page.waitForFunction(
+    (s) => {
+      const u = window.__bordev?.sim?.world.getEntity(s);
+      return !!u && u.kind === 'unit' && Math.hypot(u.x - 67.5, u.z - 15.5) > 1;
+    },
+    spearmanId,
+    { timeout: 30_000 },
+  );
   await page.keyboard.press('KeyE');
   await expectHoldImmobile(page, spearmanId);
 
@@ -626,6 +650,7 @@ test('5. trebuchet from outside tower range: stone projectiles are visible in fl
   const [trebId] = await spawnUnits(page, [
     { player: 0, type: 'trebuchet', x: 65.5, z: 17.5 },
   ]);
+  await spawnObserver(page, 75.5, 15.4, 'longbowman');
   await waitForRender(page, [trebId, towerId]);
 
   const blockedBefore = await page.evaluate(
@@ -802,6 +827,7 @@ test('6. an enemy tower fires visible arrows at a peasant sent into its range', 
   const [peasantId] = await spawnUnits(page, [
     { player: 0, type: 'peasant', x: 65.5, z: 17.5 },
   ]);
+  await spawnObserver(page, 75.5, 15.4, 'longbowman');
   await waitForRender(page, [peasantId, towerId]);
 
   await selectOnly(page, peasantId);
@@ -859,6 +885,10 @@ test('7. gate renders the open frame for a friendly unit within 1 tile and the c
   const [peasantId] = await spawnUnits(page, [
     { player: 0, type: 'peasant', x: 71.5, z: 18 },
   ]);
+  // Provide static observer coverage across the full gate screenshot clip outside proximity
+  await spawnObserver(page, 72.5, 8, 'longbowman');
+  await spawnObserver(page, 64.5, 12, 'longbowman');
+  await spawnObserver(page, 74.5, 18, 'longbowman');
   await waitForRender(page, [gateId, peasantId]);
 
   const gateOpen = () =>

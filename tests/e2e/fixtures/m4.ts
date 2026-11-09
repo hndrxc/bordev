@@ -31,7 +31,7 @@ export interface CapturePhaseFilter {
  */
 export async function setupM4Session(
   page: Page,
-  options?: { centerOn?: { x: number; z: number } },
+  options?: { centerOn?: { x: number; z: number }; debugScene?: boolean },
 ): Promise<SetupResult> {
   const consoleErrors: string[] = [];
   const pageErrors: string[] = [];
@@ -45,7 +45,8 @@ export async function setupM4Session(
     pageErrors.push(error.message);
   });
 
-  await page.goto('/?debug=1');
+  const debugScene = options?.debugScene ?? true;
+  await page.goto(debugScene ? '/?debug=1&debugScene=1' : '/?debug=1');
 
   const canvas = page.getByLabel('Game view', { exact: true });
   await expect(canvas).toBeVisible();
@@ -129,11 +130,15 @@ export async function waitForTicks(page: Page, ticks: number): Promise<void> {
     if (!sim) throw new Error('Simulation not initialized');
     return sim.world.tick;
   });
-  await page.waitForFunction((target) => {
-    const sim = window.__bordev?.sim;
-    if (!sim) return false;
-    return sim.world.tick >= target;
-  }, startTick + ticks, { timeout: 10_000 });
+  await page.waitForFunction(
+    (target) => {
+      const sim = window.__bordev?.sim;
+      if (!sim) return false;
+      return sim.world.tick >= target;
+    },
+    startTick + ticks,
+    { timeout: 10_000 },
+  );
 }
 
 /**

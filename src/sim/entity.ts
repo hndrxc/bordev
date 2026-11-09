@@ -27,6 +27,9 @@ export interface CombatState {
   lastDestX?: number;
   lastDestZ?: number;
   lastGridRevision?: number;
+  /** Dedicated last-seen coordinates of combat target (frozen when target becomes unseen). */
+  lastSeenTargetX?: number;
+  lastSeenTargetZ?: number;
 }
 
 export interface UnitOrder {
@@ -35,6 +38,9 @@ export interface UnitOrder {
   z?: number;
   targetId?: number;
   targetRef?: Combatant | MineEntity;
+  /** Dedicated last-seen coordinates of attack target (frozen when target becomes unseen; distinct from movement x/z). */
+  lastSeenTargetX?: number;
+  lastSeenTargetZ?: number;
 }
 
 export type CartPhase =

@@ -13,6 +13,7 @@ import {
 } from '../data/roles';
 import type { OrderMarker } from '../render/Overlays';
 import { areHostile } from '../sim/systems/damage';
+import { isEntityVisibleTo } from '../sim/systems/fog';
 
 export type { OrderMarker };
 
@@ -366,8 +367,11 @@ export class OrderController {
 
     const ownUnitIds = ownUnits.map((e) => e.id);
     // Look up target entity if provided
-    const targetEntity =
+    let targetEntity =
       targetId !== undefined ? sim.world.getEntity(targetId) : undefined;
+    if (targetEntity && !isEntityVisibleTo(sim.world, 0, targetEntity)) {
+      targetEntity = undefined;
+    }
 
     // 2. Enemy target -> attack (Combat M7 / C7)
     const isEnemy =

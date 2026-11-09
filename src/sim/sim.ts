@@ -44,6 +44,7 @@ import { updateRemains } from './systems/damage.js';
 import { updateProjectiles } from './systems/projectiles.js';
 import { updateAuras } from './systems/auras.js';
 import { updateGates } from './systems/gates.js';
+import { updateFog } from './systems/fog.js';
 export const SIM_DT = 0.05;
 
 export class Sim {
@@ -70,6 +71,10 @@ export class Sim {
     this.pendingCommands.push(cloneCommand(cmd));
   }
 
+  updateFog(): void {
+    updateFog(this.world);
+  }
+
   step(): void {
     const commandsToProcess = this.pendingCommands;
     this.pendingCommands = [];
@@ -79,6 +84,7 @@ export class Sim {
     }
 
     updateMovement(this.world);
+    updateFog(this.world);
     updateCombat(this.world);
     updateProjectiles(this.world);
     updateAuras(this.world);

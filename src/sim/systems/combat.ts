@@ -31,6 +31,7 @@ import {
   distanceToFootprint,
   isRangedAttacker,
 } from './reach.js';
+import { isEntityVisibleTo } from './fog.js';
 
 let meleeSwingTicks = 0;
 function getMeleeSwingTicks(): number {
@@ -167,7 +168,8 @@ function findNearestEnemy(
       ent.kind !== 'unit' ||
       !areHostile(world, attacker, ent) ||
       ent.hp <= 0 ||
-      ent.deathTick !== undefined
+      ent.deathTick !== undefined ||
+      !isEntityVisibleTo(world, attacker.player, ent)
     ) {
       continue;
     }
@@ -209,7 +211,8 @@ function findNearestEnemy(
         !areHostile(world, attacker, ent) ||
         !ent.built ||
         ent.hp <= 0 ||
-        ent.deathTick !== undefined
+        ent.deathTick !== undefined ||
+        !isEntityVisibleTo(world, attacker.player, ent)
       ) {
         continue;
       }
@@ -274,7 +277,8 @@ function findNearestEnemyForBuilding(
       ent.kind !== 'unit' ||
       !areHostile(world, building, ent) ||
       ent.hp <= 0 ||
-      ent.deathTick !== undefined
+      ent.deathTick !== undefined ||
+      !isEntityVisibleTo(world, building.player, ent)
     ) {
       continue;
     }
@@ -310,7 +314,8 @@ export function applyAttackCommand(world: World, cmd: AttackCommand): void {
   if (
     !target ||
     (target.kind !== 'unit' && target.kind !== 'building') ||
-    !isLiveCombatant(world, target)
+    !isLiveCombatant(world, target) ||
+    !isEntityVisibleTo(world, cmd.player, target)
   ) {
     return;
   }
@@ -337,12 +342,19 @@ export function applyAttackCommand(world: World, cmd: AttackCommand): void {
       unit.order.kind !== 'stop' &&
       unit.order.kind !== 'hold';
 
+    const targetX =
+      target.kind === 'unit' ? target.x : target.x + target.width / 2;
+    const targetZ =
+      target.kind === 'unit' ? target.z : target.z + target.height / 2;
+
     // The explicit order always keeps the ORIGINAL identity-checked target.
     if (cmd.queued && isBusy) {
       unit.orders.push({
         kind: 'attack',
         targetId: target.id,
         targetRef: target,
+        lastSeenTargetX: targetX,
+        lastSeenTargetZ: targetZ,
       });
     } else {
       clearActiveWorkAndCartTransientState(unit);
@@ -350,6 +362,8 @@ export function applyAttackCommand(world: World, cmd: AttackCommand): void {
         kind: 'attack',
         targetId: target.id,
         targetRef: target,
+        lastSeenTargetX: targetX,
+        lastSeenTargetZ: targetZ,
       };
       unit.orders.length = 0;
       unit.orderGeneration++;
@@ -361,6 +375,8 @@ export function applyAttackCommand(world: World, cmd: AttackCommand): void {
         unit.combat = {
           targetRef: wall,
           goalRef: wall !== target ? target : undefined,
+          lastSeenTargetX: targetX,
+          lastSeenTargetZ: targetZ,
         };
         world.pathQueue.cancel(unit.id);
         unit.path = undefined;
@@ -372,6 +388,9 @@ export function applyAttackCommand(world: World, cmd: AttackCommand): void {
         unit.stuckProgressX = unit.x;
         unit.stuckProgressZ = unit.z;
         unit.stuckLastCheckTick = world.tick;
+      } else {
+        unit.combat!.lastSeenTargetX = targetX;
+        unit.combat!.lastSeenTargetZ = targetZ;
       }
     }
   }
@@ -624,6 +643,17 @@ function chaseTarget(world: World, unit: UnitEntity, target: Combatant): void {
   requestChasePath(world, unit, destX, destZ, 1.5);
 }
 
+function getLastKnownCombatDestination(
+  unit: UnitEntity,
+): { x: number; z: number } | undefined {
+  const lastX = unit.combat?.lastSeenTargetX ?? unit.order?.lastSeenTargetX;
+  const lastZ = unit.combat?.lastSeenTargetZ ?? unit.order?.lastSeenTargetZ;
+  if (lastX !== undefined && lastZ !== undefined) {
+    return { x: lastX, z: lastZ };
+  }
+  return undefined;
+}
+
 function updateUnitCombat(world: World, unit: UnitEntity): void {
   const kind = unit.order?.kind ?? 'idle';
   if (
@@ -648,6 +678,44 @@ function updateUnitCombat(world: World, unit: UnitEntity): void {
         goal = resolveAttackOrderTarget(world, unit, unit.order);
       }
     }
+    if (goal && !isEntityVisibleTo(world, unit.player, goal)) {
+      const dest = getLastKnownCombatDestination(unit);
+      clearCombat(unit);
+      resetPath(world, unit);
+      if (dest) {
+        unit.order = {
+          kind: 'move',
+          x: dest.x,
+          z: dest.z,
+        };
+        unit.orderGeneration++;
+        unit.formationSlotX = undefined;
+        unit.formationSlotZ = undefined;
+        world.pathQueue.request(
+          unit.id,
+          unit.x,
+          unit.z,
+          dest.x,
+          dest.z,
+          unit.player,
+        );
+        unit.pathPending = true;
+      } else {
+        unit.order = { kind: 'idle' };
+        unit.orderGeneration++;
+      }
+      return;
+    }
+    if (goal) {
+      const targetX = goal.kind === 'unit' ? goal.x : goal.x + goal.width / 2;
+      const targetZ = goal.kind === 'unit' ? goal.z : goal.z + goal.height / 2;
+      unit.order.lastSeenTargetX = targetX;
+      unit.order.lastSeenTargetZ = targetZ;
+      if (unit.combat) {
+        unit.combat.lastSeenTargetX = targetX;
+        unit.combat.lastSeenTargetZ = targetZ;
+      }
+    }
   } else if (unit.combat) {
     const intended = unit.combat.goalRef ?? unit.combat.targetRef;
     if (
@@ -655,7 +723,70 @@ function updateUnitCombat(world: World, unit: UnitEntity): void {
       isLiveCombatant(world, intended) &&
       areHostile(world, unit, intended)
     ) {
-      goal = intended;
+      if (isEntityVisibleTo(world, unit.player, intended)) {
+        goal = intended;
+        const targetX =
+          intended.kind === 'unit'
+            ? intended.x
+            : intended.x + intended.width / 2;
+        const targetZ =
+          intended.kind === 'unit'
+            ? intended.z
+            : intended.z + intended.height / 2;
+        unit.combat.lastSeenTargetX = targetX;
+        unit.combat.lastSeenTargetZ = targetZ;
+      } else {
+        const orderKind = unit.order?.kind ?? 'idle';
+        if (orderKind === 'idle' || orderKind === 'stop') {
+          // Attacked from fog or target retreated into fog: approach frozen last-known attack origin safely
+          const combat = unit.combat;
+          const originX = combat.lastSeenTargetX ?? unit.order?.lastSeenTargetX;
+          const originZ = combat.lastSeenTargetZ ?? unit.order?.lastSeenTargetZ;
+          if (originX === undefined || originZ === undefined) {
+            clearCombat(unit);
+            onTargetLost(world, unit);
+            return;
+          }
+          const distToOrigin = Math.hypot(unit.x - originX, unit.z - originZ);
+          if (distToOrigin < 1.0) {
+            clearCombat(unit);
+            onTargetLost(world, unit);
+            return;
+          }
+          if (distToOrigin < 1.5) {
+            const d = distToOrigin;
+            if (d > 1e-4) {
+              const speed = computeUnitSpeed(world, unit);
+              unit.speed = speed;
+              const step = Math.min(speed * SIM_DT, d);
+              const nx = unit.x + ((originX - unit.x) / d) * step;
+              const nz = unit.z + ((originZ - unit.z) / d) * step;
+              if (world.grid.canOccupy(nx, nz, unit.radius, unit.player)) {
+                unit.facing = computeFacing(originX - unit.x, originZ - unit.z);
+                unit.x = nx;
+                unit.z = nz;
+                clampUnitRadius(unit, world.grid);
+                resetPath(world, unit);
+                return;
+              }
+            }
+          }
+          const pathSpent =
+            !unit.pathPending &&
+            (!unit.path || unit.path.length === 0) &&
+            combat.lastGridRevision === world.grid.revision;
+          if (pathSpent) {
+            clearCombat(unit);
+            onTargetLost(world, unit);
+            return;
+          }
+          requestChasePath(world, unit, originX, originZ, 1.5);
+          return;
+        } else {
+          unit.combat = undefined;
+          onTargetLost(world, unit);
+        }
+      }
     } else {
       unit.combat = undefined;
       onTargetLost(world, unit);
@@ -683,7 +814,19 @@ function updateUnitCombat(world: World, unit: UnitEntity): void {
     goal = candidate;
     // Drop any stale path (e.g. the attackMove destination path) before chasing
     resetPath(world, unit);
-    unit.combat = { targetRef: goal };
+    const targetX =
+      candidate.kind === 'unit'
+        ? candidate.x
+        : candidate.x + candidate.width / 2;
+    const targetZ =
+      candidate.kind === 'unit'
+        ? candidate.z
+        : candidate.z + candidate.height / 2;
+    unit.combat = {
+      targetRef: goal,
+      lastSeenTargetX: targetX,
+      lastSeenTargetZ: targetZ,
+    };
   }
 
   // 3. Current combat target = goal, or breach wall/gate from resolveAttackTarget
@@ -711,6 +854,10 @@ function updateUnitCombat(world: World, unit: UnitEntity): void {
     combat.lastDestX = undefined;
     combat.lastDestZ = undefined;
   }
+  const goalX = goal.kind === 'unit' ? goal.x : goal.x + goal.width / 2;
+  const goalZ = goal.kind === 'unit' ? goal.z : goal.z + goal.height / 2;
+  combat.lastSeenTargetX = goalX;
+  combat.lastSeenTargetZ = goalZ;
   combat.goalRef = target !== goal ? goal : undefined;
 
   // 4. Execute. A started swing is committed: it is never cancelled by
@@ -785,6 +932,21 @@ function updateBuildingCombat(world: World, b: BuildingEntity): void {
   if (!bData || !bData.attack || bData.attack <= 0) {
     return;
   }
+  let target = b.combat?.targetRef;
+  const hasValidTarget =
+    target !== undefined &&
+    isLiveCombatant(world, target) &&
+    areHostile(world, b, target) &&
+    isInAttackRange(b, target) &&
+    isEntityVisibleTo(world, b.player, target);
+
+  if (!hasValidTarget) {
+    if (b.combat) {
+      b.combat.targetRef = undefined;
+    }
+    target = undefined;
+  }
+
   if (
     b.attackCooldownUntilTick !== undefined &&
     world.tick < b.attackCooldownUntilTick
@@ -799,20 +961,12 @@ function updateBuildingCombat(world: World, b: BuildingEntity): void {
   }
   const cooldownTicks = Math.round(cooldown / SIM_DT);
 
-  let target = b.combat?.targetRef;
-  const hasValidTarget =
-    target !== undefined &&
-    isLiveCombatant(world, target) &&
-    areHostile(world, b, target) &&
-    isInAttackRange(b, target);
-
   if (!hasValidTarget) {
     if ((world.tick + b.id) % 10 !== 0) {
       return;
     }
     target = findNearestEnemyForBuilding(world, b, range);
   }
-
   if (target) {
     const dmg = calculateDamage(b, target);
     spawnProjectile(world, b, target, dmg);
@@ -824,6 +978,8 @@ function updateBuildingCombat(world: World, b: BuildingEntity): void {
       };
     }
     b.attackCooldownUntilTick = world.tick + cooldownTicks;
+  } else if (b.combat) {
+    b.combat.targetRef = undefined;
   }
 }
 export function updateCombat(world: World): void {

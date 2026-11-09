@@ -41,7 +41,9 @@ export function spawnProjectile(
   }
 
   const isStone =
-    source.kind === 'unit' && attackType === 'siege' && isRangedAttacker(source);
+    source.kind === 'unit' &&
+    attackType === 'siege' &&
+    isRangedAttacker(source);
   const visualKind: 'arrow' | 'stone' = isStone ? 'stone' : 'arrow';
   const speed =
     visualKind === 'stone' ? TREBUCHET_PROJECTILE_SPEED : PROJECTILE_SPEED;
@@ -124,7 +126,13 @@ export function updateProjectiles(world: World): void {
       projectile.traveledDistance += dist;
       projectile.flightProgress = 1;
 
-      applyDamage(world, target, projectile.damage, projectile.sourceRef);
+      applyDamage(
+        world,
+        target,
+        projectile.damage,
+        projectile.sourceRef,
+        projectile,
+      );
       world.removeEntity(projectile.id);
     } else {
       const invDist = 1 / dist;

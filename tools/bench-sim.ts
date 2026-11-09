@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Sim } from '../src/sim/sim.js';
+import { updateFog } from '../src/sim/systems/fog.js';
 import { parseMap } from '../src/sim/map.js';
 import { Rng } from '../src/sim/rng.js';
 
@@ -12,6 +13,7 @@ interface BenchOptions {
   warmup: number;
   seed: number;
   maxMs: number;
+  maxFogMs: number;
   mapPath: string;
 }
 
@@ -24,6 +26,7 @@ function parseArgs(): BenchOptions {
     warmup: 50,
     seed: 42,
     maxMs: 4.0,
+    maxFogMs: 0.5,
     mapPath: path.resolve(process.cwd(), 'public/maps/alpha_test.json'),
   };
 
@@ -49,7 +52,9 @@ function parseArgs(): BenchOptions {
       }
       const val = parseInt(args[++i], 10);
       if (Number.isNaN(val) || val < 0) {
-        console.error(`Error: Invalid value for --units: ${args[i]} (must be non-negative integer)`);
+        console.error(
+          `Error: Invalid value for --units: ${args[i]} (must be non-negative integer)`,
+        );
         process.exit(1);
       }
       options.units = val;
@@ -60,7 +65,9 @@ function parseArgs(): BenchOptions {
       }
       const val = parseInt(args[++i], 10);
       if (Number.isNaN(val) || val <= 0) {
-        console.error(`Error: Invalid value for --ticks: ${args[i]} (must be positive integer >= 1)`);
+        console.error(
+          `Error: Invalid value for --ticks: ${args[i]} (must be positive integer >= 1)`,
+        );
         process.exit(1);
       }
       options.ticks = val;
@@ -71,7 +78,9 @@ function parseArgs(): BenchOptions {
       }
       const val = parseInt(args[++i], 10);
       if (Number.isNaN(val) || val < 0) {
-        console.error(`Error: Invalid value for --warmup: ${args[i]} (must be non-negative integer)`);
+        console.error(
+          `Error: Invalid value for --warmup: ${args[i]} (must be non-negative integer)`,
+        );
         process.exit(1);
       }
       options.warmup = val;
@@ -93,10 +102,25 @@ function parseArgs(): BenchOptions {
       }
       const val = parseFloat(args[++i]);
       if (Number.isNaN(val) || val <= 0) {
-        console.error(`Error: Invalid value for --max-ms: ${args[i]} (must be positive number)`);
+        console.error(
+          `Error: Invalid value for --max-ms: ${args[i]} (must be positive number)`,
+        );
         process.exit(1);
       }
       options.maxMs = val;
+    } else if (arg === '--max-fog-ms') {
+      if (i + 1 >= args.length) {
+        console.error('Error: --max-fog-ms requires a numeric argument');
+        process.exit(1);
+      }
+      const val = parseFloat(args[++i]);
+      if (Number.isNaN(val) || val <= 0) {
+        console.error(
+          `Error: Invalid value for --max-fog-ms: ${args[i]} (must be positive number)`,
+        );
+        process.exit(1);
+      }
+      options.maxFogMs = val;
     } else if (arg === '--map') {
       if (i + 1 >= args.length) {
         console.error('Error: --map requires a file path argument');
@@ -106,16 +130,31 @@ function parseArgs(): BenchOptions {
     } else if (arg === '--help' || arg === '-h') {
       console.log('Usage: tsx tools/bench-sim.ts [options]');
       console.log('Options:');
-      console.log('  --scenario <move|combat>  Benchmark scenario: move (default) or combat');
-      console.log('  --units <N>    Number of units to benchmark (default: 300)');
-      console.log('  --ticks <N>    Number of measurement ticks (default: 300)');
-      console.log('  --warmup <N>   Number of warmup ticks (default: 50)');
-      console.log('  --seed <N>     Random seed (default: 42)');
-      console.log('  --max-ms <N>   Max average ms per tick before failing (default: 4.0)');
-      console.log('  --map <path>   Path to map json fixture (default: public/maps/alpha_test.json)');
+      console.log(
+        '  --scenario <move|combat>  Benchmark scenario: move (default) or combat',
+      );
+      console.log(
+        '  --units <N>       Number of units to benchmark (default: 300)',
+      );
+      console.log(
+        '  --ticks <N>       Number of measurement ticks (default: 300)',
+      );
+      console.log('  --warmup <N>      Number of warmup ticks (default: 50)');
+      console.log('  --seed <N>        Random seed (default: 42)');
+      console.log(
+        '  --max-ms <N>      Max average ms per tick before failing (default: 4.0)',
+      );
+      console.log(
+        '  --max-fog-ms <N>  Max average ms per fog update before failing (default: 0.5)',
+      );
+      console.log(
+        '  --map <path>      Path to map json fixture (default: public/maps/alpha_test.json)',
+      );
       process.exit(0);
     } else {
-      console.error(`Error: Unknown argument '${arg}'. Use --help to view available options.`);
+      console.error(
+        `Error: Unknown argument '${arg}'. Use --help to view available options.`,
+      );
       process.exit(1);
     }
   }
@@ -269,7 +308,11 @@ function runBenchmark() {
         const uId = activeUnits[i];
         const ent = sim.world.entities[uId];
         if (ent && ent.kind === 'unit') {
-          if (!ent.order || ent.order.kind === 'idle' || ent.order.kind === 'stop') {
+          if (
+            !ent.order ||
+            ent.order.kind === 'idle' ||
+            ent.order.kind === 'stop'
+          ) {
             assignRandomTarget(uId);
           }
         }
@@ -302,11 +345,15 @@ function runBenchmark() {
 
     const battleW = 36;
     const battleH = 18;
-    const battleArea =
-      findClearArea(sim.world.grid, battleW, battleH, gameMap.size) ?? {
-        x: Math.max(2, Math.floor(gameMap.size / 2) - 18),
-        z: Math.max(2, Math.floor(gameMap.size / 2) - 9),
-      };
+    const battleArea = findClearArea(
+      sim.world.grid,
+      battleW,
+      battleH,
+      gameMap.size,
+    ) ?? {
+      x: Math.max(2, Math.floor(gameMap.size / 2) - 18),
+      z: Math.max(2, Math.floor(gameMap.size / 2) - 9),
+    };
 
     const count0 = Math.floor(options.units / 2);
     const count1 = options.units - count0;
@@ -373,16 +420,21 @@ function runBenchmark() {
     // Breach setup: 20 man-at-arms attacking unit enclosed by closed stone wall ring (no gate)
     const breachW = 16;
     const breachH = 14;
-    const breachArea =
-      findClearArea(sim.world.grid, breachW, breachH, gameMap.size, {
+    const breachArea = findClearArea(
+      sim.world.grid,
+      breachW,
+      breachH,
+      gameMap.size,
+      {
         x: battleArea.x,
         z: battleArea.z,
         w: battleW,
         h: battleH,
-      }) ?? {
-        x: 2,
-        z: 2,
-      };
+      },
+    ) ?? {
+      x: 2,
+      z: 2,
+    };
 
     const rx = breachArea.x + 10;
     const rz = breachArea.z + 6;
@@ -410,6 +462,7 @@ function runBenchmark() {
       breachIds.push(u.id);
       activeUnits.push(u.id);
     }
+    updateFog(sim.world);
 
     sim.issue({
       kind: 'attack',
@@ -423,19 +476,27 @@ function runBenchmark() {
     stepTick = () => {};
   }
 
-  console.log(`[bench:sim] Map: ${gameMap.id} (${gameMap.size}x${gameMap.size})`);
+  console.log(
+    `[bench:sim] Map: ${gameMap.id} (${gameMap.size}x${gameMap.size})`,
+  );
   console.log(`[bench:sim] Scenario: ${options.scenario}`);
-  console.log(`[bench:sim] Spawning ${activeUnits.length} units (requested ${options.units})`);
-  console.log(`[bench:sim] Warmup ${options.warmup} ticks, measurement ${options.ticks} ticks...`);
+  console.log(
+    `[bench:sim] Spawning ${activeUnits.length} units (requested ${options.units})`,
+  );
+  console.log(
+    `[bench:sim] Warmup ${options.warmup} ticks, measurement ${options.ticks} ticks...`,
+  );
 
   // Warmup phase (allows JIT compilation and spatial hash / component cache stabilization)
   for (let t = 0; t < options.warmup; t++) {
     stepTick();
     sim.step();
+    updateFog(sim.world);
   }
 
   // Measurement phase
   const tickTimes: number[] = new Array(options.ticks);
+  const fogTimes: number[] = new Array(options.ticks);
   const startExpansions = sim.pathQueue.totalExpansions;
   let maxTickExpansions = 0;
 
@@ -452,6 +513,11 @@ function runBenchmark() {
     if (sim.pathQueue.lastExpansions > maxTickExpansions) {
       maxTickExpansions = sim.pathQueue.lastExpansions;
     }
+
+    const tFogStart = performance.now();
+    updateFog(sim.world);
+    const tFogEnd = performance.now();
+    fogTimes[t] = tFogEnd - tFogStart;
   }
 
   const endExpansions = sim.pathQueue.totalExpansions;
@@ -463,47 +529,101 @@ function runBenchmark() {
 
   const sortedTimes = [...tickTimes].sort((a, b) => a - b);
   const p50Ms = sortedTimes[Math.floor(sortedTimes.length * 0.5)];
-  const p95Index = Math.min(Math.floor(sortedTimes.length * 0.95), sortedTimes.length - 1);
+  const p95Index = Math.min(
+    Math.floor(sortedTimes.length * 0.95),
+    sortedTimes.length - 1,
+  );
   const p95Ms = sortedTimes[p95Index];
-  const p99Index = Math.min(Math.floor(sortedTimes.length * 0.99), sortedTimes.length - 1);
+  const p99Index = Math.min(
+    Math.floor(sortedTimes.length * 0.99),
+    sortedTimes.length - 1,
+  );
   const p99Ms = sortedTimes[p99Index];
   const minMs = sortedTimes[0];
   const maxMs = sortedTimes[sortedTimes.length - 1];
+
+  const totalFogMs = fogTimes.reduce((acc, v) => acc + v, 0);
+  const avgFogMs = totalFogMs / fogTimes.length;
+
+  const sortedFogTimes = [...fogTimes].sort((a, b) => a - b);
+  const p50FogMs = sortedFogTimes[Math.floor(sortedFogTimes.length * 0.5)];
+  const p95FogIndex = Math.min(
+    Math.floor(sortedFogTimes.length * 0.95),
+    sortedFogTimes.length - 1,
+  );
+  const p95FogMs = sortedFogTimes[p95FogIndex];
+  const p99FogIndex = Math.min(
+    Math.floor(sortedFogTimes.length * 0.99),
+    sortedFogTimes.length - 1,
+  );
+  const p99FogMs = sortedFogTimes[p99FogIndex];
+  const minFogMs = sortedFogTimes[0];
+  const maxFogMs = sortedFogTimes[sortedFogTimes.length - 1];
 
   const avgExpPerTick = measuredExpansions / options.ticks;
 
   console.log('\n============================================================');
   console.log('              SIMULATION BENCHMARK REPORT                   ');
   console.log('============================================================');
-  console.log(`Map:                     ${gameMap.id} (${gameMap.size}x${gameMap.size})`);
+  console.log(
+    `Map:                     ${gameMap.id} (${gameMap.size}x${gameMap.size})`,
+  );
   console.log(`Scenario:                ${options.scenario}`);
   console.log(`Total Active Units:      ${activeUnits.length}`);
   console.log(`Warmup Ticks:            ${options.warmup}`);
   console.log(`Measured Ticks:          ${options.ticks}`);
   console.log('------------------------------------------------------------');
   console.log('Performance:');
-  console.log(`  Average Tick Time:     ${avgMs.toFixed(3)} ms (Goal: <= ${options.maxMs.toFixed(3)} ms)`);
+  console.log(
+    `  Average Tick Time:     ${avgMs.toFixed(3)} ms (Goal: <= ${options.maxMs.toFixed(3)} ms)`,
+  );
   console.log(`  Median (P50):          ${p50Ms.toFixed(3)} ms`);
   console.log(`  P95 Tick Time:         ${p95Ms.toFixed(3)} ms`);
   console.log(`  P99 Tick Time:         ${p99Ms.toFixed(3)} ms`);
   console.log(`  Min Tick Time:         ${minMs.toFixed(3)} ms`);
   console.log(`  Max Tick Time:         ${maxMs.toFixed(3)} ms`);
   console.log('------------------------------------------------------------');
+  console.log('Fog of War Performance (Isolated updateFog):');
+  console.log(
+    `  Average Fog Time:      ${avgFogMs.toFixed(3)} ms (Goal: <= ${options.maxFogMs.toFixed(3)} ms)`,
+  );
+  console.log(`  Median (P50):          ${p50FogMs.toFixed(3)} ms`);
+  console.log(`  P95 Fog Time:          ${p95FogMs.toFixed(3)} ms`);
+  console.log(`  P99 Fog Time:          ${p99FogMs.toFixed(3)} ms`);
+  console.log(`  Min Fog Time:          ${minFogMs.toFixed(3)} ms`);
+  console.log(`  Max Fog Time:          ${maxFogMs.toFixed(3)} ms`);
+  console.log('------------------------------------------------------------');
   console.log('Pathfinding Work Counters:');
-  console.log(`  Total Node Expansions: ${measuredExpansions.toLocaleString()}`);
+  console.log(
+    `  Total Node Expansions: ${measuredExpansions.toLocaleString()}`,
+  );
   console.log(`  Avg Expansions/Tick:   ${avgExpPerTick.toFixed(1)}`);
   console.log(`  Peak Expansions/Tick:  ${maxTickExpansions.toLocaleString()}`);
   console.log(`  Pending Path Searches: ${sim.pathQueue.pendingCount}`);
   console.log('============================================================');
 
-  if (activeUnits.length >= 300 && avgMs > options.maxMs) {
-    console.error(
-      `\n[BENCHMARK FAILED] Average tick time ${avgMs.toFixed(3)} ms exceeds the ${options.maxMs} ms requirement.\n`
-    );
+  const tickFailed = activeUnits.length >= 300 && avgMs > options.maxMs;
+  const fogFailed = activeUnits.length >= 300 && avgFogMs > options.maxFogMs;
+
+  if (tickFailed || fogFailed) {
+    if (tickFailed) {
+      console.error(
+        `\n[BENCHMARK FAILED] Average tick time ${avgMs.toFixed(3)} ms exceeds the ${options.maxMs} ms requirement.`,
+      );
+    }
+    if (fogFailed) {
+      console.error(
+        `\n[BENCHMARK FAILED] Average fog update time ${avgFogMs.toFixed(3)} ms exceeds the ${options.maxFogMs} ms requirement.`,
+      );
+    }
+    console.error('');
     process.exit(1);
   } else {
     console.log(
-      `\n[BENCHMARK PASSED] Average tick time ${avgMs.toFixed(3)} ms satisfies the <= ${options.maxMs} ms requirement.\n`
+      `\n[BENCHMARK PASSED] Average tick time ${avgMs.toFixed(3)} ms satisfies the <= ${options.maxMs} ms requirement.`,
+    );
+    console.log(
+      `[BENCHMARK PASSED] Average fog update time ${avgFogMs.toFixed(3)} ms satisfies the <= ${options.maxFogMs} ms requirement.\n`,
     );
     process.exit(0);
   }

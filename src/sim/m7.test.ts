@@ -162,6 +162,10 @@ describe('M7 Deterministic Duel Matrix & Combat Mechanics', () => {
     expect(tower.hp).toBe(1000);
     expect(tower.maxHp).toBe(1000);
 
+    const spotter = world.spawnUnit(0, 'longbowman', 22.5, 32.4, 'crown');
+    sim.issue({ kind: 'hold', player: 0, ids: [spotter.id] });
+    sim.updateFog();
+
     sim.issue({
       kind: 'attack',
       player: 0,
@@ -225,6 +229,8 @@ describe('M7 Deterministic Duel Matrix & Combat Mechanics', () => {
 
     const initialHp = wall.hp;
     expect(initialHp).toBe(800);
+
+    sim.updateFog();
 
     sim.issue({
       kind: 'attack',
@@ -315,6 +321,10 @@ describe('M7 Deterministic Duel Matrix & Combat Mechanics', () => {
     const cottage = world.spawnBuilding(1, 'cottage', 20, 20, true);
     cottage.hp = 15;
 
+    const spotter = world.spawnUnit(0, 'peasant', 25, 25, 'crown');
+    sim.issue({ kind: 'hold', player: 0, ids: [spotter.id] });
+    sim.updateFog();
+
     sim.issue({
       kind: 'attack',
       player: 0,
@@ -350,6 +360,8 @@ describe('M7 Deterministic Duel Matrix & Combat Mechanics', () => {
 
     const knight = world.spawnUnit(0, 'knight', 10, 20, 'crown');
     const enemy = world.spawnUnit(1, 'peasant', 14, 20, 'crown');
+
+    sim.updateFog();
 
     // 1. Attack enemy
     sim.issue({
@@ -397,6 +409,7 @@ describe('M7 Deterministic Duel Matrix & Combat Mechanics', () => {
     const target = world.spawnUnit(1, 'peasant', 20.6, 20, 'crown');
     target.hp = 1000;
     target.maxHp = 1000;
+    sim.updateFog();
 
     sim.issue({
       kind: 'attack',
@@ -433,6 +446,7 @@ describe('M7 Deterministic Duel Matrix & Combat Mechanics', () => {
 
     const knight = world.spawnUnit(0, 'knight', 20, 20, 'crown');
     const target = world.spawnUnit(1, 'peasant', 20.6, 20, 'crown');
+    sim.updateFog();
 
     sim.issue({
       kind: 'attack',
@@ -467,6 +481,7 @@ describe('M7 Deterministic Duel Matrix & Combat Mechanics', () => {
     const knight = world.spawnUnit(0, 'knight', 20, 20, 'crown');
     const target = world.spawnUnit(1, 'peasant', 20.6, 20, 'crown');
     const oldId = target.id;
+    sim.updateFog();
 
     sim.issue({
       kind: 'attack',
@@ -503,6 +518,7 @@ describe('M7 Deterministic Duel Matrix & Combat Mechanics', () => {
     const initialPop = p1.pop;
 
     const killer = world.spawnUnit(0, 'knight', 20.6, 20, 'crown');
+    sim.updateFog();
     sim.issue({
       kind: 'attack',
       player: 0,
@@ -569,6 +585,10 @@ describe('M7 Deterministic Duel Matrix & Combat Mechanics', () => {
     const goldAfterPaying = p1.gold;
 
     const treb = world.spawnUnit(0, 'trebuchet', 16, 25, 'crown');
+    const spotter = world.spawnUnit(0, 'peasant', 25.5, 30.0, 'crown');
+    sim.issue({ kind: 'hold', player: 0, ids: [spotter.id] });
+    sim.updateFog();
+
     sim.issue({
       kind: 'attack',
       player: 0,
@@ -637,6 +657,10 @@ describe('M7 Deterministic Duel Matrix & Combat Mechanics', () => {
 
     keep.hp = 100;
     const treb = world.spawnUnit(0, 'trebuchet', 12, 20, 'crown');
+    const spotter = world.spawnUnit(0, 'longbowman', 22.0, 30.5, 'crown');
+    sim.issue({ kind: 'hold', player: 0, ids: [spotter.id] });
+    sim.updateFog();
+
     sim.issue({
       kind: 'attack',
       player: 0,
@@ -660,6 +684,7 @@ describe('M7 Deterministic Duel Matrix & Combat Mechanics', () => {
     const target = world.spawnUnit(1, 'ox_cart', 15, 20);
     target.hp = 100;
     target.maxHp = 100;
+    sim.updateFog();
 
     sim.issue({
       kind: 'attack',
@@ -698,6 +723,7 @@ describe('M7 Deterministic Duel Matrix & Combat Mechanics', () => {
     const target2 = world.spawnUnit(1, 'ox_cart', 15, 20);
     target2.hp = 100;
     target2.maxHp = 100;
+    sim.updateFog();
 
     sim.issue({
       kind: 'attack',
@@ -732,6 +758,7 @@ describe('M7 Deterministic Duel Matrix & Combat Mechanics', () => {
     const unitA = world.spawnUnit(1, 'peasant', 10, 10);
     const recycledId = unitA.id;
     const killer = world.spawnUnit(0, 'knight', 10.6, 10);
+    sim.updateFog();
     sim.issue({
       kind: 'attack',
       player: 0,
@@ -811,7 +838,10 @@ describe('M7 Deterministic Duel Matrix & Combat Mechanics', () => {
 
       for (let t = 0; t < 400; t++) {
         sim.step();
-        hpHistory.push([...p0Units.map((u) => u.hp), ...p1Units.map((u) => u.hp)]);
+        hpHistory.push([
+          ...p0Units.map((u) => u.hp),
+          ...p1Units.map((u) => u.hp),
+        ]);
         const events = sim.drainEvents();
         if (events.length > 0) {
           eventHistory.push(

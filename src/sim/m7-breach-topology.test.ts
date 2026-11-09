@@ -71,6 +71,9 @@ describe('M7 breach topology', () => {
     const target = world.spawnUnit(1, 'peasant', 12.5, 12.5);
     const targetMaxHp = target.maxHp;
     const attacker = world.spawnUnit(0, 'man_at_arms', 3.5, 12.5);
+    const spotter = world.spawnUnit(0, 'longbowman', 12.5, 19.0, 'crown');
+    sim.issue({ kind: 'hold', player: 0, ids: [spotter.id] });
+    sim.updateFog();
 
     sim.issue({
       kind: 'attack',
@@ -91,14 +94,18 @@ describe('M7 breach topology', () => {
     for (let t = 0; t < 1000 && target.hp > 0; t++) {
       sim.step();
 
-      const deadOuter = outerWalls.filter(w => world.getEntity(w.id) === undefined);
+      const deadOuter = outerWalls.filter(
+        (w) => world.getEntity(w.id) === undefined,
+      );
       if (outerFellTick < 0 && deadOuter.length > 0) {
         outerFellTick = t;
         breachedOuter = deadOuter[0];
         targetHpAtOuterBreach = target.hp;
       }
 
-      const deadInner = innerWalls.filter(w => world.getEntity(w.id) === undefined);
+      const deadInner = innerWalls.filter(
+        (w) => world.getEntity(w.id) === undefined,
+      );
       if (innerFellTick < 0 && deadInner.length > 0) {
         innerFellTick = t;
         breachedInner = deadInner[0];
@@ -148,7 +155,8 @@ describe('M7 breach topology', () => {
     expect(wall).toBeDefined();
     expect(wall?.kind).toBe('building');
     if (wall && wall.kind === 'building') {
-      const onOuterRing = wall.x === 8 || wall.x === 16 || wall.z === 8 || wall.z === 16;
+      const onOuterRing =
+        wall.x === 8 || wall.x === 16 || wall.z === 8 || wall.z === 16;
       expect(onOuterRing).toBe(true);
       expect(wall.x).toBe(8);
 
@@ -181,6 +189,9 @@ describe('M7 breach topology', () => {
 
     expect(canEngage(world, attacker, islandTarget)).toBe(false);
     expect(resolveAttackTarget(world, attacker, islandTarget)).toBeUndefined();
+    const spotter = world.spawnUnit(0, 'longbowman', 12.5, 19.0, 'crown');
+    sim.issue({ kind: 'hold', player: 0, ids: [spotter.id] });
+    sim.updateFog();
 
     // Observable Sim-level behavior: issue attack order, attacker must not damage unrelated walls
     sim.issue({
@@ -270,6 +281,10 @@ describe('M7 breach topology', () => {
     }
 
     // Observable combat execution: attacker advances to the west wall and damages it.
+    const spotter = world.spawnUnit(0, 'peasant', 53.5, 30.5, 'crown');
+    sim.issue({ kind: 'hold', player: 0, ids: [spotter.id] });
+    sim.updateFog();
+
     sim.issue({
       kind: 'attack',
       player: 0,
@@ -281,7 +296,7 @@ describe('M7 breach topology', () => {
     let firstDamagedWall: BuildingEntity | undefined;
     for (let t = 0; t < 150; t++) {
       sim.step();
-      const damaged = ringWalls.find(w => w.hp < w.maxHp);
+      const damaged = ringWalls.find((w) => w.hp < w.maxHp);
       if (damaged) {
         firstDamagedWall = damaged;
         break;
@@ -292,7 +307,7 @@ describe('M7 breach topology', () => {
     expect(firstDamagedWall?.x).toBe(10);
     expect(firstDamagedWall?.z).toBe(30);
     // East walls (x=50) never touched
-    const eastDamaged = ringWalls.filter(w => w.x === 50 && w.hp < w.maxHp);
+    const eastDamaged = ringWalls.filter((w) => w.x === 50 && w.hp < w.maxHp);
     expect(eastDamaged).toHaveLength(0);
   });
 
@@ -312,6 +327,16 @@ describe('M7 breach topology', () => {
 
     const target = world.spawnUnit(1, 'ox_cart', 22.5, 30.5);
     const attacker = world.spawnUnit(0, 'man_at_arms', 30.5, 14.5);
+    const spotter1 = world.spawnUnit(0, 'peasant', 24.5, 35.5, 'crown');
+    const spotter2 = world.spawnUnit(0, 'peasant', 28.5, 35.5, 'crown');
+    const spotter3 = world.spawnUnit(0, 'peasant', 32.5, 35.5, 'crown');
+    const spotter4 = world.spawnUnit(0, 'peasant', 36.5, 35.5, 'crown');
+    sim.issue({
+      kind: 'hold',
+      player: 0,
+      ids: [spotter1.id, spotter2.id, spotter3.id, spotter4.id],
+    });
+    sim.updateFog();
 
     sim.issue({
       kind: 'attack',
@@ -337,7 +362,7 @@ describe('M7 breach topology', () => {
       sim.step();
     }
 
-    const damagedWalls = ringWalls.filter(w => w.hp < w.maxHp);
+    const damagedWalls = ringWalls.filter((w) => w.hp < w.maxHp);
     // Sticky target: only ONE wall was targeted and damaged throughout the movement
     expect(damagedWalls).toHaveLength(1);
     expect(damagedWalls[0].x).toBe(30);
@@ -376,6 +401,10 @@ describe('M7 breach topology', () => {
       expect(resolved.z).toBe(20);
 
       // Combat: attacker must breach the orthogonal wall rather than parking indefinitely at (20,20)
+      const spotter = world.spawnUnit(0, 'peasant', 14.0, 19.5, 'crown');
+      sim.issue({ kind: 'hold', player: 0, ids: [spotter.id] });
+      sim.updateFog();
+
       sim.issue({
         kind: 'attack',
         player: 0,
@@ -415,6 +444,9 @@ describe('M7 breach topology', () => {
 
     expect(canEngage(world, attacker, target)).toBe(false);
     expect(resolveAttackTarget(world, attacker, target)).toBeUndefined();
+    const spotter = world.spawnUnit(0, 'peasant', 21.0, 15.5, 'crown');
+    sim.issue({ kind: 'hold', player: 0, ids: [spotter.id] });
+    sim.updateFog();
 
     sim.issue({
       kind: 'attack',

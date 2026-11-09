@@ -16,7 +16,7 @@ import type {
   ProjectileEntity,
 } from './entity.js';
 import type { SimEvent } from './commands.js';
-
+import { updateFog, type FogGhost } from './systems/fog.js';
 export interface PlayerState {
   id: number;
   faction: Faction;
@@ -33,6 +33,10 @@ export interface PlayerState {
   popCap: number;
   eliminated: boolean;
   explored: Uint8Array;
+  visible: Uint8Array;
+  fog: Uint8Array;
+  fogRevision: number;
+  ghosts: Map<string, FogGhost>;
   upgrades: Set<string>;
   farmFoodRateMultiplier: number;
 }
@@ -66,6 +70,7 @@ export class World {
     this.initMines();
     this.initDoodads();
     this.initStartingBases();
+    updateFog(this);
   }
 
   emitEvent(event: SimEvent): void {
@@ -463,7 +468,8 @@ export class World {
     for (let i = 0; i < count; i++) {
       const faction: Faction = playerFactions?.[i] ?? 'crown';
       const explored = new Uint8Array(totalTiles);
-      explored.fill(1);
+      const visible = new Uint8Array(totalTiles);
+      const fog = new Uint8Array(totalTiles);
       this.players.push({
         id: i,
         faction,
@@ -480,6 +486,10 @@ export class World {
         popCap: 0,
         eliminated: false,
         explored,
+        visible,
+        fog,
+        fogRevision: 0,
+        ghosts: new Map<string, FogGhost>(),
         upgrades: new Set<string>(),
         farmFoodRateMultiplier: 1,
       });

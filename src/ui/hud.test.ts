@@ -157,6 +157,7 @@ describe('HUD Store & Minimap', () => {
     const peasant = {
       id: 1,
       kind: 'unit',
+      player: 0,
       type: 'peasant',
       hp: 50,
       maxHp: 50,
@@ -394,6 +395,7 @@ describe('HUD Store & Minimap', () => {
     const site: FakeEntity = {
       id: 10,
       kind: 'building',
+      player: 0,
       type: 'farm',
       built: false,
       buildProgress: 0.45,
@@ -403,6 +405,7 @@ describe('HUD Store & Minimap', () => {
     const barracks: FakeEntity = {
       id: 11,
       kind: 'building',
+      player: 0,
       type: 'barracks',
       built: true,
       buildProgress: 1.0,

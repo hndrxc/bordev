@@ -5,8 +5,8 @@
 **Entry criteria**: Alpha exit gate checked by the user.
 
 **Exit gate**:
-- [ ] All M0–M7 goalposts checked.
-- [ ] `npm run balance` report committed to `docs/balance/beta.md` meeting M5 targets.
+- [ ] All M0–M8 goalposts checked.
+- [ ] `npm run balance` report committed to `docs/balance/beta.md` meeting M6 targets.
 - [ ] `npm run e2e` Beta smoke spec: 4-player match (human + 3 AI, both factions) runs 10 game-minutes at 8× speed via debug hook without errors.
 - [ ] User plays one full match as each faction (vs Normal) and one 2v2; files issues; no issue labelled `blocker` remains open.
 
@@ -22,7 +22,46 @@ Goalposts:
 - [ ] Headless `--p1 clans:normal --p2 crown:normal --seeds 1-10` completes all games (AI uses a provisional Clans build order).
 - [ ] Vitest: a Clans axeman's damage vs a man-at-arms is 5−1 = 4 normally and 5 during Battle Fervor.
 
-### M1 — Final art pass (units)
+### M1 — Art direction and lighting pass
+
+Implements the overview's [Art direction](00-overview.md#art-direction) section in shared pipeline code plus a two-asset pilot, before the per-asset final art passes (M2, M3). Shared changes (lighting, look, bevel helper, human proportions, player colours, colour grade, grid, terrain) reach every existing asset through the full rebuild; per-asset reshaping of the remaining assets happens in M2 and M3.
+
+Phases:
+1. Review harness: `tests/e2e/art-review.spec.ts` is skipped unless `ART_REVIEW=<label>` is set. It uses `setupM4Session` and `capture` from `tests/e2e/fixtures/m4.ts` to write `build/review/<label>/<scene>-z<zoom>.png` at zoom 0.5, 1.0 and 1.5 for two scenes:
+   - `start`: camera on player 0's start with the debug scene as booted.
+   - `lineup`: on the M7 plain-grass area x 50..99, z 0..25, with debug walkers cleared via `clearDebugWalkers`. Stage one Crown Keep per player and, for each player, 3 peasants, 3 spearmen and 1 ox cart spaced 1.5 tiles apart.
+
+   Run `ART_REVIEW=before` before any other phase.
+2. Lighting and look: apply the overview's rig and look values in `art/blender/lib/rig.py` and `art/blender/lib/look.py`. First render the smallest representative cases (`calib_tile`, `calib_arrow`, one `crown_peasant` walk frame, and one `crown_keep` body/mask/shadow frame). Confirm that calibration output is unchanged and that the shadow pass contains only the key-sun shadow.
+3. Shared modelling: in `art/blender/lib/model.py`, change `box` bevels to 2 segments with `limit_method = "ANGLE"` and add an optional `bevel` argument to `cylinder` and `cone`. In `art/blender/lib/characters.py`, apply the overview's character proportions: head 1.12×, hands 1.2×, legs as tapered cones (ankle radius 0.055, hip radius 0.068), tunic `r1` 0.24, and arms resting 0.10 rad away from the body. In `anim.character_clips`, add an idle weight shift (body roll ±0.03 rad) and a walk torso twist (±0.08 rad about Z, in phase with the legs).
+4. Pilot assets:
+   - **`crown_keep`** (`buildings.keep()`):
+     - Gatehouse projects 0.4 forward from the front curtain wall, with an arched dark recess, existing door and portcullis, and three merlons.
+     - Corner towers are 12-vertex tapered cones (radius 0.50 → 0.44), each with a corbel band and 8 crenellations.
+     - The rear tower at (−1.45, 1.45) has a 12-vertex `ROOF` cone cap (radius 0.58, height 0.9), and the flag moves to that cap's tip.
+     - The great-hall roof gets a 0.12 eave overhang, a `STONE_DARK` ridge cap and two dormers on the front (−Y) slope.
+     - Masonry boxes use bevel 0.03; merlons use 0.02.
+   - **`crown_peasant`**: overview proportions, segmented arms with a slight elbow bend, and the hoe held diagonally at idle.
+5. Runtime:
+   - Change `TINT_PLAYER_0` and `TINT_PLAYER_1` in `src/render/Renderer.ts` to the overview player colours, and change the team gain in `src/render/SpriteBatch.ts` from 1.25 to 1.1.
+   - Attach the overview grade as an `ImageProcessingPostProcess` on `IsoCamera.camera`.
+   - In `src/render/overlays/DebugGrid.ts`, implement the grid as always visible in rendering group 1 with the overview colour/alpha, and hide footprints by default.
+   - Rename `Renderer.toggleDebugGrid` → `toggleDebugFootprints`, `Overlays.toggleGrid` → `toggleFootprints`, `isGridVisible` → `areFootprintsVisible` and `setGridVisible` → `setFootprintsVisible`, updating `src/input/Hotkeys.ts` and `src/input/Hotkeys.test.ts`.
+   - Run the full `npm run e2e`.
+6. Terrain: apply the overview grass/dirt values in `art/blender/render_terrain.py`, then run `npm run art:terrain`.
+7. Rollout and record:
+   - Run full `npm run art:build && npm run art:pack`, then capture `ART_REVIEW=after`.
+   - Rewrite these overview sections to the implemented values: Rendering contract (team-colour formula and grid layer), Sprite pipeline (rig, look and terrain lines), the `G` sentence in Controls, the `G` sentence in the Debug hooks section, and the `G` sentence in `README.md`.
+   - Change the overview Art direction section's "Implementation is scheduled…" sentences to state that M1 implemented it.
+
+Goalposts:
+- [ ] `npx vitest run tools/pack-atlas.test.ts` passes, and the `calib_tile` and `calib_arrow` atlas PNGs are byte-identical to their pre-milestone versions.
+- [ ] Vitest (Babylon `NullEngine`): the tile grid is visible by default in rendering group 1; Keep footprints are hidden by default; `toggleDebugFootprints()` changes only footprint visibility.
+- [ ] Greyscale luminance standard deviation (sharp `stats()`) for `public/terrain/grass.png` and `public/terrain/dirt.png` is each ≤ 65 % of its pre-milestone value; record before/after numbers here.
+- [ ] Full `npm run art:build` completes in ≤ 90 minutes, and unchanged reruns of `art:build` and `art:pack` skip every asset.
+- [ ] The user approves `build/review/after/` against `build/review/before/` at all three zooms. The approved images become the visual reference for M2 and M3.
+
+### M2 — Final art pass (units)
 
 Phases (one phase per 5 units; each phase delivers models, all anims, icons):
 1. Crown: peasant, ox_cart, spearman, man_at_arms, halberdier.
@@ -31,27 +70,29 @@ Phases (one phase per 5 units; each phase delivers models, all anims, icons):
 4. Clans: javelineer, hunter, horse_raider, war_rider, battering_ram.
 5. Projectiles and effects sprites: arrow, bolt, javelin, trebuchet stone, hit sparks, dust puff, building-fire (3 sizes, 8-frame loops), rubble smoke; spawned by sim events in the renderer.
 
-Art bar for every unit: readable silhouette at zoom 0.5; distinct per-faction palette (Crown: blues/whites/steel, stone grey; Clans: browns/furs/ochre, bone); team colour on ≥ 15 % of visible body pixels (tabard/shield/banner), measured from the mask atlas; walk cycle 8 frames with no foot-sliding at listed speed (stride length = speed × 8/12 s); attack impact on frame 5.
+Art bar for every unit: readable silhouette at zoom 0.5; distinct per-faction palette (Crown: blues/whites/steel, stone grey; Clans: browns/furs/ochre, bone); team colour on ≥ 15 % of visible body pixels (tabard/shield/banner), measured from the mask atlas; walk cycle 8 frames with no foot-sliding at listed speed (stride length = speed × 8/12 s); attack impact on frame 5. Every unit also follows the overview's Art direction and is reviewed against the M1-approved `build/review/after/` reference; the peasant starts from the M1 pilot.
 
 Goalposts:
 - [ ] `npm run art:build` full rebuild completes on this machine in ≤ 90 minutes.
 - [ ] Vitest mask-coverage test passes for all 20 units.
 - [ ] Contact sheet `build/contact/units.png` (generated by `tools/pack-atlas.ts --contact`) reviewed by user: approved.
 
-### M2 — Final art pass (buildings, doodads, terrain, UI)
+### M3 — Final art pass (buildings, doodads, terrain, UI)
 
 Phases:
 1. Crown 12 buildings: construct stages, idle, damaged (fires/cracks), rubble, gate open/closed, icons.
 2. Clans 12 buildings: same.
 3. Doodads: 8 tree variants (2 species per faction biome feel), 4 rocks, 3 bushes (decorative, passable), gold mine with 3 depletion stages.
-4. Terrain textures final + tile transition noise tuning; shoreline foam band in water shader.
+4. Terrain textures final (starting from M1's retuned grass/dirt) + tile transition noise tuning; shoreline foam band in water shader.
 5. UI art: HUD frame (Blender-rendered stone/wood panels, 9-slice), resource icons, command icons (move, stop, hold, attack-move, build menus, cancel, rally), cursors (default, attack, build, gather, invalid) — PNG, 32 px and 64 px.
+
+Art bar for every building and doodad: follows the overview's Art direction (one focal point, one silhouette peak, eave and ridge treatment, angle-limited bevels), reviewed against the M1-approved `build/review/after/` reference; the Keep starts from the M1 pilot.
 
 Goalposts:
 - [ ] Occluded-unit silhouette: own units behind buildings render a player-colour outline (second sprite pass with depth test `GREATER`, alpha 0.6).
 - [ ] Screenshot review at zoom 0.5 / 1.0 / 1.5 approved by user.
 
-### M3 — Complete gameplay features
+### M4 — Complete gameplay features
 
 Phases:
 1. All 16 upgrades implemented with tooltips; upgrade icons.
@@ -64,7 +105,7 @@ Goalposts:
 - [ ] Vitest: allied units pass through each other's gates; allied fog shared; team victory declared when all enemy-team TCs are gone.
 - [ ] E2E: pause freezes sim tick counter; 2× speed doubles ticks per real second ±10 %.
 
-### M4 — AI: three difficulties, both factions
+### M5 — AI: three difficulties, both factions
 
 Phases:
 1. Refactor AI into managers per overview; `difficulty.ts` table:
@@ -88,7 +129,7 @@ Goalposts (headless, `npm run balance -- --matrix ai`):
 - [ ] Hard beats Easy ≥ 90 %, Normal beats Easy ≥ 75 %, Hard beats Normal ≥ 65 % over 20 seeds per pairing per faction combination.
 - [ ] No AI game stalls: every game ends before 72 000 ticks or with ≥ 1 building destroyed per 10 minutes after minute 15.
 
-### M5 — Balance
+### M6 — Balance
 
 Phases:
 1. `tools/balance.ts`: runs matrices across maps/seeds/factions, outputs markdown with win rates, average game length, unit usage and kill/death per unit type.
@@ -99,7 +140,7 @@ Goalposts:
 - [ ] Median game length Normal vs Normal 1v1: 18–30 minutes.
 - [ ] Every unit type has ≥ 3 % share of AI army production for its faction (no dead units).
 
-### M6 — Maps
+### M7 — Maps
 
 Phases:
 1. Full `tools/mapgen.ts`: templates `lowlands` (open), `riverlands` (river with 3 shallow fords), `forest_pass` (forest walls with chokepoints), `highland_ring` (rock ring centre); rotational symmetry for 2/3/4 players; guarantees from overview; contested central mines.
@@ -109,7 +150,7 @@ Phases:
 Goalposts:
 - [ ] Map validation Vitest passes for curated maps and 100 random seeds per template.
 
-### M7 — Performance and stability
+### M8 — Performance and stability
 
 Phases:
 1. `bench:sim -- --units 600 --players 4` scenario (armies fighting + economies).

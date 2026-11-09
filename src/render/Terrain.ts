@@ -52,6 +52,7 @@ const TERRAIN_FRAGMENT_SHADER = `
   uniform sampler2D uWater;
   uniform sampler2D uRock;
 
+  uniform sampler2D uFog;
   // 2D pseudo-random hash
   vec2 hash2(vec2 p) {
     p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
@@ -116,7 +117,22 @@ const TERRAIN_FRAGMENT_SHADER = `
                    s1.r * colWater.rgb +
                    s1.g * colRock.rgb;
 
-    gl_FragColor = vec4(blended, 1.0);
+    vec2 fogUV = clamp(vUV, 0.0, 1.0);
+    float fogVal = texture2D(uFog, fogUV).r;
+
+    // Unexplored: black (0.0)
+    // Explored: 50% desaturated, 50% brightness (128/255)
+    // Visible: unchanged (255/255)
+    float lum = dot(blended, vec3(0.299, 0.587, 0.114));
+    vec3 exploredColor = mix(blended, vec3(lum), 0.5) * 0.5;
+
+    float tLow = clamp(fogVal * (255.0 / 128.0), 0.0, 1.0);
+    float tHigh = clamp((fogVal - (128.0 / 255.0)) * (255.0 / 127.0), 0.0, 1.0);
+
+    vec3 lowColor = mix(vec3(0.0), exploredColor, tLow);
+    vec3 finalColor = mix(lowColor, blended, tHigh);
+
+    gl_FragColor = vec4(finalColor, 1.0);
   }
 `;
 
@@ -127,7 +143,7 @@ function loadTexture(url: string, scene: Scene): Promise<Texture> {
       url,
       scene,
       false, // noMipmap
-      true,  // invertY
+      true, // invertY
       Texture.TRILINEAR_SAMPLINGMODE,
       () => {
         if (!settled) {
@@ -139,9 +155,13 @@ function loadTexture(url: string, scene: Scene): Promise<Texture> {
         if (!settled) {
           settled = true;
           texture.dispose();
-          reject(new Error(`Failed to load texture from ${url}: ${message || exception || 'unknown error'}`));
+          reject(
+            new Error(
+              `Failed to load texture from ${url}: ${message || exception || 'unknown error'}`,
+            ),
+          );
         }
-      }
+      },
     );
     texture.wrapU = Texture.WRAP_ADDRESSMODE;
     texture.wrapV = Texture.WRAP_ADDRESSMODE;
@@ -158,7 +178,10 @@ function loadTexture(url: string, scene: Scene): Promise<Texture> {
  * - splat0: R = grass/forest, G = dirt, B = sand, A = shallow
  * - splat1: R = water, G = rock-ground, B = unused (0), A = unused (0)
  */
-export function buildTerrainSplats(map: { size: number; tiles: Uint8Array | number[] }): SplatData {
+export function buildTerrainSplats(map: {
+  size: number;
+  tiles: Uint8Array | number[];
+}): SplatData {
   const size = map.size;
   const texelsPerTile = 4;
   const width = size * texelsPerTile;
@@ -229,7 +252,7 @@ export class Terrain {
     this.ground = CreateGround(
       'terrainGround',
       { width: size, height: size, subdivisions: 1 },
-      scene
+      scene,
     );
     this.ground.position.set(size / 2, 0, size / 2);
     this.ground.renderingGroupId = 0;
@@ -244,7 +267,7 @@ export class Terrain {
       scene,
       false, // generateMipMaps: false
       false, // invertY: false
-      Constants.TEXTURE_BILINEAR_SAMPLINGMODE
+      Constants.TEXTURE_BILINEAR_SAMPLINGMODE,
     );
     this.splat0.wrapU = Texture.CLAMP_ADDRESSMODE;
     this.splat0.wrapV = Texture.CLAMP_ADDRESSMODE;
@@ -256,7 +279,7 @@ export class Terrain {
       scene,
       false, // generateMipMaps: false
       false, // invertY: false
-      Constants.TEXTURE_BILINEAR_SAMPLINGMODE
+      Constants.TEXTURE_BILINEAR_SAMPLINGMODE,
     );
     this.splat1.wrapU = Texture.CLAMP_ADDRESSMODE;
     this.splat1.wrapV = Texture.CLAMP_ADDRESSMODE;
@@ -281,8 +304,9 @@ export class Terrain {
           'uShallow',
           'uWater',
           'uRock',
+          'uFog',
         ],
-      }
+      },
     );
 
     this.material.disableDepthWrite = true;
@@ -291,7 +315,6 @@ export class Terrain {
     this.material.setFloat('uMapSize', size);
     this.material.setTexture('uSplat0', this.splat0);
     this.material.setTexture('uSplat1', this.splat1);
-
     this.material.onError = (_effect: Effect, errors: string) => {
       console.error('Terrain shader compilation failed:', errors);
       this.shaderCompileError = errors;
@@ -325,7 +348,7 @@ export class Terrain {
         }
         this.terrainTextures.push(tex);
         return { key: def.key, texture: tex };
-      })
+      }),
     );
 
     if (this.isDisposed) {
@@ -337,7 +360,9 @@ export class Terrain {
     }
 
     if (this.shaderCompileError !== null) {
-      throw new Error(`Terrain shader compilation failed: ${this.shaderCompileError}`);
+      throw new Error(
+        `Terrain shader compilation failed: ${this.shaderCompileError}`,
+      );
     }
 
     if (this.material.isReady(this.ground)) {
@@ -378,7 +403,11 @@ export class Terrain {
         if (this.shaderCompileError !== null) {
           settled = true;
           cleanup();
-          reject(new Error(`Terrain shader compilation failed: ${this.shaderCompileError}`));
+          reject(
+            new Error(
+              `Terrain shader compilation failed: ${this.shaderCompileError}`,
+            ),
+          );
           return;
         }
         if (this.isDisposed || scene.isDisposed) {
@@ -412,6 +441,13 @@ export class Terrain {
     this.material.setFloat('uTime', timeSeconds);
   }
 
+  setFogTexture(fog: Texture): void {
+    if (this.isDisposed || !this.material) {
+      return;
+    }
+    this.material.setTexture('uFog', fog);
+  }
+
   dispose(): void {
     if (this.isDisposed) {
       return;
@@ -419,10 +455,10 @@ export class Terrain {
     this.isDisposed = true;
     this.onShaderError = null;
     if (this.ground) {
-      this.ground.dispose(false, true);
+      this.ground.dispose(false, false);
     }
     if (this.material) {
-      this.material.dispose(true, true);
+      this.material.dispose(true, false);
     }
     if (this.splat0) {
       this.splat0.dispose();

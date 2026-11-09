@@ -235,7 +235,7 @@ export class Projectiles {
     this.entityById.clear();
     for (let i = 0; i < count; i++) {
       const ent = entities[i];
-      if (!ent.remains) {
+      if (!ent.remains && !ent.ghost) {
         this.entityById.set(ent.id, ent);
       }
     }
@@ -254,12 +254,26 @@ export class Projectiles {
       const x = ent.x;
       const z = ent.z;
 
-      // Current homing target centre from interpolated entity if available
+      // Flight progress at the rendered (interpolated) position: sim traveledDistance
+      // includes the full latest tick step, so back out the un-rendered fraction of it.
+      const stepX = raw.x - raw.previousX;
+      const stepZ = raw.z - raw.previousZ;
+      const step = Math.sqrt(stepX * stepX + stepZ * stepZ);
+      const traveled = Math.max(0, raw.traveledDistance - (1 - alpha) * step);
+
+      let dx: number;
+      let dz: number;
+      let remaining: number;
+      let totalDist: number;
+      let p: number;
+
+      // Current homing target centre from interpolated entity if visible in snapshot.
+      // Target coordinates must NEVER fall back to unseen raw targetRef.
       const targetRef = raw.targetRef;
-      let tx: number;
-      let tz: number;
       const targetEnt = this.entityById.get(targetRef.id);
-      if (targetEnt) {
+      if (targetEnt?.raw === targetRef) {
+        let tx: number;
+        let tz: number;
         if (targetEnt.kind === 'building') {
           tx = targetEnt.x + (targetEnt.width ?? 1) * 0.5;
           tz = targetEnt.z + (targetEnt.height ?? 1) * 0.5;
@@ -267,27 +281,46 @@ export class Projectiles {
           tx = targetEnt.x;
           tz = targetEnt.z;
         }
-      } else if (targetRef.kind === 'building') {
-        tx = targetRef.x + targetRef.width * 0.5;
-        tz = targetRef.z + targetRef.height * 0.5;
+        dx = tx - x;
+        dz = tz - z;
+        remaining = Math.sqrt(dx * dx + dz * dz);
+        totalDist = traveled + remaining;
+        p =
+          totalDist > 1e-4 ? Math.max(0, Math.min(1, traveled / totalDist)) : 1;
       } else {
-        tx = targetRef.x;
-        tz = targetRef.z;
-      }
-      // Heading: actual current projectile -> target line (follows a moving target).
-      const dx = tx - x;
-      const dz = tz - z;
-      const remaining = Math.sqrt(dx * dx + dz * dz);
+        // Target is outside visible snapshot. Use projectile's own already-interpolated state.
+        let dirX = stepX;
+        let dirZ = stepZ;
+        if (step > 1e-4) {
+          dirX /= step;
+          dirZ /= step;
+        } else {
+          const fromOriginX = raw.x - raw.originX;
+          const fromOriginZ = raw.z - raw.originZ;
+          const fromOriginDist = Math.hypot(fromOriginX, fromOriginZ);
+          if (fromOriginDist > 1e-4) {
+            dirX = fromOriginX / fromOriginDist;
+            dirZ = fromOriginZ / fromOriginDist;
+          } else {
+            dirX = 0;
+            dirZ = 1;
+          }
+        }
 
-      // Flight progress at the rendered (interpolated) position: sim traveledDistance
-      // includes the full latest tick step, so back out the un-rendered fraction of it.
-      const stepX = raw.x - raw.previousX;
-      const stepZ = raw.z - raw.previousZ;
-      const step = Math.sqrt(stepX * stepX + stepZ * stepZ);
-      const traveled = Math.max(0, raw.traveledDistance - (1 - alpha) * step);
-      const totalDist = traveled + remaining;
-      const p =
-        totalDist > 1e-4 ? Math.max(0, Math.min(1, traveled / totalDist)) : 1;
+        const simProgress = Math.max(0, Math.min(1, raw.flightProgress ?? 0));
+        if (simProgress > 1e-4 && raw.traveledDistance > 1e-4) {
+          totalDist = raw.traveledDistance / simProgress;
+        } else {
+          totalDist = Math.max(1.0, traveled);
+        }
+        remaining = Math.max(0, totalDist - traveled);
+        p =
+          totalDist > 1e-4
+            ? Math.max(0, Math.min(1, traveled / totalDist))
+            : simProgress;
+        dx = dirX * remaining;
+        dz = dirZ * remaining;
+      }
 
       const y0 = isStone ? 1.5 : raw.sourceRef?.kind === 'building' ? 1.8 : 0.9;
       const y1 = 0.5;

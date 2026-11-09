@@ -6,6 +6,7 @@ import { getUnitData } from '../data/units';
 import { getBuildingData } from '../data/buildings';
 import type { World } from '../sim/world';
 import { getResearchDefinition } from '../sim/systems/research';
+import { isEntityVisibleTo } from '../sim/systems/fog';
 
 export interface HudResources {
   food: number;
@@ -51,11 +52,14 @@ export interface MinimapUnit {
   z: number;
   player: number;
   kind: EntityKind;
+  ghost?: boolean;
 }
 
 export interface MinimapData {
   mapSize: number;
   tiles: Uint8Array | null;
+  fog: Uint8Array | null;
+  fogRevision: number;
   units: readonly MinimapUnit[];
   viewportCorners:
     | readonly [
@@ -133,6 +137,8 @@ const INITIAL_ORDERS: HudOrders = {
 const INITIAL_MINIMAP: MinimapData = {
   mapSize: 128,
   tiles: null,
+  fog: null,
+  fogRevision: 0,
   units: [],
   viewportCorners: null,
 };
@@ -250,14 +256,14 @@ function areMinimapUnitsEqual(
       uA.x !== uB.x ||
       uA.z !== uB.z ||
       uA.player !== uB.player ||
-      uA.kind !== uB.kind
+      uA.kind !== uB.kind ||
+      uA.ghost !== uB.ghost
     ) {
       return false;
     }
   }
   return true;
 }
-
 function areViewportCornersEqual(
   a: MinimapData['viewportCorners'],
   b: MinimapData['viewportCorners'],
@@ -339,6 +345,7 @@ export function publishHud(session: GameSession): void {
   for (const id of selectedIds) {
     const raw = world?.getEntity?.(id);
     if (!raw || raw.kind === 'projectile') continue;
+    if (world && !isEntityVisibleTo(world, 0, raw)) continue;
 
     let trainingProgress: number | undefined;
     let trainingQueueCount: number | undefined;
@@ -419,12 +426,28 @@ export function publishHud(session: GameSession): void {
   const mapSize = map?.size ?? 128;
   const tiles = map?.tiles ?? null;
 
+  const fog =
+    session.snapshot?.fog ?? session.sim?.world?.players?.[0]?.fog ?? null;
+  const fogRevision =
+    session.snapshot?.fogRevision ??
+    session.sim?.world?.players?.[0]?.fogRevision ??
+    0;
+
   const snapshotEntities = session.snapshot?.entities ?? [];
   const minimapUnits: MinimapUnit[] = [];
 
   for (const ent of snapshotEntities) {
     if (ent.remains || ent.deathTick !== undefined) continue;
     if (ent.kind === 'projectile' || ent.kind === 'doodad') continue;
+
+    const isGhost = 'ghost' in ent && ent.ghost === true;
+    if (!isGhost && ent.player !== 0 && world) {
+      const raw = world.getEntity?.(ent.id);
+      if (raw && !isEntityVisibleTo(world, 0, raw)) {
+        continue;
+      }
+    }
+
     const isFootprint = ent.kind === 'building' || ent.kind === 'mine';
     const cx =
       isFootprint && ent.width != null ? ent.x + ent.width * 0.5 : ent.x;
@@ -435,9 +458,9 @@ export function publishHud(session: GameSession): void {
       z: cz,
       player: ent.player ?? -1,
       kind: ent.kind,
+      ...(isGhost ? { ghost: true } : {}),
     });
   }
-
   const camera = session.renderer?.camera;
   const view = camera?.view ?? null;
 
@@ -503,11 +526,15 @@ export function publishHud(session: GameSession): void {
       finalUnits === prev.minimap.units &&
       finalCorners === prev.minimap.viewportCorners &&
       mapSize === prev.minimap.mapSize &&
-      tiles === prev.minimap.tiles
+      tiles === prev.minimap.tiles &&
+      fog === prev.minimap.fog &&
+      fogRevision === prev.minimap.fogRevision
         ? prev.minimap
         : {
             mapSize,
             tiles,
+            fog,
+            fogRevision,
             units: finalUnits,
             viewportCorners: finalCorners,
           };

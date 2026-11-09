@@ -1,3 +1,4 @@
+import { isEntityVisibleTo } from '../sim/systems/fog';
 import type { GameSession } from '../game/GameSession';
 import type { CameraController } from './CameraController';
 import type { Entity } from '../sim/entity';
@@ -67,6 +68,9 @@ export class SelectionController {
     const sim = this.session.sim;
     if (!sim) return false;
     if (sim.world.getEntity(ent.id) !== ent) return false;
+    if (!isEntityVisibleTo(sim.world, 0, ent)) {
+      return false;
+    }
     if (ent.kind === 'mine') return true;
     if (ent.kind === 'unit' || ent.kind === 'building') {
       return typeof ent.hp === 'number' ? ent.hp > 0 : true;
@@ -403,9 +407,11 @@ export class SelectionController {
       (ent.kind === 'mine' ||
         ((ent.kind === 'unit' || ent.kind === 'building') && ent.hp > 0))
     ) {
+      if (!isEntityVisibleTo(sim.world, 0, ent)) {
+        return undefined;
+      }
       return pickedId;
     }
-
     return undefined;
   }
 

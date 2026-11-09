@@ -39,8 +39,22 @@ describe('M7 Wall and Gate Systems & Acceptance', () => {
 
     // Closed 5x5 ring of player 0 walls at x=12..16, z=12..16 with vertical gates
     // on both west (x=12, z=13..15) and east (x=16, z=13..15) sides.
-    const westGate = world.spawnBuilding(0, 'stone_gate', 12, 13, true, 'vertical');
-    const eastGate = world.spawnBuilding(0, 'stone_gate', 16, 13, true, 'vertical');
+    const westGate = world.spawnBuilding(
+      0,
+      'stone_gate',
+      12,
+      13,
+      true,
+      'vertical',
+    );
+    const eastGate = world.spawnBuilding(
+      0,
+      'stone_gate',
+      16,
+      13,
+      true,
+      'vertical',
+    );
     expect(westGate.width).toBe(1);
     expect(westGate.height).toBe(3);
     expect(eastGate.width).toBe(1);
@@ -96,7 +110,12 @@ describe('M7 Wall and Gate Systems & Acceptance', () => {
     for (let tick = 0; tick < 1500; tick++) {
       sim.step();
 
-      if (friendly.x > 12 && friendly.x < 16 && friendly.z > 12 && friendly.z < 16) {
+      if (
+        friendly.x > 12 &&
+        friendly.x < 16 &&
+        friendly.z > 12 &&
+        friendly.z < 16
+      ) {
         friendlyEnteredRing = true;
       }
       if (enemy.x > 12 && enemy.x < 16 && enemy.z > 12 && enemy.z < 16) {
@@ -106,7 +125,10 @@ describe('M7 Wall and Gate Systems & Acceptance', () => {
       friendlyMaxDevZ = Math.max(friendlyMaxDevZ, Math.abs(friendly.z - 14.5));
       enemyMaxDevZ = Math.max(enemyMaxDevZ, Math.abs(enemy.z - 14.5));
 
-      if (!friendlyArrived && Math.hypot(friendly.x - 21.5, friendly.z - 14.5) <= 0.6) {
+      if (
+        !friendlyArrived &&
+        Math.hypot(friendly.x - 21.5, friendly.z - 14.5) <= 0.6
+      ) {
         friendlyArrived = true;
       }
       if (!enemyArrived && Math.hypot(enemy.x - 21.5, enemy.z - 14.5) <= 0.6) {
@@ -135,7 +157,14 @@ describe('M7 Wall and Gate Systems & Acceptance', () => {
     {
       const sim = makeOpenSim({ size: MAP_SIZE });
       const { world } = sim;
-      const gate = world.spawnBuilding(0, 'stone_gate', 15, 14, true, 'vertical');
+      const gate = world.spawnBuilding(
+        0,
+        'stone_gate',
+        15,
+        14,
+        true,
+        'vertical',
+      );
       // Adjacent hostile at dx=0.5 (x=14.5, z=15.5): gate stays closed
       const hostile = world.spawnUnit(1, 'man_at_arms', 14.5, 15.5);
       sim.issue({ kind: 'hold', player: 1, ids: [hostile.id], queued: false });
@@ -146,7 +175,14 @@ describe('M7 Wall and Gate Systems & Acceptance', () => {
     {
       const sim = makeOpenSim({ size: MAP_SIZE });
       const { world } = sim;
-      const gate = world.spawnBuilding(0, 'stone_gate', 15, 14, true, 'vertical');
+      const gate = world.spawnBuilding(
+        0,
+        'stone_gate',
+        15,
+        14,
+        true,
+        'vertical',
+      );
 
       // Friendly unit at dx=1.1 (x=13.9, z=15.5): gate stays closed
       const owner = world.spawnUnit(0, 'man_at_arms', 13.9, 15.5);
@@ -158,7 +194,14 @@ describe('M7 Wall and Gate Systems & Acceptance', () => {
     {
       const sim = makeOpenSim({ size: MAP_SIZE });
       const { world } = sim;
-      const gate = world.spawnBuilding(0, 'stone_gate', 15, 14, true, 'vertical');
+      const gate = world.spawnBuilding(
+        0,
+        'stone_gate',
+        15,
+        14,
+        true,
+        'vertical',
+      );
 
       // Friendly unit at dx=1.0 (x=14.0, z=15.5): gate opens
       const owner = world.spawnUnit(0, 'man_at_arms', 14.0, 15.5);
@@ -206,7 +249,9 @@ describe('M7 Wall and Gate Systems & Acceptance', () => {
 
       expect(passedThroughGate).toBe(true);
       expect(observedGateOpen).toBe(true);
-      expect(Math.hypot(owner.x - 22.5, owner.z - 15.5)).toBeLessThanOrEqual(0.6);
+      expect(Math.hypot(owner.x - 22.5, owner.z - 15.5)).toBeLessThanOrEqual(
+        0.6,
+      );
       expect(gate.gateOpen).toBe(false);
     }
   });
@@ -371,6 +416,9 @@ describe('M7 Wall and Gate Systems & Acceptance', () => {
 
     const target = world.spawnUnit(1, 'peasant', 20.5, 15.5);
     const attacker = world.spawnUnit(0, 'man_at_arms', 10.5, 15.5);
+    const observer = world.spawnUnit(0, 'longbowman', 14.5, 11);
+    sim.updateFog();
+    sim.issue({ kind: 'hold', player: 0, ids: [observer.id] });
 
     // Gate is selected as the breach target
     expect(resolveAttackTarget(world, attacker, target)).toBe(gate);
@@ -444,6 +492,9 @@ describe('M7 Wall and Gate Systems & Acceptance', () => {
     const target = world.spawnUnit(1, 'peasant', 12.5, 12.5);
     const targetMaxHp = target.maxHp;
     const attacker = world.spawnUnit(0, 'man_at_arms', 5.5, 12.5);
+    const observer = world.spawnUnit(0, 'longbowman', 12.5, 6);
+    sim.updateFog();
+    sim.issue({ kind: 'hold', player: 0, ids: [observer.id] });
 
     // Enclosed: attacker resolves to the west wall directly between it and the target
     expect(resolveAttackTarget(world, attacker, target)).toBe(breachWall);

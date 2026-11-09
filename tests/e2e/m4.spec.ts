@@ -4,6 +4,7 @@ import {
   setupM4Session,
   worldToScreen,
   waitForTicks,
+  waitForRender,
   playfield,
   pickablePoint,
   trustedDigit1DoubleTap,
@@ -1323,9 +1324,19 @@ test('4. hotkey submenus, queued orders, delete slot, and enemy ownership isolat
         typeof e.hp === 'number' &&
         e.hp > 0,
     );
-    return enemy ? enemy.id : null;
+    if (!enemy) return null;
+    // Stage genuine noninterfering owned observer near enemy before selection
+    const ox = enemy.x + 1 < sim.world.map.size - 2 ? enemy.x + 1 : enemy.x - 1;
+    const observer = sim.world.spawnUnit(0, 'peasant', ox, enemy.z, 'crown');
+    observer.order = { kind: 'hold' };
+    sim.issue({ kind: 'hold', player: 0, ids: [observer.id] });
+    sim.updateFog();
+    return enemy.id;
   });
   expect(enemyUnitId).not.toBeNull();
+
+  await waitForTicks(page, 2);
+  await waitForRender(page, [enemyUnitId!]);
 
   await page.evaluate((id) => {
     window.__bordev?.session.input.selection.set([id]);
@@ -1630,6 +1641,7 @@ test('5. contextual orders: enemy combat, gold mining, farm economy, repair, ral
     const sim = window.__bordev?.sim;
     if (!sim) throw new Error('Sim missing');
     const m = sim.world.spawnMine(20, 25);
+    sim.updateFog();
     return m.id;
   });
 
@@ -1637,6 +1649,7 @@ test('5. contextual orders: enemy combat, gold mining, farm economy, repair, ral
     const sim = window.__bordev?.sim;
     if (!sim) throw new Error('Sim missing');
     const c = sim.world.spawnUnit(0, 'ox_cart', 21, 28, 'crown');
+    sim.updateFog();
     return c.id;
   });
   await waitForTicks(page, 2);
@@ -1718,8 +1731,13 @@ test('5. contextual orders: enemy combat, gold mining, farm economy, repair, ral
   const enemyId = await page.evaluate(() => {
     const sim = window.__bordev?.sim;
     if (!sim) throw new Error('Sim missing');
+    // Observer provides legitimate owned LOS without global reveal or visibility array bypass
+    const obs = sim.world.spawnUnit(0, 'peasant', 25, 13, 'crown');
+    obs.order = { kind: 'hold' };
+    sim.issue({ kind: 'hold', player: 0, ids: [obs.id] });
     const e = sim.world.spawnUnit(1, 'spearman', 23, 13, 'crown');
     sim.issue({ kind: 'hold', player: 1, ids: [e.id] });
+    sim.updateFog();
     return e.id;
   });
 

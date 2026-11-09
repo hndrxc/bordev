@@ -186,7 +186,7 @@ Implemented sprite-pipeline prerequisites:
 - Atlas cache keys include the resolved `maxrects-packer` version alongside sharp versions.
 - Blender animation descriptors are checked against manifest names, frame counts and loop flags; cart `load` is non-looping.
 
-Placement already validates each player's exploration array. M5 initializes it fully explored; M8 supplies actual fog/exploration updates and rendering. No whole-M5 completion claim is made here; final test/build/E2E/art gates remain for the integration owner.
+Placement validates each player's exploration array. M5 initially filled it with explored tiles; M8 replaces that initialization with actual LOS/exploration updates and rendering. No whole-M5 completion claim is made here; its combined five-minute economy goalpost remains separate.
 
 ### M6 — Production and progression
 
@@ -256,9 +256,17 @@ Phases:
 
 Goalposts:
 
-- [ ] At match start only the area around the player's Keep is visible; the rest is black.
-- [ ] An enemy building seen then left behind remains drawn as a ghost at last-seen HP/state; if destroyed while unseen, the ghost disappears only after its tile becomes visible again.
-- [ ] Fog update cost ≤ 0.5 ms per update at 300 units (bench output).
+- [x] At match start only the area around the player's Keep is visible; the rest is black.
+- [x] An enemy building seen then left behind remains drawn as a ghost at last-seen HP/state; if destroyed while unseen, the ghost disappears only after its tile becomes visible again.
+- [x] Fog update cost ≤ 0.5 ms per update at 300 units (bench output).
+
+M8 implementation notes:
+
+- Per-player LOS disks share allied vision and maintain visible, explored and three-state fog buffers. Fog initializes after standard bases and updates after movement, before combat. The existing placement validator rejects unexplored footprint tiles but accepts explored-hidden territory.
+- Location-keyed, detached building/mine ghosts preserve last-seen HP, construction, orientation, gate and gold state. Recycled live IDs do not replace remote memories; revisiting a destroyed object's footprint clears its ghost, including repeated fog updates in one tick.
+- Viewer snapshots filter hidden entities before rendering, picking and minimap submission. Ghosts have no live references, health bars, selection or orders. Terrain uses a linearly filtered R8 fog texture; explored terrain and static sprites are dimmed/desaturated. The minimap reuses its terrain buffers across fog revisions.
+- Combat acquisition and explicit attacks require current player visibility. Lost targets use frozen observed coordinates, separate from movement destinations; queued attacks, minimum-range standoff, retaliation and bounded chase-path work retain their existing behavior.
+- Normal sessions omit debug walkers and the grid; explicit `?debug=1&debugScene=1` preserves the earlier debug scene. Live Chromium smoke observed a building at 380 HP, then unseen live damage to 120 HP while the ghost stayed at 380, unseen removal preserving the ghost, and scouting back clearing it.
 
 ### M9 — Skirmish flow and Normal AI
 

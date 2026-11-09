@@ -131,7 +131,8 @@ describe('OrderController combat and contextual precedence orders', () => {
   it('emits attack command and sets sim attack order when right-clicking enemy unit', () => {
     const sim = new Sim(makeTestMap(), 1);
     const spearman = sim.world.spawnUnit(0, 'spearman', 10, 10);
-    const enemy = sim.world.spawnUnit(1, 'peasant', 14, 14);
+    const enemy = sim.world.spawnUnit(1, 'peasant', 12, 12);
+    sim.updateFog();
 
     const issued: Command[] = [];
     const controller = createTestController(sim, [spearman.id], issued);
@@ -157,7 +158,8 @@ describe('OrderController combat and contextual precedence orders', () => {
   it('supports shift queue when right-clicking enemy unit', () => {
     const sim = new Sim(makeTestMap(), 1);
     const spearman = sim.world.spawnUnit(0, 'spearman', 10, 10);
-    const enemy = sim.world.spawnUnit(1, 'peasant', 14, 14);
+    const enemy = sim.world.spawnUnit(1, 'peasant', 12, 12);
+    sim.updateFog();
 
     // Initial move order so shift-queue has an active order to queue behind
     sim.issue({
@@ -197,7 +199,8 @@ describe('OrderController combat and contextual precedence orders', () => {
   it('emits attack command when right-clicking enemy building', () => {
     const sim = new Sim(makeTestMap(), 1);
     const spearman = sim.world.spawnUnit(0, 'spearman', 10, 10);
-    const enemyBuilding = sim.world.spawnBuilding(1, 'keep', 15, 15, true);
+    const enemyBuilding = sim.world.spawnBuilding(1, 'keep', 12, 12, true);
+    sim.updateFog();
 
     const issued: Command[] = [];
     const controller = createTestController(sim, [spearman.id], issued);
@@ -232,6 +235,7 @@ describe('OrderController combat and contextual precedence orders', () => {
 
     // Set player 1 to team 0 (allies)
     sim.world.setTeam(1, 0);
+    sim.updateFog();
 
     const issued: Command[] = [];
     const controller = createTestController(sim, [spearman.id], issued);
@@ -246,6 +250,7 @@ describe('OrderController combat and contextual precedence orders', () => {
     const sim = new Sim(makeTestMap(), 1);
     const cart = sim.world.spawnUnit(0, 'ox_cart', 10, 10);
     const enemy = sim.world.spawnUnit(1, 'peasant', 14, 14);
+    sim.updateFog();
 
     // Cart-only selection: cart receives move to target position, move marker
     const issuedCart: Command[] = [];
@@ -275,6 +280,7 @@ describe('OrderController combat and contextual precedence orders', () => {
 
     // Mixed selection: spearman receives attack, cart receives move
     const spearman = sim.world.spawnUnit(0, 'spearman', 10, 12);
+    sim.updateFog();
     const issuedMixed: Command[] = [];
     const mixedController = createTestController(
       sim,
@@ -286,7 +292,9 @@ describe('OrderController combat and contextual precedence orders', () => {
 
     expect(issuedMixed).toHaveLength(2);
     expect(
-      issuedMixed.some((c) => c.kind === 'attack' && c.ids.includes(spearman.id)),
+      issuedMixed.some(
+        (c) => c.kind === 'attack' && c.ids.includes(spearman.id),
+      ),
     ).toBe(true);
     expect(
       issuedMixed.some((c) => c.kind === 'move' && c.ids.includes(cart.id)),
@@ -307,6 +315,7 @@ describe('OrderController combat and contextual precedence orders', () => {
     const sim = new Sim(makeTestMap(), 1);
     const peasant = sim.world.spawnUnit(0, 'peasant', 10, 10);
     const unfinished = sim.world.spawnBuilding(0, 'cottage', 12, 12, false);
+    sim.updateFog();
 
     const issued: Command[] = [];
     const controller = createTestController(sim, [peasant.id], issued);
@@ -322,6 +331,7 @@ describe('OrderController combat and contextual precedence orders', () => {
     const sim = new Sim(makeTestMap(), 1);
     const cart = sim.world.spawnUnit(0, 'ox_cart', 10, 10);
     const mine = sim.world.spawnMine(12, 12, 1000);
+    sim.updateFog();
 
     const issued: Command[] = [];
     const controller = createTestController(sim, [cart.id], issued);
@@ -331,5 +341,38 @@ describe('OrderController combat and contextual precedence orders', () => {
     expect(issued).toHaveLength(1);
     expect(issued[0].kind).toBe('pinMine');
     expect(cart.order?.kind).toBe('pinMine');
+  });
+
+  it('routes right-click on hidden enemy in fog to ground move without targetId', () => {
+    const sim = new Sim(makeTestMap(), 1);
+    const spearman = sim.world.spawnUnit(0, 'spearman', 4, 4);
+    const hiddenEnemy = sim.world.spawnUnit(1, 'peasant', 28, 28);
+    sim.updateFog();
+
+    const issued: Command[] = [];
+    const controller = createTestController(sim, [spearman.id], issued);
+    controller.contextOrder(
+      hiddenEnemy.x,
+      hiddenEnemy.z,
+      false,
+      hiddenEnemy.id,
+    );
+    sim.step();
+
+    expect(issued).toHaveLength(1);
+    expect(issued[0]).toEqual({
+      kind: 'move',
+      player: 0,
+      ids: [spearman.id],
+      x: 28,
+      z: 28,
+      queued: false,
+    });
+    expect(spearman.order?.kind).toBe('move');
+    expect(
+      spearman.order && 'targetId' in spearman.order
+        ? spearman.order.targetId
+        : undefined,
+    ).toBeUndefined();
   });
 });

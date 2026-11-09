@@ -48,9 +48,7 @@ test('boots a full-window game canvas without browser errors', async ({
     }
 
     return (
-      session.isLoaded &&
-      stats.isLoaded &&
-      stats.renderer?.isReady === true
+      session.isLoaded && stats.isLoaded && stats.renderer?.isReady === true
     );
   });
 
@@ -59,6 +57,11 @@ test('boots a full-window game canvas without browser errors', async ({
     return context !== null && !context.isContextLost();
   });
   expect(hasWebGL).toBe(true);
+  // Under normal start without explicit debugScene=1, no debug walkers/probes are spawned
+  const debugProbes = await page.evaluate(
+    () => window.__bordev?.renderer?.debugProbes,
+  );
+  expect(debugProbes).toBeNull();
   expect(consoleErrors, 'console errors during boot and first render').toEqual(
     [],
   );

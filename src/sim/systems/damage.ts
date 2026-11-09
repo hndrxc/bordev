@@ -1,8 +1,10 @@
 import type {
   Combatant,
+  ProjectileEntity,
   UnitEntity,
   UnitOrder,
 } from '../entity.js';
+import { isEntityVisibleTo } from './fog.js';
 import type { World } from '../world.js';
 import { getBuildingData } from '../../data/buildings.js';
 import { CORPSE_DURATION_SEC, RUBBLE_DURATION_SEC } from '../../data/combat.js';
@@ -108,6 +110,7 @@ export function applyDamage(
   target: Combatant,
   damage: number,
   source?: Combatant,
+  projectile?: ProjectileEntity,
 ): void {
   // If target already dead or removed, ignore
   if (target.hp <= 0 || target.deathTick !== undefined) {
@@ -207,9 +210,26 @@ export function applyDamage(
         }
 
         if (shouldSwitch) {
-          target.combat = {
-            targetRef: source,
-          };
+          let originX: number | undefined;
+          let originZ: number | undefined;
+
+          if (isEntityVisibleTo(world, target.player, source)) {
+            originX =
+              source.kind === 'unit' ? source.x : source.x + source.width / 2;
+            originZ =
+              source.kind === 'unit' ? source.z : source.z + source.height / 2;
+          } else if (projectile) {
+            originX = projectile.originX;
+            originZ = projectile.originZ;
+          }
+
+          if (originX !== undefined && originZ !== undefined) {
+            target.combat = {
+              targetRef: source,
+              lastSeenTargetX: originX,
+              lastSeenTargetZ: originZ,
+            };
+          }
         }
       }
     }

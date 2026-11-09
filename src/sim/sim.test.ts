@@ -3,6 +3,7 @@ import { CROWN_BUILDINGS } from '../data/buildings.js';
 import type { BuildingEntity } from './entity.js';
 import { Sim, SIM_DT } from './sim.js';
 import { parseMap, type GameMap, Terrain } from './map.js';
+import { revealExplored } from './testFixtures.js';
 
 function makeTestMap(size = 32): GameMap {
   return {
@@ -401,7 +402,6 @@ describe('Sim Core Consumer Regressions', () => {
     sim.step();
     expect(keep.rallyPoint).toEqual({ x: 12, z: 14 });
   });
-
 
   it('every M5 command works next-tick through Sim.issue', () => {
     const map = makeTestMap(32);
@@ -807,6 +807,7 @@ describe('Sim Core Consumer Regressions', () => {
 
   it('builds a Shift-queued second farm after the first farm completes and starts working', () => {
     const sim = new Sim(makeTestMap(64), 1);
+    revealExplored(sim.world, 0);
     const player = sim.world.players[0];
     const farmData = CROWN_BUILDINGS.farm;
     const initialFood = player.food;
@@ -906,6 +907,7 @@ describe('Sim Core Consumer Regressions', () => {
 
   it('finishes an active finite build before starting the next queued build', () => {
     const sim = new Sim(makeTestMap(32), 1);
+    revealExplored(sim.world, 0);
     const player = sim.world.players[0];
     const farmData = CROWN_BUILDINGS.farm;
     const initialGold = player.gold;

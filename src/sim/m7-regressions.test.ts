@@ -35,7 +35,9 @@ describe('M7 combat regressions', () => {
     for (let i = 0; i < 8; i++) {
       const col = Math.floor(i / 4);
       const row = i % 4;
-      spears.push(world.spawnUnit(0, 'spearman', 17 - col * 0.5, 18.5 + row * 0.5));
+      spears.push(
+        world.spawnUnit(0, 'spearman', 17 - col * 0.5, 18.5 + row * 0.5),
+      );
     }
     sim.issue({
       kind: 'attack',
@@ -162,6 +164,9 @@ describe('M7 combat regressions', () => {
     const minRange = CROWN_UNITS.trebuchet.minRange;
     const treb = world.spawnUnit(0, 'trebuchet', 20, 20);
     const target = world.spawnUnit(1, 'ox_cart', 22, 20);
+    const spotter = world.spawnUnit(0, 'peasant', 22, 23, 'crown');
+    sim.issue({ kind: 'hold', player: 0, ids: [spotter.id] });
+    sim.updateFog();
     const startDistance = Math.hypot(treb.x - target.x, treb.z - target.z);
     expect(startDistance).toBeLessThan(minRange);
     sim.issue({
@@ -182,9 +187,9 @@ describe('M7 combat regressions', () => {
 
     expect(closest).toBeGreaterThanOrEqual(startDistance - 1e-6);
     expect(target.hp).toBeLessThan(target.maxHp);
-    expect(Math.hypot(treb.x - target.x, treb.z - target.z)).toBeGreaterThanOrEqual(
-      minRange,
-    );
+    expect(
+      Math.hypot(treb.x - target.x, treb.z - target.z),
+    ).toBeGreaterThanOrEqual(minRange);
     expect(isInAttackRange(treb, target)).toBe(true);
   });
 
@@ -220,10 +225,7 @@ describe('M7 combat regressions', () => {
             sim.world.spawnBuilding(1, 'stone_wall', 15, z, true);
         },
       ],
-      [
-        'water',
-        () => undefined,
-      ],
+      ['water', () => undefined],
     ];
 
     it.each(barriers)(
@@ -235,7 +237,8 @@ describe('M7 combat regressions', () => {
           mutate:
             name === 'water'
               ? (tiles, size) => {
-                  for (const z of wallRows) tiles[z * size + 15] = Terrain.WATER;
+                  for (const z of wallRows)
+                    tiles[z * size + 15] = Terrain.WATER;
                 }
               : undefined,
         });
@@ -334,6 +337,7 @@ describe('M7 combat regressions', () => {
     const knight = world.spawnUnit(0, 'knight', 20, 20);
     const first = world.spawnUnit(1, 'ox_cart', 20.6, 20);
     const second = world.spawnUnit(1, 'ox_cart', 19.4, 20);
+    sim.updateFog();
     first.hp = CROWN_UNITS.knight.attack; // one hit
     sim.issue({
       kind: 'attack',
@@ -559,9 +563,9 @@ describe('M7 combat regressions', () => {
 
     for (let t = 0; t < 200 && cottage.hp === cottageHpBefore; t++) {
       sim.step();
-      expect(
-        world.entities.some((e) => e && e.kind === 'projectile'),
-      ).toBe(false);
+      expect(world.entities.some((e) => e && e.kind === 'projectile')).toBe(
+        false,
+      );
     }
     expect(cottage.hp).toBeLessThan(cottageHpBefore);
 
@@ -579,9 +583,9 @@ describe('M7 combat regressions', () => {
 
     for (let t = 0; t < 200 && peasant.hp === peasantHpBefore; t++) {
       sim.step();
-      expect(
-        world.entities.some((e) => e && e.kind === 'projectile'),
-      ).toBe(false);
+      expect(world.entities.some((e) => e && e.kind === 'projectile')).toBe(
+        false,
+      );
     }
     expect(peasant.hp).toBeLessThan(peasantHpBefore);
   });
@@ -670,6 +674,9 @@ describe('M7 combat regressions', () => {
     // Friendly barracks blocks straight-line retreat
     world.spawnBuilding(0, 'barracks', 7, 19, true);
     const treb = world.spawnUnit(0, 'trebuchet', 10.5, 20.5);
+    const spotter = world.spawnUnit(0, 'peasant', 17.5, 20.5, 'crown');
+    sim.issue({ kind: 'hold', player: 0, ids: [spotter.id] });
+    sim.updateFog();
 
     sim.issue({
       kind: 'attack',
@@ -688,10 +695,12 @@ describe('M7 combat regressions', () => {
     const trebEnc = wEnc.spawnUnit(0, 'trebuchet', 20.5, 20.5);
     for (let x = 19; x <= 21; x++) {
       for (let z = 19; z <= 21; z++) {
-        if (x !== 20 || z !== 20) wEnc.spawnBuilding(0, 'stone_wall', x, z, true);
+        if (x !== 20 || z !== 20)
+          wEnc.spawnBuilding(0, 'stone_wall', x, z, true);
       }
     }
     const enemyEnc = wEnc.spawnUnit(1, 'ox_cart', 22.5, 20.5);
+    simEnclosed.updateFog();
 
     simEnclosed.issue({
       kind: 'attack',
@@ -763,7 +772,8 @@ describe('M7 combat regressions', () => {
 
     // 2. Enemy within longbowman range (distance 5): damaged while archer stays strictly at (20, 20)
     const nearEnemy = world.spawnUnit(1, 'ox_cart', 25, 20);
-    for (let t = 0; t < 100 && nearEnemy.hp === nearEnemy.maxHp; t++) sim.step();
+    for (let t = 0; t < 100 && nearEnemy.hp === nearEnemy.maxHp; t++)
+      sim.step();
     expect(nearEnemy.hp).toBeLessThan(nearEnemy.maxHp);
     expect(archer.x).toBe(20);
     expect(archer.z).toBe(20);

@@ -13,6 +13,7 @@ import {
 import { Sim, SIM_DT } from '../sim.js';
 import type { BuildingEntity, UnitEntity } from '../entity.js';
 import { applyDamage } from './damage.js';
+import { revealExplored } from '../testFixtures.js';
 function makeTestMap(size = 32): GameMap {
   return {
     version: 1,
@@ -64,6 +65,7 @@ describe('Construction System — Placement Validation & Explored Invalidation',
 
   it('enforces age requirements and extra Town Center Age II rule', () => {
     const world = new World(makeTestMap(), new Rng(1));
+    revealExplored(world, 0);
     const pState = world.players[0];
     pState.age = 1;
 
@@ -113,6 +115,7 @@ describe('Construction System — Placement Validation & Explored Invalidation',
 
   it('rejects placement when any tile in the footprint is unexplored', () => {
     const world = new World(makeTestMap(), new Rng(1));
+    revealExplored(world, 0);
     const pState = world.players[0];
 
     // Cottage is 2x2. Tile (11, 10) inside (10..12, 10..12) set to unexplored (0)
@@ -121,7 +124,7 @@ describe('Construction System — Placement Validation & Explored Invalidation',
 
     const res = validatePlacement(world, 0, 'cottage', 10, 10);
     expect(res.valid).toBe(false);
-
+    expect(res.reason).toBe('Unexplored territory');
     // Once marked explored, it passes
     pState.explored[unexploredIdx] = 1;
     const res2 = validatePlacement(world, 0, 'cottage', 10, 10);
@@ -137,6 +140,7 @@ describe('Construction System — Placement Validation & Explored Invalidation',
 
   it('handles gate dimensions and orientations accurately', () => {
     const world = new World(makeTestMap(), new Rng(1));
+    revealExplored(world, 0);
     world.players[0].age = 2; // Stone gate requires Age 2
 
     const horiz = validatePlacement(
@@ -159,6 +163,7 @@ describe('Construction System — Placement Validation & Explored Invalidation',
 
   it('allows placement when units are inside footprint (units do not block placement)', () => {
     const world = new World(makeTestMap(), new Rng(1));
+    revealExplored(world, 0);
     world.spawnUnit(0, 'peasant', 10.5, 10.5);
 
     const res = validatePlacement(world, 0, 'cottage', 10, 10);
@@ -178,6 +183,7 @@ describe('Construction System — Deterministic Unit Displacement', () => {
         map.tiles[z * map.size + x] = Terrain.WATER;
       }
       const world = new World(map, new Rng(1));
+      revealExplored(world, 0);
       const doodad = world.spawnDoodad(10.5, 10.5, 'flowers');
       const units = [
         world.spawnUnit(0, 'peasant', 10.5, 10.5),
@@ -404,6 +410,7 @@ describe.each([
 describe('Construction System — Progress, 3T/(n+2) Rule, and Completion', () => {
   it('deducts cost once on initial site placement and does not deduct cost on resume', () => {
     const world = new World(makeTestMap(), new Rng(1));
+    revealExplored(world, 0);
     const pState = world.players[0];
     const initialFood = pState.food;
     const initialGold = pState.gold;
@@ -577,6 +584,7 @@ describe('Construction System — Progress, 3T/(n+2) Rule, and Completion', () =
 describe('Construction System — Cancellation and Refunds', () => {
   it('refunds 100% of cost when cancelled at exact 0% progress', () => {
     const world = new World(makeTestMap(), new Rng(1));
+    revealExplored(world, 0);
     const pState = world.players[0];
     const bData = getBuildingData('cottage', 'crown')!;
 
@@ -606,6 +614,7 @@ describe('Construction System — Cancellation and Refunds', () => {
 
   it('refunds positive 50% of cost when cancelled with positive progress', () => {
     const world = new World(makeTestMap(), new Rng(1));
+    revealExplored(world, 0);
     const pState = world.players[0];
     const bData = getBuildingData('cottage', 'crown')!;
 
@@ -803,6 +812,7 @@ describe('Construction System — Connected Transactional Displacement', () => {
       for (let x = 0; x < map.size; x++)
         map.tiles[9 * map.size + x] = Terrain.WATER;
       const world = new World(map, new Rng(1), { 0: 'clans' });
+      revealExplored(world, 0);
       const player = world.players[0];
       player.gold = 100;
       world.spawnBuilding(0, 'palisade', 9, 10, true);

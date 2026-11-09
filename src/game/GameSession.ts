@@ -18,8 +18,12 @@ import type {
 import { InputController } from '../input/InputController';
 import { publishHud, resetHud, setHudStatus } from '../ui/hud';
 import { resolveRallyTarget } from '../sim/systems/rally';
+import {
+  isEntityVisibleTo,
+  isFootprintVisible,
+  type FogGhost,
+} from '../sim/systems/fog';
 import type { World } from '../sim/world';
-
 export { SIM_DT };
 export const DEFAULT_MAP_URL = '/maps/alpha_test.json';
 export const DEFAULT_SEED = 7;
@@ -32,6 +36,8 @@ export interface InterpolatedEntity {
   type?: string;
   faction?: string;
   remains: boolean;
+  ghost?: boolean;
+  lastSeenTick?: number;
   x: number;
   z: number;
   simX: number;
@@ -57,7 +63,7 @@ export interface InterpolatedEntity {
   combat?: CombatState;
   deathTick?: number;
   gateOpen?: boolean;
-  raw: Entity | Combatant;
+  raw: Entity | Combatant | FogGhost;
 }
 
 export interface SessionSnapshot {
@@ -65,6 +71,9 @@ export interface SessionSnapshot {
   alpha: number;
   simTime: number;
   entities: readonly InterpolatedEntity[];
+  fog?: Uint8Array;
+  fogRevision?: number;
+  viewerPlayerId?: number;
 }
 
 export interface SessionStats {
@@ -238,6 +247,9 @@ export class GameSession {
     alpha: 0,
     simTime: 0,
     entities: this._snapshotEntities,
+    fog: undefined,
+    fogRevision: undefined,
+    viewerPlayerId: 0,
   };
   private readonly _drainedEvents: SimEvent[] = [];
   private _recordedEvents: SimEvent[] | null = null;
@@ -261,7 +273,13 @@ export class GameSession {
 
   constructor(canvas: HTMLCanvasElement, options?: GameSessionOptions) {
     this._maxAccumulator = options?.maxAccumulator ?? DEFAULT_MAX_ACCUMULATOR;
-    this._debugSceneEnabled = options?.debugScene ?? true;
+    const hasDebugParams =
+      typeof window !== 'undefined' &&
+      (() => {
+        const params = new URLSearchParams(window.location.search);
+        return params.get('debug') === '1' && params.get('debugScene') === '1';
+      })();
+    this._debugSceneEnabled = options?.debugScene ?? Boolean(hasDebugParams);
     this.debugEnabled =
       Boolean(import.meta.env.DEV) ||
       (typeof window !== 'undefined' &&
@@ -315,6 +333,7 @@ export class GameSession {
           createdIds.push(unit.id);
         }
 
+        this._sim.updateFog();
         this.updateSnapshot(this._alpha);
         publishHud(this);
 
@@ -382,7 +401,8 @@ export class GameSession {
   getInterpolatedEntity(id: number): InterpolatedEntity | undefined {
     if (!this._sim) return undefined;
     return this._snapshotEntities.find(
-      (candidate) => candidate.id === id && !candidate.remains,
+      (candidate) =>
+        candidate.id === id && !candidate.remains && !candidate.ghost,
     );
   }
   getInterpolatedPosition(id: number): { x: number; z: number } | undefined {
@@ -482,13 +502,21 @@ export class GameSession {
       return;
     }
 
-    const worldEntities = this._sim.world.entities;
+    const world = this._sim.world;
+    const viewerPlayerId = 0;
+    const viewerPlayer = world.players[viewerPlayerId];
+    const worldEntities = world.entities;
     const pool = this._snapshotEntities;
     let count = 0;
 
+    // 1. Live entities (visible to player 0, doodads shown on explored tiles)
     for (let i = 0; i < worldEntities.length; i++) {
       const e = worldEntities[i];
       if (!e) continue;
+
+      if (!isEntityVisibleTo(world, viewerPlayerId, e)) {
+        continue;
+      }
 
       let slot = pool[count] as SnapshotSlot | undefined;
       if (!slot) {
@@ -503,6 +531,7 @@ export class GameSession {
           previousZ: 0,
           raw: e,
           remains: false,
+          ghost: false,
         };
         pool[count] = slot;
       }
@@ -517,6 +546,8 @@ export class GameSession {
       slot.previousZ = e.previousZ;
       slot.raw = e;
       slot.remains = false;
+      slot.ghost = false;
+      slot.lastSeenTick = undefined;
       slot.player = 'player' in e ? e.player : undefined;
       slot.type = 'type' in e ? e.type : undefined;
       slot.faction = 'faction' in e ? e.faction : undefined;
@@ -533,7 +564,7 @@ export class GameSession {
         const scratch =
           slot._rallyScratch ?? (slot._rallyScratch = { x: 0, z: 0 });
         slot.rallyPoint = resolveSnapshotRally(
-          this._sim.world,
+          world,
           e.rallyPoint,
           alpha,
           scratch,
@@ -563,11 +594,15 @@ export class GameSession {
       count++;
     }
 
-    const remains = this._sim.world.remains;
+    // 2. Visible remains (corpses)
+    const remains = world.remains;
     if (remains) {
       for (let i = 0; i < remains.length; i++) {
         const e = remains[i];
         if (!e) continue;
+        if (!isEntityVisibleTo(world, viewerPlayerId, e)) {
+          continue;
+        }
 
         let slot = pool[count] as SnapshotSlot | undefined;
         if (!slot) {
@@ -582,6 +617,7 @@ export class GameSession {
             previousZ: 0,
             raw: e,
             remains: true,
+            ghost: false,
           };
           pool[count] = slot;
         }
@@ -596,6 +632,8 @@ export class GameSession {
         slot.previousZ = e.previousZ ?? e.z;
         slot.raw = e;
         slot.remains = true;
+        slot.ghost = false;
+        slot.lastSeenTick = undefined;
         slot.player = e.player;
         slot.type = e.type;
         slot.faction = e.faction;
@@ -622,11 +660,89 @@ export class GameSession {
       }
     }
 
+    // 3. Append currently hidden ghosts (frozen at lastSeenTick)
+    const ghosts = viewerPlayer?.ghosts;
+    if (ghosts && ghosts.size > 0) {
+      for (const ghost of ghosts.values()) {
+        // Only append currently hidden ghosts to avoid duplicate visible live objects
+        if (
+          isFootprintVisible(
+            world,
+            viewerPlayerId,
+            ghost.x,
+            ghost.z,
+            ghost.width,
+            ghost.height,
+          )
+        ) {
+          continue;
+        }
+
+        let slot = pool[count] as SnapshotSlot | undefined;
+        if (!slot) {
+          slot = {
+            id: ghost.id,
+            kind: ghost.kind,
+            x: ghost.x,
+            z: ghost.z,
+            simX: ghost.x,
+            simZ: ghost.z,
+            previousX: ghost.previousX ?? ghost.x,
+            previousZ: ghost.previousZ ?? ghost.z,
+            raw: ghost,
+            remains: false,
+            ghost: true,
+            lastSeenTick: ghost.lastSeenTick,
+          };
+          pool[count] = slot;
+        }
+
+        slot.id = ghost.id;
+        slot.kind = ghost.kind;
+        slot.x = ghost.x;
+        slot.z = ghost.z;
+        slot.simX = ghost.x;
+        slot.simZ = ghost.z;
+        slot.previousX = ghost.previousX ?? ghost.x;
+        slot.previousZ = ghost.previousZ ?? ghost.z;
+        slot.raw = ghost;
+        slot.remains = false;
+        slot.ghost = true;
+        slot.lastSeenTick = ghost.lastSeenTick;
+        slot.player = ghost.player;
+        slot.type = ghost.type;
+        slot.faction = ghost.faction;
+        slot.radius = undefined;
+        slot.facing = undefined;
+        slot.hp = ghost.hp;
+        slot.maxHp = ghost.maxHp;
+        slot.width = ghost.width;
+        slot.height = ghost.height;
+        slot.built = ghost.built;
+        slot.buildProgress = ghost.buildProgress;
+        slot.goldRemaining = ghost.goldRemaining;
+        slot.rallyPoint = undefined;
+        slot.workAnimation = undefined;
+        slot.workStartedTick = undefined;
+        slot.cart = undefined;
+        slot.orientation = ghost.orientation;
+        slot.trainingQueue = undefined;
+        slot.order = undefined;
+        slot.combat = undefined;
+        slot.deathTick = undefined;
+        slot.gateOpen = ghost.gateOpen;
+        count++;
+      }
+    }
+
     pool.length = count;
 
-    this._snapshot.tick = this._sim.world.tick;
+    this._snapshot.tick = world.tick;
     this._snapshot.alpha = alpha;
-    this._snapshot.simTime = this._sim.world.tick * SIM_DT;
+    this._snapshot.simTime = world.tick * SIM_DT;
+    this._snapshot.viewerPlayerId = viewerPlayerId;
+    this._snapshot.fog = viewerPlayer?.fog;
+    this._snapshot.fogRevision = viewerPlayer?.fogRevision;
   }
 
   private async loadMap(mapUrl: string, seed: number): Promise<void> {
@@ -658,6 +774,7 @@ export class GameSession {
 
       await this.renderer.initialize(gameMap);
       if (this._disposed) return;
+      this.renderer.overlays?.setGridVisible(this._debugSceneEnabled);
 
       this._sim = sim;
       this._loadError = null;
