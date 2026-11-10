@@ -22,8 +22,15 @@ Phases:
 
 Goalposts:
 
-- [ ] Headless `--p1 clans:normal --p2 crown:normal --seeds 1-10` completes all games (AI uses a provisional Clans build order).
-- [ ] Vitest: a Clans axeman's damage vs a man-at-arms is 5−1 = 4 normally and 5 during Battle Fervor.
+- [x] Headless `--p1 clans:normal --p2 crown:normal --seeds 1-10` completes all games (AI uses a provisional Clans build order).
+- [x] Vitest: a Clans axeman's damage vs a man-at-arms is 5−1 = 4 normally and 5 during Battle Fervor.
+
+M0 verification (2026-11-10):
+
+- Clans vs Crown: 10/10 decided, all Clans wins at tick 36744; Crown vs Crown retains P1 wins at tick 37048 for all ten seeds.
+- All 53 assets rendered and packed, including 22 Clans assets; atlas validation passes and an unchanged render/pack rerun skips every asset.
+- Typecheck, lint, production build, 515 Vitest tests and all 31 Playwright tests pass.
+- Manual Clans skirmish confirms the Camp HUD, economic building names, enabled Palisade/Watchtower and the Horse Pen's “Requires Steading” tooltip.
 
 ### M1 — Art direction and lighting pass
 

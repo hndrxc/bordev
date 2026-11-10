@@ -40,8 +40,8 @@ def _haft(arm, side, direction, back, front, radius, mat):
     return hand, (tip - butt).normalized(), tip
 
 
-def _horse(parts, heavy):
-    coat = "HORSE_GREY" if heavy else "HORSE_BAY"
+def _horse(parts, heavy, coat=None):
+    coat = coat or ("HORSE_GREY" if heavy else "HORSE_BAY")
     horse = parts["horse"]
     ico("Horse barrel", (0, 0, 0.68), (0.205, 0.46, 0.235), coat, horse, 2)
     ico("Horse chest", (0, -0.29, 0.73), (0.20, 0.22, 0.25), coat, horse)

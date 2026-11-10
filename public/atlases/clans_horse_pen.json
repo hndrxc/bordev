@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "id": "clans_horse_pen",
+  "pages": [
+    {
+      "image": "clans_horse_pen_0.png",
+      "mask": "clans_horse_pen_0_mask.png",
+      "shadow": "clans_horse_pen_0_shadow.png"
+    }
+  ],
+  "fps": 12,
+  "anims": {
+    "construct": {
+      "frames": 3,
+      "loop": false,
+      "dirs": 1
+    },
+    "damaged": {
+      "frames": 1,
+      "loop": false,
+      "dirs": 1
+    },
+    "idle": {
+      "frames": 1,
+      "loop": true,
+      "dirs": 1
+    },
+    "rubble": {
+      "frames": 1,
+      "loop": false,
+      "dirs": 1
+    }
+  },
+  "frames": {
+    "construct/0/0": {
+      "page": 0,
+      "x": 2,
+      "y": 474,
+      "w": 360,
+      "h": 244,
+      "ax": 144,
+      "ay": 172
+    },
+    "construct/0/1": {
+      "page": 0,
+      "x": 368,
+      "y": 2,
+      "w": 361,
+      "h": 246,
+      "ax": 144,
+      "ay": 172
+    },
+    "construct/0/2": {
+      "page": 0,
+      "x": 368,
+      "y": 250,
+      "w": 361,
+      "h": 247,
+      "ax": 144,
+      "ay": 172
+    },
+    "damaged/0/0": {
+      "page": 0,
+      "x": 2,
+      "y": 2,
+      "w": 364,
+      "h": 231,
+      "ax": 138,
+      "ay": 147
+    },
+    "idle/0/0": {
+      "page": 0,
+      "x": 2,
+      "y": 235,
+      "w": 364,
+      "h": 237,
+      "ax": 138,
+      "ay": 152
+    },
+    "rubble/0/0": {
+      "page": 0,
+      "x": 364,
+      "y": 499,
+      "w": 230,
+      "h": 125,
+      "ax": 101,
+      "ay": 67
+    }
+  }
+}

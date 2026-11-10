@@ -1,0 +1,194 @@
+{
+  "version": 1,
+  "id": "clans_palisade_gate",
+  "pages": [
+    {
+      "image": "clans_palisade_gate_0.png",
+      "mask": "clans_palisade_gate_0_mask.png",
+      "shadow": "clans_palisade_gate_0_shadow.png"
+    }
+  ],
+  "fps": 12,
+  "facings": [
+    0,
+    6
+  ],
+  "anims": {
+    "construct": {
+      "frames": 3,
+      "loop": false,
+      "dirs": 8
+    },
+    "damaged": {
+      "frames": 1,
+      "loop": false,
+      "dirs": 8
+    },
+    "damaged_open": {
+      "frames": 1,
+      "loop": false,
+      "dirs": 8
+    },
+    "idle": {
+      "frames": 1,
+      "loop": true,
+      "dirs": 8
+    },
+    "open": {
+      "frames": 1,
+      "loop": true,
+      "dirs": 8
+    },
+    "rubble": {
+      "frames": 1,
+      "loop": false,
+      "dirs": 8
+    }
+  },
+  "frames": {
+    "construct/0/0": {
+      "page": 0,
+      "x": 837,
+      "y": 2,
+      "w": 248,
+      "h": 176,
+      "ax": 97,
+      "ay": 125
+    },
+    "construct/0/1": {
+      "page": 0,
+      "x": 546,
+      "y": 638,
+      "w": 266,
+      "h": 210,
+      "ax": 97,
+      "ay": 159
+    },
+    "construct/0/2": {
+      "page": 0,
+      "x": 2,
+      "y": 426,
+      "w": 272,
+      "h": 211,
+      "ax": 98,
+      "ay": 159
+    },
+    "construct/6/0": {
+      "page": 0,
+      "x": 837,
+      "y": 180,
+      "w": 248,
+      "h": 176,
+      "ax": 97,
+      "ay": 125
+    },
+    "construct/6/1": {
+      "page": 0,
+      "x": 814,
+      "y": 638,
+      "w": 266,
+      "h": 211,
+      "ax": 97,
+      "ay": 159
+    },
+    "construct/6/2": {
+      "page": 0,
+      "x": 286,
+      "y": 2,
+      "w": 275,
+      "h": 213,
+      "ax": 101,
+      "ay": 159
+    },
+    "damaged/0/0": {
+      "page": 0,
+      "x": 550,
+      "y": 426,
+      "w": 270,
+      "h": 210,
+      "ax": 97,
+      "ay": 159
+    },
+    "damaged/6/0": {
+      "page": 0,
+      "x": 2,
+      "y": 639,
+      "w": 270,
+      "h": 210,
+      "ax": 97,
+      "ay": 159
+    },
+    "damaged_open/0/0": {
+      "page": 0,
+      "x": 274,
+      "y": 639,
+      "w": 270,
+      "h": 210,
+      "ax": 97,
+      "ay": 159
+    },
+    "damaged_open/6/0": {
+      "page": 0,
+      "x": 2,
+      "y": 214,
+      "w": 280,
+      "h": 210,
+      "ax": 107,
+      "ay": 159
+    },
+    "idle/0/0": {
+      "page": 0,
+      "x": 276,
+      "y": 426,
+      "w": 272,
+      "h": 210,
+      "ax": 98,
+      "ay": 159
+    },
+    "idle/6/0": {
+      "page": 0,
+      "x": 563,
+      "y": 2,
+      "w": 272,
+      "h": 210,
+      "ax": 98,
+      "ay": 159
+    },
+    "open/0/0": {
+      "page": 0,
+      "x": 563,
+      "y": 214,
+      "w": 272,
+      "h": 210,
+      "ax": 98,
+      "ay": 159
+    },
+    "open/6/0": {
+      "page": 0,
+      "x": 2,
+      "y": 2,
+      "w": 282,
+      "h": 210,
+      "ax": 108,
+      "ay": 159
+    },
+    "rubble/0/0": {
+      "page": 0,
+      "x": 837,
+      "y": 358,
+      "w": 176,
+      "h": 96,
+      "ax": 76,
+      "ay": 53
+    },
+    "rubble/6/0": {
+      "page": 0,
+      "x": 822,
+      "y": 456,
+      "w": 163,
+      "h": 88,
+      "ax": 72,
+      "ay": 49
+    }
+  }
+}

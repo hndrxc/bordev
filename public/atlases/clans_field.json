@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "id": "clans_field",
+  "pages": [
+    {
+      "image": "clans_field_0.png",
+      "mask": "clans_field_0_mask.png",
+      "shadow": "clans_field_0_shadow.png"
+    }
+  ],
+  "fps": 12,
+  "anims": {
+    "construct": {
+      "frames": 3,
+      "loop": false,
+      "dirs": 1
+    },
+    "damaged": {
+      "frames": 1,
+      "loop": false,
+      "dirs": 1
+    },
+    "idle": {
+      "frames": 1,
+      "loop": true,
+      "dirs": 1
+    },
+    "rubble": {
+      "frames": 1,
+      "loop": false,
+      "dirs": 1
+    }
+  },
+  "frames": {
+    "construct/0/0": {
+      "page": 0,
+      "x": 2,
+      "y": 2,
+      "w": 252,
+      "h": 177,
+      "ax": 96,
+      "ay": 114
+    },
+    "construct/0/1": {
+      "page": 0,
+      "x": 2,
+      "y": 181,
+      "w": 252,
+      "h": 177,
+      "ax": 96,
+      "ay": 114
+    },
+    "construct/0/2": {
+      "page": 0,
+      "x": 256,
+      "y": 2,
+      "w": 252,
+      "h": 177,
+      "ax": 96,
+      "ay": 114
+    },
+    "damaged/0/0": {
+      "page": 0,
+      "x": 256,
+      "y": 181,
+      "w": 221,
+      "h": 124,
+      "ax": 109,
+      "ay": 75
+    },
+    "idle/0/0": {
+      "page": 0,
+      "x": 2,
+      "y": 360,
+      "w": 221,
+      "h": 126,
+      "ax": 109,
+      "ay": 77
+    },
+    "rubble/0/0": {
+      "page": 0,
+      "x": 225,
+      "y": 360,
+      "w": 133,
+      "h": 102,
+      "ax": 53,
+      "ay": 47
+    }
+  }
+}

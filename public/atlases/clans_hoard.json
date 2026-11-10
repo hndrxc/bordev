@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "id": "clans_hoard",
+  "pages": [
+    {
+      "image": "clans_hoard_0.png",
+      "mask": "clans_hoard_0_mask.png",
+      "shadow": "clans_hoard_0_shadow.png"
+    }
+  ],
+  "fps": 12,
+  "anims": {
+    "construct": {
+      "frames": 3,
+      "loop": false,
+      "dirs": 1
+    },
+    "damaged": {
+      "frames": 1,
+      "loop": false,
+      "dirs": 1
+    },
+    "idle": {
+      "frames": 1,
+      "loop": true,
+      "dirs": 1
+    },
+    "rubble": {
+      "frames": 1,
+      "loop": false,
+      "dirs": 1
+    }
+  },
+  "frames": {
+    "construct/0/0": {
+      "page": 0,
+      "x": 262,
+      "y": 218,
+      "w": 243,
+      "h": 166,
+      "ax": 100,
+      "ay": 114
+    },
+    "construct/0/1": {
+      "page": 0,
+      "x": 2,
+      "y": 209,
+      "w": 258,
+      "h": 190,
+      "ax": 100,
+      "ay": 137
+    },
+    "construct/0/2": {
+      "page": 0,
+      "x": 265,
+      "y": 2,
+      "w": 256,
+      "h": 214,
+      "ax": 101,
+      "ay": 161
+    },
+    "damaged/0/0": {
+      "page": 0,
+      "x": 2,
+      "y": 2,
+      "w": 261,
+      "h": 205,
+      "ax": 106,
+      "ay": 155
+    },
+    "idle/0/0": {
+      "page": 0,
+      "x": 2,
+      "y": 401,
+      "w": 248,
+      "h": 210,
+      "ax": 93,
+      "ay": 161
+    },
+    "rubble/0/0": {
+      "page": 0,
+      "x": 262,
+      "y": 386,
+      "w": 156,
+      "h": 104,
+      "ax": 82,
+      "ay": 58
+    }
+  }
+}

@@ -1,4 +1,5 @@
 import { getBuildingData } from '../../data/buildings.js';
+import { FACTIONS } from '../../data/factions.js';
 import { getUnitData } from '../../data/units.js';
 import type { Command } from '../commands.js';
 import type { BuildingEntity, UnitEntity } from '../entity.js';
@@ -203,6 +204,7 @@ function placeBuilding(
 export function runEconomy(ctx: AiContext): void {
   const { world, player, params, view } = ctx;
   const state = world.players[player];
+  const ids = FACTIONS[ctx.order.faction];
   const townCenter = view.townCenter;
   const assigned = new Set<number>();
   const planned: PlannedBuilding[] = [];
@@ -210,7 +212,7 @@ export function runEconomy(ctx: AiContext): void {
   const peasants = view.peasants.length;
   const carts = view.carts.length;
   const farmTarget = peasants - Math.ceil(peasants / 4);
-  const farms = view.buildings.farm ?? [];
+  const farms = view.buildings[ids.farmId] ?? [];
   const nextStep = firstUnstartedStep(ctx);
   const nextResearch =
     nextStep?.kind === 'research'
@@ -224,11 +226,11 @@ export function runEconomy(ctx: AiContext): void {
     townCenter &&
     state.popCap < 150 &&
     state.pop + queuedPop >= state.popCap - params.housingMargin &&
-    !(view.buildings.cottage ?? []).some((building) => !building.built)
+    !(view.buildings[ids.housingId] ?? []).some((building) => !building.built)
   ) {
     placeBuilding(
       ctx,
-      'cottage',
+      ids.housingId,
       offsetAnchor(world, townCenter, -6),
       2,
       12,
@@ -251,11 +253,11 @@ export function runEconomy(ctx: AiContext): void {
   ) {
     let unitType: string | undefined;
     if (carts < params.targetCarts && carts * 3 < peasants) {
-      unitType = 'ox_cart';
+      unitType = ids.cartId;
     } else if (peasants < params.targetPeasants) {
-      unitType = 'peasant';
+      unitType = ids.workerId;
     } else if (carts < params.targetCarts) {
-      unitType = 'ox_cart';
+      unitType = ids.cartId;
     }
     const data = unitType
       ? getUnitData(unitType, ctx.order.faction)
@@ -281,7 +283,15 @@ export function runEconomy(ctx: AiContext): void {
     farms.length < farmTarget &&
     !farms.some((farm) => !farm.built)
   ) {
-    placeBuilding(ctx, 'farm', centre(townCenter), 3, 14, assigned, planned);
+    placeBuilding(
+      ctx,
+      ids.farmId,
+      centre(townCenter),
+      3,
+      14,
+      assigned,
+      planned,
+    );
   }
 
   // 4. Only the first unstarted build-order step may claim resources.
@@ -294,15 +304,15 @@ export function runEconomy(ctx: AiContext): void {
       ctx.reserve = { food: cost.food, gold: cost.gold };
     } else if (cost && peasants >= nextStep.minPeasants) {
       if (nextStep.kind === 'build' && townCenter) {
-        const chapel = nextStep.buildingType === 'chapel';
+        const faithSite = nextStep.buildingType === ids.categoryMapping.faith;
         placeBuilding(
           ctx,
           nextStep.buildingType,
-          chapel
+          faithSite
             ? getGatherPoint(world, player, townCenter)
             : offsetAnchor(world, townCenter, 8),
           2,
-          chapel ? 6 : 14,
+          faithSite ? 6 : 14,
           assigned,
           planned,
         );
@@ -334,8 +344,12 @@ export function runEconomy(ctx: AiContext): void {
   );
   if (
     townCenter &&
-    !(view.buildings.storehouse ?? []).some((building) => !building.built) &&
-    !planned.some((building) => building.type === 'storehouse')
+    !(view.buildings[ids.categoryMapping.storehouse] ?? []).some(
+      (building) => !building.built,
+    ) &&
+    !planned.some(
+      (building) => building.type === ids.categoryMapping.storehouse,
+    )
   ) {
     const origin = centre(townCenter);
     const nearDistance = params.farStorehouseDistance ** 2;
@@ -369,7 +383,7 @@ export function runEconomy(ctx: AiContext): void {
     if (nearMines < 2 && fartherMine) {
       placeBuilding(
         ctx,
-        'storehouse',
+        ids.categoryMapping.storehouse,
         centre(fartherMine),
         2,
         6,

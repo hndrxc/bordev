@@ -145,3 +145,37 @@ describe('Crown Normal AI', () => {
     ).toThrow(/Invalid build order crown:/);
   });
 });
+
+describe('Clans Normal AI', () => {
+  it(
+    'grows its economy, fields and military buildings',
+    { timeout: 120_000 },
+    () => {
+      const sim = new Sim(
+        parseMap(alphaTestMapJson),
+        3,
+        { 1: 'clans' },
+        { 1: 'normal' },
+      );
+
+      for (let tick = 0; tick < 12000; tick++) {
+        sim.step();
+        if (sim.world.tick % 200 === 0) sim.drainEvents();
+      }
+
+      const view = perceive(sim.world, 1);
+      expect(sim.world.tick).toBe(12000);
+      expect(view.peasants.length).toBeGreaterThanOrEqual(12);
+      expect(view.carts.length).toBeGreaterThanOrEqual(4);
+      expect(view.buildings.mead_hall?.some((building) => building.built)).toBe(
+        true,
+      );
+      expect(
+        view.buildings.hunters_lodge?.some((building) => building.built),
+      ).toBe(true);
+      expect(view.buildings.field?.some((building) => building.built)).toBe(
+        true,
+      );
+    },
+  );
+});

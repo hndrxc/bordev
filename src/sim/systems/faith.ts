@@ -1,4 +1,5 @@
-import type { World } from '../world.js';
+import { FACTIONS } from '../../data/factions.js';
+import type { PlayerState, World } from '../world.js';
 
 const MAX_POP_CAP = 150;
 const previousLowFaith: boolean[] = [];
@@ -34,7 +35,8 @@ export function updateFaith(world: World): void {
           player.popCap += entity.pop;
         }
         if (entity.faith > 0) {
-          player.faithProduced += entity.faith;
+          player.faithProduced +=
+            entity.faith + (player.buildingFaithBonus.get(entity.type) ?? 0);
         } else if (entity.faith < 0) {
           player.faithUsed += -entity.faith;
         }
@@ -58,4 +60,24 @@ export function updateFaith(world: World): void {
       }
     }
   }
+}
+
+/**
+ * Battle Fervor attack bonus for a player's units; 0 when inactive or the
+ * faction has no Fervor. Blood Rites replaces the base +1 rather than adding
+ * to it, so the result is the larger of the two bonuses.
+ *
+ * Reads the previous tick's faith totals, the same latency `lowFaith` has.
+ */
+export function battleFervorAttackBonus(player: PlayerState): number {
+  const faction = FACTIONS[player.faction];
+  const fervor = 'battleFervor' in faction ? faction.battleFervor : undefined;
+  if (!fervor) {
+    return 0;
+  }
+  const surplus = player.faithProduced - player.faithUsed;
+  if (surplus < fervor.minFaithSurplus) {
+    return 0;
+  }
+  return Math.max(fervor.attackBonus, player.battleFervorUpgradeAttack);
 }

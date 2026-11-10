@@ -1,3 +1,4 @@
+import type { Faction } from '../data/types.js';
 import { Terrain, type GameMap } from './map.js';
 import { Sim } from './sim.js';
 import type { World } from './world.js';
@@ -40,9 +41,17 @@ export function makeOpenMap({
 
 /** Sim on {@link makeOpenMap}; with no starts the world begins empty. */
 export function makeOpenSim(
-  options: OpenMapOptions & { seed?: number; explored?: boolean } = {},
+  options: OpenMapOptions & {
+    seed?: number;
+    explored?: boolean;
+    factions?: Readonly<Record<number, Faction>>;
+  } = {},
 ): Sim {
-  const sim = new Sim(makeOpenMap(options), options.seed ?? 1);
+  const sim = new Sim(
+    makeOpenMap(options),
+    options.seed ?? 1,
+    options.factions,
+  );
   if (options.explored) {
     for (let p = 0; p < sim.world.players.length; p++) {
       sim.world.players[p].explored.fill(1);

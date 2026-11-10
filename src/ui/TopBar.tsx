@@ -1,9 +1,13 @@
 import { forwardRef } from 'react';
+import { AGES } from '../data/ages';
+import { FACTIONS } from '../data/factions';
 import { useHudStore } from './hud';
 
 export const TopBar = forwardRef<HTMLElement>(function TopBar(_props, ref) {
   const resources = useHudStore((state) => state.resources);
   const status = useHudStore((state) => state.status);
+  const factionName = FACTIONS[resources.faction].name;
+  const ageName = AGES[resources.age].name[resources.faction];
 
   return (
     <header
@@ -23,7 +27,7 @@ export const TopBar = forwardRef<HTMLElement>(function TopBar(_props, ref) {
           bordev
         </span>
         <span className="topbar-faction-age">
-          {resources.faction.toUpperCase()} — Age {resources.age}
+          {factionName} — {ageName}
         </span>
       </div>
 

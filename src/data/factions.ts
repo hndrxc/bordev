@@ -14,6 +14,8 @@ export const FACTIONS = {
         'Each completed Chapel heals own non-siege units within 5 tiles by 1 HP/s.',
     },
     townCenterId: 'keep',
+    housingId: 'cottage',
+    farmId: 'farm',
     workerId: 'peasant',
     cartId: 'ox_cart',
     categoryMapping: {
@@ -41,6 +43,8 @@ export const FACTIONS = {
       attackBonus: 1,
     },
     townCenterId: 'great_hall',
+    housingId: 'longhouse',
+    farmId: 'field',
     workerId: 'thrall',
     cartId: 'haul_wagon',
     categoryMapping: {

@@ -3,6 +3,7 @@ import {
   isTownCenterType,
   isWorkerType,
 } from '../data/roles';
+import { AGES } from '../data/ages';
 import { getBuildingData } from '../data/buildings';
 import { ALL_UNITS, getUnitData } from '../data/units';
 import type { Faction } from '../data/types';
@@ -80,7 +81,9 @@ function gateBuildingSlots(
     slot.reason = !context
       ? 'Simulation not ready'
       : slot.disabled
-        ? `Requires Age ${requiredAge}`
+        ? requiredAge === undefined
+          ? 'Unknown building'
+          : `Requires ${AGES[requiredAge].name[context.faction]}`
         : undefined;
     slot.tooltip = `${data?.name ?? slot.label} [${slot.key}]${slot.reason ? ` (${slot.reason})` : ''}`;
     if (data) slot.label = data.name.replace(' (Town Center)', '');

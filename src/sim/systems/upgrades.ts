@@ -7,6 +7,8 @@ import type { PlayerState } from '../world.js';
  */
 const ENABLED_UPGRADES: Record<string, true> = {
   heavy_plough: true,
+  slash_burn: true,
+  blood_rites: true,
 };
 
 export function isUpgradeEnabled(upgradeId: string): boolean {
@@ -20,6 +22,8 @@ export function isUpgradeEnabled(upgradeId: string): boolean {
  */
 export function recomputeUpgradeModifiers(player: PlayerState): void {
   let farmFoodRatePercent = 0;
+  player.buildingFaithBonus.clear();
+  player.battleFervorUpgradeAttack = 0;
   for (const upgradeId of player.upgrades) {
     const data = getUpgradeData(upgradeId, player.faction);
     if (!data) {
@@ -28,8 +32,19 @@ export function recomputeUpgradeModifiers(player: PlayerState): void {
     for (const effect of data.effects) {
       if (effect.kind === 'farm_food_rate_pct') {
         farmFoodRatePercent += effect.percent;
+      } else if (effect.kind === 'building_faith_bonus') {
+        player.buildingFaithBonus.set(
+          effect.buildingId,
+          (player.buildingFaithBonus.get(effect.buildingId) ?? 0) +
+            effect.amount,
+        );
+      } else if (effect.kind === 'battle_fervor_attack_bonus') {
+        player.battleFervorUpgradeAttack = Math.max(
+          player.battleFervorUpgradeAttack,
+          effect.attackBonus,
+        );
       }
-      // Other effect kinds belong to Beta upgrades and are not applied yet.
+      // The remaining effect kinds arrive with the Beta M4 upgrades.
     }
   }
   player.farmFoodRateMultiplier = (100 + farmFoodRatePercent) / 100;

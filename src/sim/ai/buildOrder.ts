@@ -4,6 +4,7 @@ import { getUnitData } from '../../data/units.js';
 import { AGE_RESEARCH_IDS } from '../systems/research.js';
 import type { AiDifficulty } from './difficulty.js';
 import crownNormal from './buildOrders/crown_normal.json' with { type: 'json' };
+import clansNormal from './buildOrders/clans_normal.json' with { type: 'json' };
 
 export type BuildStep =
   | { kind: 'build'; buildingType: string; minPeasants: number }
@@ -136,19 +137,21 @@ export function parseBuildOrder(json: unknown): BuildOrder {
   return { faction, steps, army, maxAlive };
 }
 
+const RAW_BUILD_ORDERS: Record<Faction, Record<AiDifficulty, unknown>> = {
+  crown: { normal: crownNormal },
+  clans: { normal: clansNormal },
+};
+
 const cache = new Map<string, BuildOrder>();
 
 export function getBuildOrder(
   faction: Faction,
   difficulty: AiDifficulty,
 ): BuildOrder {
-  if (faction !== 'crown' || difficulty !== 'normal') {
-    throw new Error(`AI for ${faction} is not available until Beta`);
-  }
   const key = `${faction}:${difficulty}`;
   let order = cache.get(key);
   if (!order) {
-    order = parseBuildOrder(crownNormal);
+    order = parseBuildOrder(RAW_BUILD_ORDERS[faction][difficulty]);
     cache.set(key, order);
   }
   return order;

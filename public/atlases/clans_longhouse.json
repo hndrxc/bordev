@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "id": "clans_longhouse",
+  "pages": [
+    {
+      "image": "clans_longhouse_0.png",
+      "mask": "clans_longhouse_0_mask.png",
+      "shadow": "clans_longhouse_0_shadow.png"
+    }
+  ],
+  "fps": 12,
+  "anims": {
+    "construct": {
+      "frames": 3,
+      "loop": false,
+      "dirs": 1
+    },
+    "damaged": {
+      "frames": 1,
+      "loop": false,
+      "dirs": 1
+    },
+    "idle": {
+      "frames": 1,
+      "loop": true,
+      "dirs": 1
+    },
+    "rubble": {
+      "frames": 1,
+      "loop": false,
+      "dirs": 1
+    }
+  },
+  "frames": {
+    "construct/0/0": {
+      "page": 0,
+      "x": 246,
+      "y": 2,
+      "w": 239,
+      "h": 163,
+      "ax": 96,
+      "ay": 114
+    },
+    "construct/0/1": {
+      "page": 0,
+      "x": 2,
+      "y": 192,
+      "w": 240,
+      "h": 166,
+      "ax": 97,
+      "ay": 114
+    },
+    "construct/0/2": {
+      "page": 0,
+      "x": 2,
+      "y": 2,
+      "w": 242,
+      "h": 188,
+      "ax": 99,
+      "ay": 134
+    },
+    "damaged/0/0": {
+      "page": 0,
+      "x": 246,
+      "y": 167,
+      "w": 230,
+      "h": 179,
+      "ax": 94,
+      "ay": 129
+    },
+    "idle/0/0": {
+      "page": 0,
+      "x": 2,
+      "y": 360,
+      "w": 229,
+      "h": 183,
+      "ax": 96,
+      "ay": 134
+    },
+    "rubble/0/0": {
+      "page": 0,
+      "x": 244,
+      "y": 348,
+      "w": 167,
+      "h": 95,
+      "ax": 74,
+      "ay": 56
+    }
+  }
+}

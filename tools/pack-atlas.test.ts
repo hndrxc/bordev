@@ -245,16 +245,23 @@ test('every public atlas validates and contains all manifest frames with aligned
         const bottom = top + frame.h;
         expect(left, `${entry.id} source left edge`).toBeGreaterThan(0);
         expect(top, `${entry.id} source top edge`).toBeGreaterThan(0);
-        expect(right, `${entry.id} source right edge`).toBeLessThan(entry.frame);
-        expect(bottom, `${entry.id} source bottom edge`).toBeLessThan(entry.frame);
-        for (const other of frames.slice(index + 1)) {
-          expect(
-            frame.x + frame.w + 2 <= other.x ||
+        expect(right, `${entry.id} source right edge`).toBeLessThan(
+          entry.frame,
+        );
+        expect(bottom, `${entry.id} source bottom edge`).toBeLessThan(
+          entry.frame,
+        );
+        const overlap = frames.find(
+          (other, otherIndex) =>
+            otherIndex > index &&
+            !(
+              frame.x + frame.w + 2 <= other.x ||
               other.x + other.w + 2 <= frame.x ||
               frame.y + frame.h + 2 <= other.y ||
-              other.y + other.h + 2 <= frame.y,
-          ).toBe(true);
-        }
+              other.y + other.h + 2 <= frame.y
+            ),
+        );
+        expect(overlap, `${entry.id} overlaps another sprite`).toBeUndefined();
       }
     }
   }
@@ -523,7 +530,15 @@ test('schema rejects missing facings, invalid page references, unsafe filenames 
   expect(() => parseAtlas(missingFacing)).toThrow('missing idle/6/0');
 
   const extraFacing = structuredClone(facingsAtlas);
-  extraFacing.frames['idle/2/0'] = { page: 0, x: 22, y: 2, w: 8, h: 8, ax: 4, ay: 12 };
+  extraFacing.frames['idle/2/0'] = {
+    page: 0,
+    x: 22,
+    y: 2,
+    w: 8,
+    h: 8,
+    ax: 4,
+    ay: 12,
+  };
   expect(() => parseAtlas(extraFacing)).toThrow('unexpected frame');
 
   const outOfRange = structuredClone(facingsAtlas);
@@ -547,15 +562,17 @@ test('schema rejects missing facings, invalid page references, unsafe filenames 
   expect(() => parseAtlas(dirsOne)).toThrow('dirs 8');
 
   // Manifest parser validates facings
-  const validManifest = [{
-    id: 'test_gate',
-    kind: 'building' as const,
-    script: 'assets/test_gate.py',
-    frame: 512,
-    dirs: 8 as const,
-    facings: [0, 6],
-    anims: { idle: { frames: 1, loop: true } },
-  }];
+  const validManifest = [
+    {
+      id: 'test_gate',
+      kind: 'building' as const,
+      script: 'assets/test_gate.py',
+      frame: 512,
+      dirs: 8 as const,
+      facings: [0, 6],
+      anims: { idle: { frames: 1, loop: true } },
+    },
+  ];
   expect(parseArtManifest(validManifest)[0].facings).toEqual([0, 6]);
 
   const manifestDirsOne: unknown[] = [{ ...validManifest[0], dirs: 1 }];

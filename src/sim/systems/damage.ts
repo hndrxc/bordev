@@ -10,6 +10,7 @@ import { getBuildingData } from '../../data/buildings.js';
 import { CORPSE_DURATION_SEC, RUBBLE_DURATION_SEC } from '../../data/combat.js';
 import { SIM_DT } from '../sim.js';
 import { isInAttackRange } from './combat.js';
+import { battleFervorAttackBonus } from './faith.js';
 
 /** Different player AND different team. Same-team allies are never hostile. */
 export function areHostile(
@@ -53,13 +54,23 @@ export function resolveAttackOrderTarget(
   return target;
 }
 
-export function calculateDamage(source: Combatant, target: Combatant): number {
+export function calculateDamage(
+  world: World,
+  source: Combatant,
+  target: Combatant,
+): number {
   let attack = 0;
   let attackType: 'melee' | 'pierce' | 'siege' = 'melee';
   let bonusMap: Partial<Record<string, number>> | undefined;
 
   if (source.kind === 'unit') {
     attack = source.attack ?? 0;
+    if (attack > 0) {
+      const owner = world.players[source.player];
+      if (owner) {
+        attack += battleFervorAttackBonus(owner);
+      }
+    }
     attackType = source.attackType ?? 'melee';
     bonusMap = source.bonus;
   } else {

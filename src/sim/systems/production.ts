@@ -5,6 +5,7 @@ import type {
   CancelTrainCommand,
   SetRallyCommand,
 } from '../commands.js';
+import { AGES } from '../../data/ages.js';
 import { getUnitData } from '../../data/units.js';
 import { isProductionType } from '../../data/roles.js';
 import {
@@ -192,7 +193,10 @@ export function getTrainAvailability(
 
   // Age validation
   if (unitData.age > player.age) {
-    return { allowed: false, reason: `Requires Age ${unitData.age}` };
+    return {
+      allowed: false,
+      reason: `Requires ${AGES[unitData.age].name[player.faction]}`,
+    };
   }
 
   // Building validation: unitData.from must match building type

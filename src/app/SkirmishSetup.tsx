@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { FACTIONS } from '../data/factions';
+import type { Faction } from '../data/types';
 import { PLAYER_COLOURS, type PlayerColourId } from '../render/playerColours';
 import type { SkirmishConfig } from './App';
 
@@ -7,8 +9,35 @@ interface SkirmishSetupProps {
   onStart: (config: SkirmishConfig) => void;
 }
 
+const FACTION_OPTIONS = Object.values(FACTIONS);
+
+interface FactionFieldProps {
+  value: Faction;
+  onChange: (faction: Faction) => void;
+}
+
+function FactionField({ value, onChange }: FactionFieldProps) {
+  return (
+    <label className="setup-field">
+      Faction
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value as Faction)}
+      >
+        {FACTION_OPTIONS.map((faction) => (
+          <option key={faction.id} value={faction.id}>
+            {faction.name}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 export function SkirmishSetup({ onBack, onStart }: SkirmishSetupProps) {
   const [humanColour, setHumanColour] = useState<PlayerColourId>('blue');
+  const [humanFaction, setHumanFaction] = useState<Faction>('crown');
+  const [opponentFaction, setOpponentFaction] = useState<Faction>('crown');
   const opponentColour = PLAYER_COLOURS.find(
     (colour) => colour.id !== humanColour,
   )!;
@@ -18,7 +47,9 @@ export function SkirmishSetup({ onBack, onStart }: SkirmishSetupProps) {
       mapUrl: '/maps/alpha_test.json',
       seed: 1 + Math.floor(Math.random() * 1_000_000),
       humanColour,
+      humanFaction,
       opponent: 'normal',
+      opponentFaction,
     });
   }
 
@@ -35,12 +66,7 @@ export function SkirmishSetup({ onBack, onStart }: SkirmishSetupProps) {
         <div className="setup-slots">
           <div className="setup-slot" data-testid="slot-0">
             <h2>You</h2>
-            <label className="setup-field">
-              Faction
-              <select disabled defaultValue="crown">
-                <option value="crown">Crown</option>
-              </select>
-            </label>
+            <FactionField value={humanFaction} onChange={setHumanFaction} />
             <label className="setup-field">
               Your colour
               <select
@@ -59,12 +85,10 @@ export function SkirmishSetup({ onBack, onStart }: SkirmishSetupProps) {
           </div>
           <div className="setup-slot" data-testid="slot-1">
             <h2>Normal AI</h2>
-            <label className="setup-field">
-              Faction
-              <select disabled defaultValue="crown">
-                <option value="crown">Crown</option>
-              </select>
-            </label>
+            <FactionField
+              value={opponentFaction}
+              onChange={setOpponentFaction}
+            />
             <label className="setup-field">
               Difficulty
               <select disabled defaultValue="normal">
