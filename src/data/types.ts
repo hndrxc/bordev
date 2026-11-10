@@ -96,11 +96,7 @@ export type BuildingRole =
   | 'gate';
 
 export type BuildingCategory =
-  | 'barracks'
-  | 'range'
-  | 'storehouse'
-  | 'faith'
-  | 'stable';
+  'barracks' | 'range' | 'storehouse' | 'faith' | 'stable';
 
 export type CrownUpgradeId =
   | 'heavy_plough'
@@ -304,9 +300,14 @@ export interface FactionData<TFaction extends Faction = Faction> {
     readonly attackBonus: number;
   };
   readonly townCenterId: FactionBuildingId<TFaction>;
+  readonly housingId: FactionBuildingId<TFaction>;
+  readonly farmId: FactionBuildingId<TFaction>;
   readonly workerId: FactionUnitId<TFaction>;
   readonly cartId: FactionUnitId<TFaction>;
-  readonly categoryMapping: Record<BuildingCategory, FactionBuildingId<TFaction>>;
+  readonly categoryMapping: Record<
+    BuildingCategory,
+    FactionBuildingId<TFaction>
+  >;
 }
 
 export interface EconomyStartingState {
@@ -364,10 +365,4 @@ export interface EconomyData {
 export type TerrainCode = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 
 export type TerrainType =
-  | 'grass'
-  | 'dirt'
-  | 'sand'
-  | 'shallow'
-  | 'water'
-  | 'forest'
-  | 'rock';
+  'grass' | 'dirt' | 'sand' | 'shallow' | 'water' | 'forest' | 'rock';

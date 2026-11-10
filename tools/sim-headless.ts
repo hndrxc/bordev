@@ -179,8 +179,7 @@ Options:
   --json                  Print JSON instead of text
   --help, -h              Show this help message
 
-Unspecified slots use Crown Normal AI; none keeps a passive Crown base.
-Clans AI is unavailable until Beta and reports an error for each seed.`);
+Unspecified slots use Crown Normal AI; none keeps a passive Crown base.`);
       return 0;
     }
 

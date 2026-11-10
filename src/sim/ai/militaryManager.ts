@@ -119,7 +119,7 @@ export class MilitaryManager {
     this.updateTarget(ctx, gather);
     const target = this.target!;
     const idle: number[] = [];
-    const trebuchets: number[] = [];
+    const siegeUnits: number[] = [];
     const reinforcements: UnitEntity[] = [];
     for (const unit of ctx.view.army) {
       if (!this.wave.has(unit.id)) {
@@ -131,8 +131,8 @@ export class MilitaryManager {
         }
         continue;
       }
-      if (unit.type === 'trebuchet' && target.id !== undefined) {
-        trebuchets.push(unit.id);
+      if (unit.tags.includes('siege') && target.id !== undefined) {
+        siegeUnits.push(unit.id);
         continue;
       }
       const orderKind = unit.order?.kind ?? 'idle';
@@ -145,11 +145,11 @@ export class MilitaryManager {
       }
     }
     this.attackMoveOrMove(ctx, 'attackMove', idle, target);
-    if (trebuchets.length > 0 && target.id !== undefined) {
+    if (siegeUnits.length > 0 && target.id !== undefined) {
       ctx.issue({
         kind: 'attack',
         player: ctx.player,
-        ids: trebuchets,
+        ids: siegeUnits,
         targetId: target.id,
         queued: false,
       });

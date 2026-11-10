@@ -22,7 +22,7 @@ Phases:
 
 Goalposts:
 
-- [ ] Headless `--p1 clans:normal --p2 crown:normal --seeds 1-10` completes all games (AI uses a provisional Clans build order).
+- [x] Headless `--p1 clans:normal --p2 crown:normal --seeds 1-10` completes all games (AI uses a provisional Clans build order).
 - [x] Vitest: a Clans axeman's damage vs a man-at-arms is 5−1 = 4 normally and 5 during Battle Fervor.
 
 ### M1 — Art direction and lighting pass
