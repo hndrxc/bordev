@@ -6,11 +6,13 @@
 
 **Exit gate** (all must hold):
 
-- [ ] `npm run typecheck && npm run lint && npm test` pass.
-- [ ] `npm run sim:headless -- --map alpha_test --p1 crown:normal --p2 crown:normal --seeds 1-10` finishes all 10 games with a winner within 72 000 ticks (60 game-minutes), zero exceptions.
-- [ ] `npm run e2e` passes the Alpha smoke spec (boot → skirmish → debug-cheat to Age III → train one of each Crown unit → destroy enemy Keep → victory screen).
-- [ ] `npm run bench:sim -- --units 300` reports average tick ≤ 4 ms.
-- [ ] User plays a full match in the browser vs Normal AI and reaches victory or defeat without blockers.
+- [x] `npm run typecheck && npm run lint && npm test` pass.
+- [x] `npm run sim:headless -- --map alpha_test --p1 crown:normal --p2 crown:normal --seeds 1-10` finishes all 10 games with a winner within 72 000 ticks (60 game-minutes), zero exceptions.
+- [x] `npm run e2e` passes the Alpha smoke spec (boot → skirmish → debug-cheat to Age III → train one of each Crown unit → destroy enemy Keep → victory screen).
+- [x] `npm run bench:sim -- --units 300` reports average tick ≤ 4 ms.
+- [x] User plays a full match in the browser vs Normal AI and reaches victory or defeat without blockers.
+
+All Alpha exit gates are complete; the user has confirmed playing a full browser match against Normal AI, reaching victory or defeat without blockers.
 
 ### M0 — Project foundation
 
@@ -172,13 +174,13 @@ Phases:
 
 Goalposts:
 
-- [ ] Headless test: from standard start with scripted commands (build 2 farms, 1 cottage, train 1 more cart), after 5 game-minutes food ≥ 250 and gold ≥ 500 collected in total (sim counters).
+- [x] Headless test: from standard start with scripted commands (build 2 farms, 1 cottage, train 1 more cart), after 5 game-minutes food ≥ 250 and gold ≥ 500 collected in total (sim counters).
 - [x] Building a barracks while faith produced is 5 and used becomes 7 puts the player in Low Faith; a unit then trains in 2× its listed time.
 - [x] A mine with 3 carts never has more than 2 loading at once and depletes exactly at 6000 delivered + carried.
 
-The user explicitly approved replacing the original 600-food goalpost with 250 food, without changing the locked 0.5 food/s rate. Even two farms completed at tick zero can collect at most `2 × 0.5 × 300 = 300` food in five minutes; construction and approach time lower that ceiling, so 600 was impossible. Counters exclude starting stock. The combined food/gold goalpost remains unchecked pending final verification.
+The user explicitly approved replacing the original 600-food goalpost with 250 food, without changing the locked 0.5 food/s rate. Even two farms completed at tick zero can collect at most `2 × 0.5 × 300 = 300` food in five minutes; construction and approach time lower that ceiling, so 600 was impossible. Counters exclude starting stock. Final headless verification, `npx vitest run src/sim/m5.test.ts -t '6000 ticks'`, passed (1 passed, 3 skipped): the standard-start script builds two farms and a cottage, trains one extra cart, and verifies food ≥ 250 and gold ≥ 500 collected after 6000 ticks.
 
-Measured runtime smoke evidence: farms completed in 15.05 s and the cottage in 25 s; food collected was 285 at five minutes. The mine smoke ran 4961 ticks, observed at most two simultaneous loaders, and finished with 6000 delivered, zero remaining and zero carried. Faith smoke observed produced/used 5/7 after barracks completion and peasant training in 400 ticks normally versus 800 ticks in Low Faith. These are scoped observations, not a claim that all M5 gates or the five-minute gold criterion have passed.
+Historical runtime smoke evidence: farms completed in 15.05 s and the cottage in 25 s; food collected was 285 at five minutes. The mine smoke ran 4961 ticks, observed at most two simultaneous loaders, and finished with 6000 delivered, zero remaining and zero carried. Faith smoke observed produced/used 5/7 after barracks completion and peasant training in 400 ticks normally versus 800 ticks in Low Faith. Those observations did not alone establish the combined economy goalpost; the final headless Vitest proof above closes it.
 
 Implemented sprite-pipeline prerequisites:
 
@@ -186,7 +188,7 @@ Implemented sprite-pipeline prerequisites:
 - Atlas cache keys include the resolved `maxrects-packer` version alongside sharp versions.
 - Blender animation descriptors are checked against manifest names, frame counts and loop flags; cart `load` is non-looping.
 
-Placement validates each player's exploration array. M5 initially filled it with explored tiles; M8 replaces that initialization with actual LOS/exploration updates and rendering. No whole-M5 completion claim is made here; its combined five-minute economy goalpost remains separate.
+Placement validates each player's exploration array. M5 initially filled it with explored tiles; M8 replaces that initialization with actual LOS/exploration updates and rendering. All M5 goalposts are now verified, including the combined five-minute economy test above.
 
 ### M6 — Production and progression
 
@@ -274,12 +276,28 @@ Phases:
 
 1. Screens: `MainMenu` (Skirmish, Quit placeholder), `SkirmishSetup` (map = alpha_test, 2 slots, faction locked to Crown, AI difficulty locked to Normal, player colour), `GameScreen`, `Results` (winner, time, units trained/lost, resources gathered).
 2. `systems/victory.ts`: elimination rule from overview; game menu (Esc) with Resume / Surrender / Quit to menu.
-3. AI v1 (`sim/ai/*`) for Crown Normal: JSON build order (peasants to 12, carts to 4, farms per 4 peasants, cottages at pop-cap − 5, storehouse near far mines, barracks, archery range, Age II, stable, Age III, workshop); military composition per age; attack wave when army ≥ 12 or at minute 10; defend when own buildings attacked within 20 tiles; retreat units under 30 % HP to base.
+3. AI v1 (`sim/ai/*`) for Crown Normal: JSON build order (peasants to 12, carts to 4, farms per 4 peasants, cottages at pop-cap − 5, storehouse near far mines, barracks, archery range, Age II, chapel, stable, Age III, workshop); military composition per age; tuned attack wave when army ≥ 10 or at minute 7:30; defend when own buildings attacked within 20 tiles; retreat units under 30 % HP to base.
 4. `tools/sim-headless.ts` (args `--map`, `--p1 faction:difficulty` … `--p4`, `--seeds a-b`, `--max-ticks`, `--json`) printing winner, duration, per-player stats.
 5. Alerts: "Under attack", "Age reached", "Not enough gold/food/population/faith" toasts with `Space` jump.
 
 Goalposts:
 
-- [ ] Exit-gate headless run (10 seeds) passes.
-- [ ] A human who does nothing loses to Normal AI before minute 25 in 3/3 seeds (headless with an idle player slot `none`).
-- [ ] Alpha E2E smoke spec passes.
+- [x] Exit-gate headless run (10 seeds) passes.
+- [x] A human who does nothing loses to Normal AI before minute 25 in 3/3 seeds (headless with an idle player slot `none`).
+- [x] Alpha E2E smoke spec passes.
+
+M9 implementation and verification notes:
+
+- Simulation support is implemented: last-Town-Center elimination (including unfinished Town Centers), surrender, one-shot match outcome/events, shared match summaries, units trained/lost counters, and population-cap/low-faith transition events. Victory tests passed all 5 cases; the full suite at that step passed 467 tests, with typecheck and lint clean.
+- Deterministic, fog-safe Crown Normal AI is implemented with a validated JSON build order, economy/site planning, military production, defence, retreat and attack waves. Hostile perception uses current visibility and remembered building ghosts. All 4 AI tests passed, including the tuned rerun; typecheck and lint passed.
+- The shared sim-only headless runner and CLI support passive slots, per-seed results/stats, timeouts/errors and JSON output. All 24 argument-parser tests, typecheck and lint passed. Slot-count errors, passive-slot timeout, unsupported Clans AI and JSON error output were exercised.
+- Current prescribed tuning: first attack at tick 9000 (7:30), attack army size 10, minimum wave size 3, and Age II man-at-arms weight 3. These replace the original phase-3 attack thresholds and weight, not the planned baseline. Town-Center-priority targeting (tuning 4) has not been applied.
+- Idle-human goalpost: the latest `--p1 none --p2 crown:normal --seeds 1-3 --max-ticks 30000` run produced 3/3 P2 victories within 17 945 ticks (14:57), below the 25-minute limit.
+- Headless exit gate passed after prescribed tuning 3: all 10 seeds finished with P1 victorious at 37 048 ticks (30:52), zero timeouts and zero errors. The initial version and tunings 1–2 each timed out in all 10 seeds at 72 000 ticks; no unprescribed tuning was applied.
+- The menu-first app, two-slot Crown/Normal setup, selectable human colour, game screen, pause menu (Resume / Surrender / Quit to menu), victory/defeat/draw results with duration and per-player statistics, configurable sprite/minimap colours, and debug-only sandbox quick start are implemented. Alerts cover attacks, age advancement, resource shortages, population and faith, with positioned-toast clicks and `Space` camera jumps.
+- Final automated verification passed `npm run typecheck && npm run lint && npm test`: 506 tests across 40 files. `npm run build` passed with the existing non-fatal 500 kB chunk warning.
+- Manual production Chromium smoke at 1280×720 exercised menu → Skirmish → Green → Start, with live WebGL and all 31 assets loaded. Own sprites and minimap marks were green; the enemy was blue, matching setup's first palette colour different from the human's (the manual plan's “red” phrase was incorrect). AI population rose from 5 to 9 within three game-minutes. Clicking an unaffordable Peasant card showed `Not enough food`.
+- Escape opened the pause menu and held tick 1338 unchanged for one second; after resume, the tick reached 1347 within half a second. A real attack raised `Under attack`, and `Space` jumped the camera. Surrender showed Defeat with match time, player colours and statistics. Menu/setup/game/pause/toast/results visuals were inspected, with zero console or page errors.
+- Final `npm run e2e` passed all 30 browser tests (28 existing plus both Alpha smoke tests) in 12.5 minutes. The Alpha smoke trained all ten Crown units through actual command-card clicks, destroyed the enemy Keep using actual trebuchet selection/right-click orders and reached Victory; the second test verified pause, resume and surrender to Defeat.
+- Final `npm run bench:sim -- --units 300` averaged 3.903 ms per tick (≤ 4 ms); isolated fog updates averaged 0.419 ms (≤ 0.5 ms), with zero pending paths. The separate M5 combined economy headless Vitest goalpost also passed, as recorded above.
+All M9 goalposts and Alpha exit gates are complete; the user has confirmed the manual full browser match against Normal AI (victory or defeat, no blockers).

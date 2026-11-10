@@ -25,32 +25,8 @@ export interface CapturePhaseFilter {
   phase: 'attack' | 'rest';
 }
 
-/**
- * Concise boot and readiness helper for M4 browser fixtures.
- * Navigates to /?debug=1 and waits for loaded world + HUD.
- */
-export async function setupM4Session(
-  page: Page,
-  options?: { centerOn?: { x: number; z: number }; debugScene?: boolean },
-): Promise<SetupResult> {
-  const consoleErrors: string[] = [];
-  const pageErrors: string[] = [];
-
-  page.on('console', (message) => {
-    if (message.type() === 'error') {
-      consoleErrors.push(message.text());
-    }
-  });
-  page.on('pageerror', (error) => {
-    pageErrors.push(error.message);
-  });
-
-  const debugScene = options?.debugScene ?? true;
-  await page.goto(debugScene ? '/?debug=1&debugScene=1' : '/?debug=1');
-
-  const canvas = page.getByLabel('Game view', { exact: true });
-  await expect(canvas).toBeVisible();
-
+/** Waits for the loaded world, renderer, input, and debug interface. */
+export async function waitForSessionLoaded(page: Page): Promise<void> {
   await page.waitForFunction(
     () => {
       const bordev = window.__bordev;
@@ -78,6 +54,55 @@ export async function setupM4Session(
     undefined,
     { timeout: 30_000 },
   );
+}
+
+function collectBrowserErrors(page: Page): SetupResult {
+  const consoleErrors: string[] = [];
+  const pageErrors: string[] = [];
+
+  page.on('console', (message) => {
+    if (message.type() === 'error') {
+      consoleErrors.push(message.text());
+    }
+  });
+  page.on('pageerror', (error) => {
+    pageErrors.push(error.message);
+  });
+
+  return { consoleErrors, pageErrors };
+}
+
+/** Starts a Normal AI skirmish through the main menu. */
+export async function startSkirmish(page: Page): Promise<SetupResult> {
+  const errors = collectBrowserErrors(page);
+  await page.goto('/?debug=1');
+  await page.getByRole('button', { name: 'Skirmish', exact: true }).click();
+  await page.getByRole('button', { name: 'Start', exact: true }).click();
+  await waitForSessionLoaded(page);
+  return errors;
+}
+
+/**
+ * Concise boot and readiness helper for M4 browser fixtures.
+ * Navigates to the passive-opponent sandbox and waits for loaded world + HUD.
+ */
+export async function setupM4Session(
+  page: Page,
+  options?: { centerOn?: { x: number; z: number }; debugScene?: boolean },
+): Promise<SetupResult> {
+  const { consoleErrors, pageErrors } = collectBrowserErrors(page);
+
+  const debugScene = options?.debugScene ?? true;
+  await page.goto(
+    debugScene
+      ? '/?debug=1&start=sandbox&debugScene=1'
+      : '/?debug=1&start=sandbox',
+  );
+
+  const canvas = page.getByLabel('Game view', { exact: true });
+  await expect(canvas).toBeVisible();
+
+  await waitForSessionLoaded(page);
 
   const center = options?.centerOn ?? { x: 60, z: 60 };
   await page.evaluate(

@@ -1,10 +1,17 @@
 import { Renderer, type RendererStats } from '../render/Renderer';
 import { setupDebugScene } from '../render/DebugScene';
+import {
+  getPlayerColour,
+  type PlayerColour,
+  type PlayerColourId,
+} from '../render/playerColours';
 import { SIM_DT, Sim } from '../sim/sim';
 import { parseMap } from '../sim/map';
 import { cloneCommand } from '../sim/commands';
 import type { GameMap } from '../sim/map';
 import type { Command, SimEvent } from '../sim/commands';
+import type { AiDifficulty } from '../sim/ai/difficulty';
+import { summarizeMatch } from '../sim/systems/victory';
 import type {
   Entity,
   CartState,
@@ -16,7 +23,7 @@ import type {
   Combatant,
 } from '../sim/entity';
 import { InputController } from '../input/InputController';
-import { publishHud, resetHud, setHudStatus } from '../ui/hud';
+import { publishHud, resetHud, setHudStatus, useHudStore } from '../ui/hud';
 import { resolveRallyTarget } from '../sim/systems/rally';
 import {
   isEntityVisibleTo,
@@ -24,6 +31,9 @@ import {
   type FogGhost,
 } from '../sim/systems/fog';
 import type { World } from '../sim/world';
+import { AlertFeed } from './alerts';
+import { buildMatchResult, type MatchResult } from './matchResult';
+import { readUrlFlags } from './urlFlags';
 export { SIM_DT };
 export const DEFAULT_MAP_URL = '/maps/alpha_test.json';
 export const DEFAULT_SEED = 7;
@@ -95,11 +105,15 @@ export interface GameSessionOptions {
   seed?: number;
   maxAccumulator?: number;
   debugScene?: boolean;
+  ai?: Readonly<Record<number, AiDifficulty>>;
+  playerColours?: readonly PlayerColourId[];
+  onMatchEnd?: (result: MatchResult) => void;
 }
 
 export interface GameCheats {
   resources: (n: number) => void;
   spawnPeasants: (count: number, x: number, z: number) => number[];
+  age: (age: 2 | 3) => void;
 }
 
 interface PassableGrid {
@@ -235,11 +249,16 @@ export class GameSession {
   readonly debugEnabled: boolean;
   readonly renderer: Renderer;
   readonly input: InputController;
+  readonly playerColours: readonly PlayerColour[];
+  private readonly _options: GameSessionOptions;
+  private readonly _alerts = new AlertFeed(0);
   private readonly _cheats: GameCheats;
 
   private _sim: Sim | null = null;
   private _map: GameMap | null = null;
   private _loadError: string | null = null;
+  private _paused = false;
+  private _matchEnded = false;
 
   private readonly _snapshotEntities: InterpolatedEntity[] = [];
   private readonly _snapshot: SessionSnapshot = {
@@ -272,24 +291,25 @@ export class GameSession {
   private _lastHudTick = -1;
 
   constructor(canvas: HTMLCanvasElement, options?: GameSessionOptions) {
+    this._options = options ?? {};
     this._maxAccumulator = options?.maxAccumulator ?? DEFAULT_MAX_ACCUMULATOR;
-    const hasDebugParams =
-      typeof window !== 'undefined' &&
-      (() => {
-        const params = new URLSearchParams(window.location.search);
-        return params.get('debug') === '1' && params.get('debugScene') === '1';
-      })();
-    this._debugSceneEnabled = options?.debugScene ?? Boolean(hasDebugParams);
-    this.debugEnabled =
-      Boolean(import.meta.env.DEV) ||
-      (typeof window !== 'undefined' &&
-        new URLSearchParams(window.location.search).get('debug') === '1');
+    const flags = readUrlFlags();
+    this._debugSceneEnabled = options?.debugScene ?? flags.debugScene;
+    this.debugEnabled = flags.debug;
+    const colourIds: readonly PlayerColourId[] = options?.playerColours ?? [
+      'blue',
+      'red',
+    ];
+    this.playerColours = colourIds.map(getPlayerColour);
 
     // Reset HUD on session initialization
     resetHud();
 
     // Construct renderer, then input controller
     this.renderer = new Renderer(canvas);
+    this.renderer.setPlayerTints(
+      this.playerColours.map((colour) => colour.tint),
+    );
     this.input = new InputController(canvas, this);
 
     this._cheats = {
@@ -300,6 +320,11 @@ export class GameSession {
           p.food = n;
           p.gold = n;
         }
+        publishHud(this);
+      },
+      age: (age: 2 | 3) => {
+        if (!this._sim) return;
+        this._sim.world.players[0].age = age;
         publishHud(this);
       },
       spawnPeasants: (count: number, x: number, z: number) => {
@@ -384,6 +409,30 @@ export class GameSession {
   showStatus(message: string): void {
     setHudStatus(message);
   }
+  reject(reason: string): void {
+    if (!this._alerts.rejection(reason)) this.showStatus(reason);
+  }
+  jumpToLatestAlert(): void {
+    const position = this._alerts.latestPosition();
+    if (position) this.input.camera.centerOn(position.x, position.z);
+  }
+  get paused(): boolean {
+    return this._paused;
+  }
+  openMenu(): void {
+    if (!this._sim || this._matchEnded || this._disposed) return;
+    this._paused = true;
+    useHudStore.setState({ menuOpen: true });
+  }
+  closeMenu(): void {
+    this._paused = false;
+    this._accumulator = 0;
+    useHudStore.setState({ menuOpen: false });
+  }
+  surrender(): void {
+    this.closeMenu();
+    this.issue({ kind: 'surrender', player: 0 });
+  }
   recordEvents(): SimEvent[] {
     const list: SimEvent[] = [];
     this._recordedEvents = list;
@@ -443,7 +492,6 @@ export class GameSession {
 
     // Clamp delta to prevent spiral of death
     const dt = Math.max(0, Math.min(delta, this._maxAccumulator));
-    this._accumulator += dt;
 
     // Track FPS
     this._frameCount++;
@@ -454,41 +502,63 @@ export class GameSession {
       this._fpsFrames = 0;
     }
 
-    // Step simulation at authoritative fixed SIM_DT
-    let stepped = false;
-    while (this._accumulator >= SIM_DT) {
-      if (this._sim) {
-        this._sim.step();
-        stepped = true;
-      }
-      this._accumulator -= SIM_DT;
-    }
+    if (!this._paused && !this._matchEnded) {
+      this._accumulator += dt;
 
-    if (this._sim) {
-      this._sim.drainEvents(this._drainedEvents);
-      if (this._recordedEvents !== null && this._drainedEvents.length > 0) {
-        for (let i = 0; i < this._drainedEvents.length; i++) {
-          this._recordedEvents.push(this._drainedEvents[i]);
+      // Stop on the deciding tick, even when this frame has time for more steps.
+      let stepped = false;
+      while (this._accumulator >= SIM_DT && !this._sim?.world.outcome) {
+        if (this._sim) {
+          this._sim.step();
+          stepped = true;
+        }
+        this._accumulator -= SIM_DT;
+      }
+
+      if (this._sim) {
+        this._sim.drainEvents(this._drainedEvents);
+        this._alerts.ingest(this._drainedEvents, this._sim.world);
+        if (this._recordedEvents !== null && this._drainedEvents.length > 0) {
+          for (let i = 0; i < this._drainedEvents.length; i++) {
+            this._recordedEvents.push(this._drainedEvents[i]);
+          }
+        }
+        for (const event of this._drainedEvents) {
+          if (event.kind !== 'matchEnded') continue;
+          this._matchEnded = true;
+          this._options.onMatchEnd?.(
+            buildMatchResult(summarizeMatch(this._sim.world), {
+              viewer: 0,
+              ai: this._options.ai,
+              colours: this.playerColours.map((colour) => colour.id),
+            }),
+          );
+          break;
         }
       }
-    }
 
-    this._alpha = Math.max(0, Math.min(1, this._accumulator / SIM_DT));
+      if (this._disposed) return;
+      this._alpha = this._matchEnded
+        ? 1
+        : Math.max(0, Math.min(1, this._accumulator / SIM_DT));
 
-    // Update snapshot with interpolated entity positions
-    this.updateSnapshot(this._alpha);
+      // Update snapshot with interpolated entity positions.
+      this.updateSnapshot(this._alpha);
 
-    // Publish HUD at 10 Hz measured in sim ticks/time (every 2 sim ticks = 0.10s)
-    if (this._sim && stepped) {
-      const currentTick = this._sim.world.tick;
-      if (currentTick - this._lastHudTick >= 2) {
-        this._lastHudTick = currentTick;
-        publishHud(this);
+      if (!this._matchEnded) {
+        // Publish HUD at 10 Hz measured in sim ticks/time.
+        if (this._sim && stepped) {
+          const currentTick = this._sim.world.tick;
+          if (currentTick - this._lastHudTick >= 2) {
+            this._lastHudTick = currentTick;
+            publishHud(this);
+          }
+        }
+
+        // Update camera, pruning and interaction before rendering.
+        this.input.update(dt, now);
       }
     }
-
-    // Update input controller BEFORE render (updates camera, pruning, setInteraction)
-    this.input.update(dt, now);
 
     // Explicitly render canvas frame with snapshot and render time
     this.renderer.render(this._sim ? this._snapshot : undefined, now / 1000);
@@ -764,7 +834,7 @@ export class GameSession {
       if (this._disposed) return;
 
       this._map = gameMap;
-      const sim = new Sim(gameMap, seed);
+      const sim = new Sim(gameMap, seed, undefined, this._options.ai);
       if (this._disposed) return;
 
       if (this._debugSceneEnabled) {

@@ -32,7 +32,7 @@ export function CommandCard({ session }: CommandCardProps) {
   const handleAction = (slot: CommandSlot) => {
     if (slot.disabled) {
       if (slot.reason) {
-        session?.showStatus(slot.reason);
+        session?.reject(slot.reason);
       }
       return;
     }

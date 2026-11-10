@@ -32,6 +32,7 @@ describe('OrderController functional rally outcomes in Sim', () => {
         sim.issue(cmd);
       },
       showStatus: () => {},
+      reject: () => {},
     } as unknown as GameSession;
 
     const mockSelection = {
@@ -118,6 +119,7 @@ describe('OrderController combat and contextual precedence orders', () => {
         sim.issue(cmd);
       },
       showStatus: () => {},
+      reject: () => {},
     } as unknown as GameSession;
 
     const mockSelection = {

@@ -332,9 +332,7 @@ export class PlacementController {
       const validTiles = wallPreview.filter((tile) => tile.valid);
 
       if (validTiles.length === 0) {
-        this.session.showStatus(
-          this.lastInvalidReason ?? 'Cannot place wall here',
-        );
+        this.session.reject(this.lastInvalidReason ?? 'Cannot place wall here');
       } else {
         for (let i = 0; i < validTiles.length; i++) {
           const t = validTiles[i];
@@ -393,7 +391,7 @@ export class PlacementController {
         this.cancel();
       }
     } else {
-      this.session.showStatus(
+      this.session.reject(
         this.lastInvalidReason ?? 'Cannot place building here',
       );
     }

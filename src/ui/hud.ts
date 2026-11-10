@@ -85,6 +85,15 @@ export interface HudProgression {
   buildingTypes: readonly string[];
 }
 
+export interface HudAlert {
+  id: number;
+  kind: 'underAttack' | 'age' | 'resources' | 'population' | 'faith';
+  text: string;
+  x?: number;
+  z?: number;
+  at: number;
+}
+
 export interface HudState {
   resources: HudResources;
   selection: readonly SelectedEntityData[];
@@ -92,6 +101,8 @@ export interface HudState {
   progression: HudProgression;
   status: string;
   statusTimestamp: number;
+  alerts: readonly HudAlert[];
+  menuOpen: boolean;
   minimap: MinimapData;
   reset: () => void;
 }
@@ -152,6 +163,8 @@ export const useHudStore = create<HudState>((set) => ({
   progression: INITIAL_PROGRESSION,
   status: '',
   statusTimestamp: 0,
+  alerts: [],
+  menuOpen: false,
   minimap: INITIAL_MINIMAP,
   reset: () =>
     set({
@@ -161,6 +174,8 @@ export const useHudStore = create<HudState>((set) => ({
       progression: INITIAL_PROGRESSION,
       status: '',
       statusTimestamp: 0,
+      alerts: [],
+      menuOpen: false,
       minimap: INITIAL_MINIMAP,
     }),
 }));
@@ -173,7 +188,7 @@ export function setHudClock(clock: HudClock | null): void {
   customClock = clock;
 }
 
-function getHudNow(): number {
+export function getHudNow(): number {
   if (customClock) return customClock();
   return typeof performance !== 'undefined' ? performance.now() : Date.now();
 }
@@ -183,6 +198,12 @@ export function setHudStatus(message: string): void {
     status: message,
     statusTimestamp: message ? getHudNow() : 0,
   });
+}
+
+export function pushHudAlert(alert: HudAlert): void {
+  useHudStore.setState((prev) => ({
+    alerts: [...prev.alerts.slice(-3), alert],
+  }));
 }
 
 export function resetHud(): void {
@@ -489,6 +510,9 @@ export function publishHud(session: GameSession): void {
       nextStatus = '';
       nextStatusTimestamp = 0;
     }
+    const nextAlerts = prev.alerts.some((alert) => now - alert.at >= 5000)
+      ? prev.alerts.filter((alert) => now - alert.at < 5000)
+      : prev.alerts;
 
     const finalResources = areResourcesEqual(prev.resources, nextResources)
       ? prev.resources
@@ -544,6 +568,7 @@ export function publishHud(session: GameSession): void {
       finalOrders === prev.orders &&
       finalMinimap === prev.minimap &&
       finalProgression === prev.progression &&
+      nextAlerts === prev.alerts &&
       nextStatus === prev.status &&
       nextStatusTimestamp === prev.statusTimestamp
     ) {
@@ -557,6 +582,7 @@ export function publishHud(session: GameSession): void {
       progression: finalProgression,
       status: nextStatus,
       statusTimestamp: nextStatusTimestamp,
+      alerts: nextAlerts,
       minimap: finalMinimap,
     };
   });

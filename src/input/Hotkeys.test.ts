@@ -63,13 +63,17 @@ function createHarness(options?: {
 
   const executedSlots: commandSlotsModule.CommandSlot[] = [];
   const executedOrders: string[] = [];
-  const statusMessages: string[] = [];
+  const rejectionMessages: string[] = [];
 
   let toggledDebugGrid = false;
   const session = {
     debugEnabled: options?.debugEnabled ?? false,
-    showStatus: vi.fn((msg: string) => {
-      statusMessages.push(msg);
+    paused: false,
+    openMenu: vi.fn(),
+    closeMenu: vi.fn(),
+    jumpToLatestAlert: vi.fn(),
+    reject: vi.fn((msg: string) => {
+      rejectionMessages.push(msg);
     }),
     renderer: {
       toggleDebugGrid: vi.fn(() => {
@@ -95,7 +99,7 @@ function createHarness(options?: {
       executedSlots.push(slot);
       if (slot.disabled) {
         if (slot.reason) {
-          session.showStatus(slot.reason);
+          session.reject(slot.reason);
         }
         return;
       }
@@ -104,6 +108,7 @@ function createHarness(options?: {
       }
     }),
     submenu: null as 'economic' | 'military' | null,
+    mode: null as 'move' | 'attackMove' | null,
   };
 
   const renderer = session.renderer;
@@ -148,7 +153,7 @@ function createHarness(options?: {
     },
     executedOrders,
     executedSlots,
-    statusMessages,
+    rejectionMessages,
     get toggledDebugGrid() {
       return toggledDebugGrid;
     },
@@ -403,7 +408,7 @@ describe('Hotkeys', () => {
       repeat: false,
       timeStamp: 100,
     });
-    expect(reasonHarness.statusMessages).toEqual(['Custom reason']);
+    expect(reasonHarness.rejectionMessages).toEqual(['Custom reason']);
     expect(reasonHarness.toggledDebugGrid).toBe(false);
     reasonSpy.mockRestore();
   });
@@ -447,7 +452,8 @@ describe('Hotkeys', () => {
     });
     expect(harness.executedOrders).toContain('delete');
 
-    // Escape issues back order and cancels drag
+    // Escape issues back when an order mode is active and cancels drag
+    harness.orders.mode = 'move';
     harness.hotkeys.handleKeyDown({
       code: 'Escape',
       repeat: false,
@@ -467,6 +473,163 @@ describe('Hotkeys', () => {
     expect(harness.executedOrders).toHaveLength(prevOrdersLen);
   });
 
+  it('Escape with no active order or marquee opens the menu', () => {
+    const harness = createHarness();
+    const preventDefault = vi.fn();
+
+    harness.hotkeys.handleKeyDown({
+      code: 'Escape',
+      timeStamp: 100,
+      preventDefault,
+    });
+
+    expect(harness.session.openMenu).toHaveBeenCalledOnce();
+    expect(harness.orders.execute).not.toHaveBeenCalled();
+    expect(harness.selection.cancelDrag).not.toHaveBeenCalled();
+    expect(preventDefault).toHaveBeenCalledOnce();
+  });
+
+  it('Escape with a submenu goes back without opening the menu', () => {
+    const harness = createHarness();
+    harness.orders.submenu = 'economic';
+
+    harness.hotkeys.handleKeyDown({ code: 'Escape', timeStamp: 100 });
+
+    expect(harness.executedOrders).toEqual(['back']);
+    expect(harness.selection.cancelDrag).toHaveBeenCalledOnce();
+    expect(harness.session.openMenu).not.toHaveBeenCalled();
+  });
+
+  it('Escape cancels an active marquee without opening the menu', () => {
+    const harness = createHarness();
+    vi.spyOn(harness.selection, 'currentBox', 'get').mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 20,
+      bottom: 20,
+    });
+
+    harness.hotkeys.handleKeyDown({ code: 'Escape', timeStamp: 100 });
+
+    expect(harness.selection.cancelDrag).toHaveBeenCalledOnce();
+    expect(harness.orders.execute).not.toHaveBeenCalled();
+    expect(harness.session.openMenu).not.toHaveBeenCalled();
+  });
+
+  it.each(['Escape', 'F10'])(
+    'while paused, %s closes the menu and all gameplay keys are ignored',
+    (code) => {
+      const harness = createHarness({ placementActive: true });
+      harness.session.paused = true;
+      const preventDefault = vi.fn();
+      const assignGroup = vi.spyOn(harness.selection, 'assignGroup');
+      const selectGroup = vi.spyOn(harness.selection, 'selectGroup');
+
+      for (const ignored of [
+        'KeyQ',
+        'KeyR',
+        'ArrowUp',
+        'Digit1',
+        'KeyH',
+        'Period',
+        'Delete',
+        'Space',
+      ]) {
+        harness.hotkeys.handleKeyDown({
+          code: ignored,
+          timeStamp: 100,
+          preventDefault,
+        });
+      }
+      harness.hotkeys.handleKeyDown({
+        code: 'Digit1',
+        ctrlKey: true,
+        timeStamp: 100,
+        preventDefault,
+      });
+
+      expect(harness.orders.execute).not.toHaveBeenCalled();
+      expect(harness.orders.executeSlot).not.toHaveBeenCalled();
+      expect(harness.placement.rotate).not.toHaveBeenCalled();
+      expect(harness.panKeys).toEqual([]);
+      expect(assignGroup).not.toHaveBeenCalled();
+      expect(selectGroup).not.toHaveBeenCalled();
+      expect(harness.camera.centerOnTownCenter).not.toHaveBeenCalled();
+      expect(harness.cycledWorker).toBe(false);
+      expect(harness.session.jumpToLatestAlert).not.toHaveBeenCalled();
+      expect(preventDefault).not.toHaveBeenCalled();
+
+      harness.hotkeys.handleKeyDown({ code, timeStamp: 200, preventDefault });
+
+      expect(harness.session.closeMenu).toHaveBeenCalledOnce();
+      expect(harness.session.openMenu).not.toHaveBeenCalled();
+      expect(harness.placement.cancel).not.toHaveBeenCalled();
+      expect(preventDefault).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('F10 opens the menu and Space jumps to the latest alert once', () => {
+    const harness = createHarness();
+    const preventDefault = vi.fn();
+
+    harness.hotkeys.handleKeyDown({
+      code: 'F10',
+      timeStamp: 100,
+      preventDefault,
+    });
+    harness.hotkeys.handleKeyDown({
+      code: 'Space',
+      timeStamp: 200,
+      preventDefault,
+    });
+    harness.hotkeys.handleKeyDown({
+      code: 'Space',
+      repeat: true,
+      timeStamp: 250,
+      preventDefault,
+    });
+
+    expect(harness.session.openMenu).toHaveBeenCalledOnce();
+    expect(harness.session.jumpToLatestAlert).toHaveBeenCalledOnce();
+    expect(preventDefault).toHaveBeenCalledTimes(2);
+    expect(harness.orders.execute).not.toHaveBeenCalled();
+  });
+
+  it('menu and alert keys retain editable, modifier and repeat filtering', () => {
+    const harness = createHarness();
+    const preventDefault = vi.fn();
+    for (const code of ['Escape', 'F10', 'Space']) {
+      for (const flags of [
+        { repeat: true },
+        { ctrlKey: true },
+        { altKey: true },
+        { metaKey: true },
+        { target: { tagName: 'INPUT' } as unknown as EventTarget },
+      ]) {
+        harness.hotkeys.handleKeyDown({
+          code,
+          timeStamp: 100,
+          preventDefault,
+          ...flags,
+        });
+      }
+    }
+    harness.session.paused = true;
+    for (const code of ['Escape', 'F10']) {
+      harness.hotkeys.handleKeyDown({
+        code,
+        timeStamp: 200,
+        target: { tagName: 'INPUT' } as unknown as EventTarget,
+        preventDefault,
+      });
+    }
+
+    expect(harness.session.openMenu).not.toHaveBeenCalled();
+    expect(harness.session.closeMenu).not.toHaveBeenCalled();
+    expect(harness.session.jumpToLatestAlert).not.toHaveBeenCalled();
+    expect(preventDefault).not.toHaveBeenCalled();
+  });
+
   it('active placement prioritises Escape to cancel and KeyR to rotate over card slots', () => {
     const harness = createHarness({ placementActive: true });
     const defaultPrevented: string[] = [];
@@ -483,6 +646,7 @@ describe('Hotkeys', () => {
     expect(harness.placement.cancel).toHaveBeenCalled();
     expect(harness.executedOrders).not.toContain('back');
     expect(harness.selection.cancelDrag).not.toHaveBeenCalled();
+    expect(harness.session.openMenu).not.toHaveBeenCalled();
     expect(defaultPrevented).toContain('Escape');
 
     // 2. KeyR rotates placement without triggering slot R (attackMove)
@@ -608,7 +772,7 @@ describe('Hotkeys', () => {
       repeat: false,
       timeStamp: 100,
     });
-    expect(harness.statusMessages).toContain('Requires Storehouse');
+    expect(harness.rejectionMessages).toContain('Requires Storehouse');
     expect(harness.executedOrders).toEqual(['build']); // no new order executed
     reasonSpy.mockRestore();
   });

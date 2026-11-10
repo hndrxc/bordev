@@ -1,0 +1,24 @@
+{
+  "faction": "crown",
+  "steps": [
+    { "build": "barracks", "minPeasants": 8 },
+    { "build": "archery_range", "minPeasants": 10 },
+    { "research": "age_2", "minPeasants": 12 },
+    { "build": "chapel" },
+    { "build": "stable" },
+    { "research": "age_3" },
+    { "build": "siege_workshop" }
+  ],
+  "army": {
+    "1": { "spearman": 1, "longbowman": 1 },
+    "2": { "man_at_arms": 3, "crossbowman": 1, "knight": 1 },
+    "3": {
+      "man_at_arms": 1,
+      "halberdier": 1,
+      "crossbowman": 1,
+      "knight": 1,
+      "trebuchet": 1
+    }
+  },
+  "maxAlive": { "trebuchet": 3 }
+}

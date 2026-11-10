@@ -20,6 +20,7 @@ import { Terrain } from './Terrain';
 import { UnitShadows } from './UnitShadows';
 import { Projectiles } from './Projectiles';
 import { FogTexture } from './FogTexture';
+import { getPlayerColour } from './playerColours';
 import {
   ATTACK_ANIM_FPS,
   MELEE_TOTAL_FRAMES,
@@ -113,8 +114,6 @@ export const REQUIRED_ATLASES = [
   'crown_stone_tower',
 ] as const;
 
-const TINT_PLAYER_0: readonly [number, number, number] = [0.2, 0.5, 0.9];
-const TINT_PLAYER_1: readonly [number, number, number] = [0.9, 0.2, 0.2];
 const TINT_NEUTRAL: readonly [number, number, number] = [1.0, 1.0, 1.0];
 
 const TYPE_TO_ASSET: Record<string, string> = {
@@ -284,6 +283,10 @@ export class Renderer {
   public unitShadows: UnitShadows | null = null;
   public projectiles: Projectiles | null = null;
   private mapSize = 128;
+  private playerTints: readonly (readonly [number, number, number])[] = [
+    getPlayerColour('blue').tint,
+    getPlayerColour('red').tint,
+  ];
   public debugProbes: DebugSceneProbes | null = null;
 
   private readonly batches = new Map<string, SpriteBatch>();
@@ -360,6 +363,10 @@ export class Renderer {
     this.engine.resize();
     this.camera?.resize();
   };
+
+  setPlayerTints(tints: readonly (readonly [number, number, number])[]): void {
+    this.playerTints = tints;
+  }
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -961,11 +968,9 @@ export class Renderer {
                 this.scratchSprite.x = anchorX;
                 this.scratchSprite.z = anchorZ;
                 this.scratchSprite.tint =
-                  ent.player === 0
-                    ? TINT_PLAYER_0
-                    : ent.player === 1
-                      ? TINT_PLAYER_1
-                      : TINT_NEUTRAL;
+                  ent.player === undefined
+                    ? TINT_NEUTRAL
+                    : (this.playerTints[ent.player] ?? TINT_NEUTRAL);
                 this.scratchSprite.alpha = unitAlpha;
                 this.scratchSprite.radius = radius;
                 this.scratchSprite.shadowAlpha = isDead ? 0.0 : 1.0;
@@ -1072,11 +1077,9 @@ export class Renderer {
             this.scratchSprite.x = posX;
             this.scratchSprite.z = posZ;
             this.scratchSprite.tint =
-              ent.player === 0
-                ? TINT_PLAYER_0
-                : ent.player === 1
-                  ? TINT_PLAYER_1
-                  : TINT_NEUTRAL;
+              ent.player === undefined
+                ? TINT_NEUTRAL
+                : (this.playerTints[ent.player] ?? TINT_NEUTRAL);
             this.scratchSprite.alpha = buildingAlpha;
             this.scratchSprite.shadowAlpha = ent.remains ? 0.0 : 1.0;
             this.scratchSprite.fogged = isGhost;

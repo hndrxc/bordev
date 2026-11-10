@@ -17,6 +17,7 @@ import type {
 } from './entity.js';
 import type { SimEvent } from './commands.js';
 import { updateFog, type FogGhost } from './systems/fog.js';
+import { eliminatePlayer } from './systems/victory.js';
 export interface PlayerState {
   id: number;
   faction: Faction;
@@ -26,6 +27,8 @@ export interface PlayerState {
   gold: number;
   foodCollected: number;
   goldCollected: number;
+  unitsTrained: number;
+  unitsLost: number;
   faithProduced: number;
   faithUsed: number;
   lowFaith: boolean;
@@ -52,6 +55,7 @@ export class World {
   readonly events: SimEvent[] = [];
   readonly remains: Combatant[] = [];
   tick = 0;
+  outcome: { winnerTeam: number | null; endTick: number } | null = null;
   private readonly freeIds: number[] = [];
 
   constructor(
@@ -433,12 +437,8 @@ export class World {
             e.isTownCenter &&
             e.id !== ent.id,
         );
-        if (!hasOtherTC && pState && !pState.eliminated) {
-          pState.eliminated = true;
-          this.emitEvent({
-            kind: 'playerEliminated',
-            player: ent.player,
-          });
+        if (!hasOtherTC) {
+          eliminatePlayer(this, ent.player);
         }
       }
     } else if (ent.kind === 'mine') {
@@ -448,6 +448,7 @@ export class World {
       const pState = this.players[ent.player];
       if (pState) {
         pState.pop = Math.max(0, pState.pop - ent.pop);
+        pState.unitsLost++;
       }
       this.emitEvent({
         kind: 'unitDied',
@@ -479,6 +480,8 @@ export class World {
         gold: 200,
         foodCollected: 0,
         goldCollected: 0,
+        unitsTrained: 0,
+        unitsLost: 0,
         faithProduced: 0,
         faithUsed: 0,
         lowFaith: false,

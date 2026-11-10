@@ -73,7 +73,7 @@ export class OrderController {
     if (this.isDisposed) return;
     if (slot.disabled) {
       if (slot.reason) {
-        this.session.showStatus(slot.reason);
+        this.session.reject(slot.reason);
       }
       return;
     }

@@ -78,6 +78,13 @@ export class Hotkeys {
   public readonly handleKeyDown = (e: KeyboardEventLike): void => {
     if (this.isDisposed) return;
     if (isEditableElement(e.target)) return;
+    if (this.session.paused) {
+      if (e.code === 'Escape' || e.code === 'F10') {
+        e.preventDefault?.();
+        this.session.closeMenu();
+      }
+      return;
+    }
 
     const code = e.code;
 
@@ -110,6 +117,16 @@ export class Hotkeys {
 
     // One-shot actions ignore Ctrl/Alt/Meta modifiers and ignore e.repeat
     if (e.ctrlKey || e.altKey || e.metaKey || e.repeat) {
+      return;
+    }
+    if (code === 'F10') {
+      e.preventDefault?.();
+      this.session.openMenu();
+      return;
+    }
+    if (code === 'Space') {
+      e.preventDefault?.();
+      this.session.jumpToLatestAlert();
       return;
     }
     // Placement consumes these keys only after the normal one-shot filter.
@@ -147,10 +164,19 @@ export class Hotkeys {
       return;
     }
 
-    // 6. Escape -> back order and cancel marquee drag
+    // 6. Escape -> back, cancel marquee drag, or open the game menu
     if (code === 'Escape') {
-      this.input.orders.execute('back');
-      this.input.selection.cancelDrag?.();
+      if (
+        this.input.orders.submenu !== null ||
+        this.input.orders.mode !== null
+      ) {
+        this.input.orders.execute('back');
+        this.input.selection.cancelDrag?.();
+      } else if (this.input.selection.currentBox !== null) {
+        this.input.selection.cancelDrag?.();
+      } else {
+        this.session.openMenu();
+      }
       e.preventDefault?.();
       return;
     }

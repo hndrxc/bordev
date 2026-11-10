@@ -156,6 +156,7 @@ export interface BuildingEntity {
   };
   orientation?: 'horizontal' | 'vertical';
   trainingQueue: TrainingItem[];
+  popBlocked?: boolean;
   research?: ResearchItem;
   combat?: CombatState;
   /** Persistent across target changes; earliest tick the next shot may fire. */

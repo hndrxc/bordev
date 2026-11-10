@@ -122,11 +122,7 @@ export function Minimap({ session, width = 180, height = 180 }: MinimapProps) {
 
       if (u.ghost) {
         ctx.globalAlpha = 0.6;
-        if (u.player === 1) {
-          ctx.fillStyle = '#991b1b'; // Muted dark red
-        } else {
-          ctx.fillStyle = '#92400e'; // Muted amber
-        }
+        ctx.fillStyle = session?.playerColours[u.player]?.ghostCss ?? '#92400e';
 
         if (u.kind === 'building') {
           ctx.fillRect(mx - 2, my - 2, 4, 4);
@@ -141,13 +137,7 @@ export function Minimap({ session, width = 180, height = 180 }: MinimapProps) {
         }
         ctx.globalAlpha = 1.0;
       } else {
-        if (u.player === 0) {
-          ctx.fillStyle = '#3b82f6'; // Blue (player 0)
-        } else if (u.player === 1) {
-          ctx.fillStyle = '#ef4444'; // Red (player 1)
-        } else {
-          ctx.fillStyle = '#f59e0b'; // Amber (neutral/mine)
-        }
+        ctx.fillStyle = session?.playerColours[u.player]?.css ?? '#f59e0b';
 
         if (u.kind === 'building') {
           ctx.fillRect(mx - 2, my - 2, 4, 4);
@@ -186,7 +176,7 @@ export function Minimap({ session, width = 180, height = 180 }: MinimapProps) {
     }
 
     ctx.restore();
-  }, [minimapData, mapSize, width, height, dpr]);
+  }, [minimapData, mapSize, width, height, dpr, session]);
 
   // Generate or reuse cached ImageData for terrain
   useEffect(() => {

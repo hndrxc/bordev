@@ -3,6 +3,8 @@ import type { GameMap } from './map.js';
 import { World } from './world.js';
 import type { PathQueue } from './path/pathQueue.js';
 import { Rng } from './rng.js';
+import { AiPlayer } from './ai/aiPlayer.js';
+import type { AiDifficulty } from './ai/difficulty.js';
 import {
   type Command,
   type SimEvent,
@@ -45,6 +47,7 @@ import { updateProjectiles } from './systems/projectiles.js';
 import { updateAuras } from './systems/auras.js';
 import { updateGates } from './systems/gates.js';
 import { updateFog } from './systems/fog.js';
+import { eliminatePlayer, updateVictory } from './systems/victory.js';
 export const SIM_DT = 0.05;
 
 export class Sim {
@@ -53,15 +56,30 @@ export class Sim {
   readonly rng: Rng;
 
   private pendingCommands: Command[] = [];
+  private readonly aiPlayers: AiPlayer[] = [];
+  private readonly issueAiCommand = (cmd: Command): void => {
+    this.issue(cmd);
+  };
 
   constructor(
     map: GameMap,
     seed = 1,
     playerFactions?: Record<number, Faction>,
+    ai?: Readonly<Record<number, AiDifficulty>>,
   ) {
     this.rng = new Rng(seed);
     this.world = new World(map, this.rng, playerFactions);
     this.pathQueue = this.world.pathQueue;
+    if (ai) {
+      for (const [id, difficulty] of Object.entries(ai)) {
+        const player = Number(id);
+        const state = this.world.players[player];
+        if (!state) {
+          throw new Error(`AI player ${player} does not exist on this map`);
+        }
+        this.aiPlayers.push(new AiPlayer(player, difficulty, state.faction));
+      }
+    }
   }
 
   issue(cmd: Command): void {
@@ -95,6 +113,10 @@ export class Sim {
     stepResearch(this.world);
     updateProduction(this.world);
     updateRemains(this.world);
+    updateVictory(this.world);
+    for (const ai of this.aiPlayers) {
+      ai.update(this.world, this.issueAiCommand);
+    }
     this.world.tick++;
   }
 
@@ -158,6 +180,9 @@ export class Sim {
         break;
       case 'cancelResearch':
         cancelResearch(this.world, cmd);
+        break;
+      case 'surrender':
+        eliminatePlayer(this.world, cmd.player);
         break;
       default:
         throw new Error(`Unsupported command: ${(cmd as Command).kind}`);

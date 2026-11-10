@@ -117,6 +117,11 @@ export interface SetRallyCommand {
   targetId?: number;
 }
 
+export interface SurrenderCommand {
+  kind: 'surrender';
+  player: number;
+}
+
 export type Command =
   | MoveCommand
   | AttackMoveCommand
@@ -132,7 +137,8 @@ export type Command =
   | CancelTrainCommand
   | ResearchCommand
   | CancelResearchCommand
-  | SetRallyCommand;
+  | SetRallyCommand
+  | SurrenderCommand;
 
 export const SUPPORTED_COMMAND_KINDS = [
   'move',
@@ -150,6 +156,7 @@ export const SUPPORTED_COMMAND_KINDS = [
   'cancelTrain',
   'research',
   'cancelResearch',
+  'surrender',
 ] as const;
 export type SupportedCommandKind = (typeof SUPPORTED_COMMAND_KINDS)[number];
 
@@ -171,7 +178,8 @@ export function isSupportedCommandKind(
     kind === 'train' ||
     kind === 'cancelTrain' ||
     kind === 'research' ||
-    kind === 'cancelResearch'
+    kind === 'cancelResearch' ||
+    kind === 'surrender'
   );
 }
 
@@ -204,6 +212,7 @@ export function cloneCommand(cmd: Command): Command {
     case 'research':
     case 'cancelResearch':
     case 'setRally':
+    case 'surrender':
       return {
         ...cmd,
       };
@@ -254,7 +263,25 @@ export interface AgeReachedEvent {
 export interface PlayerEliminatedEvent {
   kind: 'playerEliminated';
   player: number;
-  victorTeam?: number;
+}
+
+export interface MatchEndedEvent {
+  kind: 'matchEnded';
+  winnerTeam: number | null;
+  tick: number;
+}
+
+export interface PopulationCappedEvent {
+  kind: 'populationCapped';
+  player: number;
+  buildingId: number;
+  x: number;
+  z: number;
+}
+
+export interface FaithLowEvent {
+  kind: 'faithLow';
+  player: number;
 }
 
 export type SimEvent =
@@ -263,4 +290,7 @@ export type SimEvent =
   | BuildingCompletedEvent
   | UnderAttackEvent
   | AgeReachedEvent
-  | PlayerEliminatedEvent;
+  | PlayerEliminatedEvent
+  | MatchEndedEvent
+  | PopulationCappedEvent
+  | FaithLowEvent;

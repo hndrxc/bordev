@@ -332,12 +332,23 @@ export function updateProduction(world: World): void {
 
     // Population cap pause
     if (player.pop + unitData.pop > player.popCap) {
+      if (building.popBlocked !== true) {
+        world.emitEvent({
+          kind: 'populationCapped',
+          player: building.player,
+          buildingId: building.id,
+          x: building.x + building.width / 2,
+          z: building.z + building.height / 2,
+        });
+      }
+      building.popBlocked = true;
       continue;
     }
 
     // Advance progress (halved if in Low Faith state)
     const progressDelta = player.lowFaith ? SIM_DT * 0.5 : SIM_DT;
     item.progress += progressDelta;
+    building.popBlocked = false;
 
     // Check completion
     if (item.progress >= unitData.trainTime - 1e-6) {
@@ -359,6 +370,7 @@ export function updateProduction(world: World): void {
         spawnPos.z,
         building.faction,
       );
+      player.unitsTrained++;
 
       // Apply rally (ground, live-unit, or live-building target) if set
       applyRallyOrder(world, building, unit);
