@@ -1,0 +1,426 @@
+import type { World } from '../world.js';
+import type { BuildingEntity } from '../entity.js';
+import type {
+  TrainCommand,
+  CancelTrainCommand,
+  SetRallyCommand,
+} from '../commands.js';
+import { getUnitData } from '../../data/units.js';
+import { isProductionType } from '../../data/roles.js';
+import {
+  applyRallyOrder,
+  resolveRallyPoint,
+  type RallyPoint,
+} from './rally.js';
+
+export const SIM_DT = 0.05;
+
+/**
+ * Checks whether a candidate position is blocked by another live unit.
+ */
+function isPositionBlockedByUnit(
+  world: World,
+  px: number,
+  pz: number,
+  radius: number,
+): boolean {
+  // Query spatial hash first if populated
+  const nearby = world.spatialHash.queryNearby(px, pz, radius + 1.0);
+  if (nearby.length > 0) {
+    for (let i = 0; i < nearby.length; i++) {
+      const u = world.entities[nearby[i]];
+      if (u && u.kind === 'unit' && u.hp > 0) {
+        const dx = u.x - px;
+        const dz = u.z - pz;
+        const minDist = radius + u.radius;
+        if (dx * dx + dz * dz < (minDist - 1e-4) * (minDist - 1e-4)) {
+          return true;
+        }
+      }
+    }
+  }
+
+  // Fallback to checking living units directly for tests or when spatial hash is unpopulated
+  for (let i = 0; i < world.entities.length; i++) {
+    const u = world.entities[i];
+    if (u && u.kind === 'unit' && u.hp > 0) {
+      const dx = u.x - px;
+      const dz = u.z - pz;
+      const minDist = radius + u.radius;
+      if (dx * dx + dz * dz < (minDist - 1e-4) * (minDist - 1e-4)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Finds a collision-safe spawn position on the perimeter of a building.
+ *
+ * Expands in rings (d = 1..5) around the building footprint.
+ * Prefers tiles closest to the building's rally point if set, or closest
+ * to the south perimeter by default.
+ */
+export function findSpawnPosition(
+  world: World,
+  building: BuildingEntity,
+  unitRadius: number,
+): { x: number; z: number } | undefined {
+  const mapSize = world.map.size;
+  const rallyPos = building.rallyPoint
+    ? resolveRallyPoint(world, building.rallyPoint, building.player)
+    : undefined;
+  const targetX = rallyPos?.x ?? building.x + building.width * 0.5;
+  const targetZ = rallyPos?.z ?? building.z + building.height + 0.5;
+
+  let fallbackPassable: { x: number; z: number; distSq: number } | undefined;
+
+  for (let d = 1; d <= 5; d++) {
+    const minTx = building.x - d;
+    const maxTx = building.x + building.width - 1 + d;
+    const minTz = building.z - d;
+    const maxTz = building.z + building.height - 1 + d;
+
+    const candidates: { x: number; z: number; distSq: number }[] = [];
+
+    // Perimeter tiles of ring d
+    for (let tx = minTx; tx <= maxTx; tx++) {
+      for (let tz = minTz; tz <= maxTz; tz++) {
+        // Only evaluate outer boundary of the current ring d
+        const isBorder =
+          tx === minTx || tx === maxTx || tz === minTz || tz === maxTz;
+        if (!isBorder) continue;
+
+        if (tx < 0 || tx >= mapSize || tz < 0 || tz >= mapSize) {
+          continue;
+        }
+
+        const px = tx + 0.5;
+        const pz = tz + 0.5;
+
+        if (!world.grid.canOccupy(px, pz, unitRadius, building.player)) {
+          continue;
+        }
+
+        const distSq = (px - targetX) ** 2 + (pz - targetZ) ** 2;
+
+        if (!fallbackPassable || distSq < fallbackPassable.distSq) {
+          fallbackPassable = { x: px, z: pz, distSq };
+        }
+
+        if (!isPositionBlockedByUnit(world, px, pz, unitRadius)) {
+          candidates.push({ x: px, z: pz, distSq });
+        }
+      }
+    }
+
+    if (candidates.length > 0) {
+      candidates.sort((a, b) => a.distSq - b.distSq);
+      return { x: candidates[0].x, z: candidates[0].z };
+    }
+  }
+
+  // If all passable perimeter tiles within 5 rings are crowded with units,
+  // use the best passable tile rather than deadlock forever.
+  if (fallbackPassable) {
+    return { x: fallbackPassable.x, z: fallbackPassable.z };
+  }
+
+  return undefined;
+}
+
+export interface TrainAvailability {
+  allowed: boolean;
+  reason?: string;
+}
+/**
+ * Checks whether `playerId` may queue training of `unitType` at `buildingId` right now.
+ *
+ * Enforces:
+ * - Completed living building owned by player
+ * - Mutually exclusive with active research on the same building
+ * - Max queue capacity of 5
+ * - Unit data table matches faction, age, and building type ('from')
+ * - Player has sufficient food and gold
+ */
+export function getTrainAvailability(
+  world: World,
+  playerId: number,
+  buildingId: number,
+  unitType: string,
+): TrainAvailability {
+  const player = world.players[playerId];
+  if (!player || player.eliminated) {
+    return { allowed: false, reason: 'Player unavailable' };
+  }
+
+  const building = world.getEntity(buildingId);
+  if (
+    !building ||
+    building.kind !== 'building' ||
+    building.player !== playerId ||
+    !building.built ||
+    building.hp <= 0
+  ) {
+    return { allowed: false, reason: 'Building unavailable' };
+  }
+
+  // Training and research are mutually exclusive per building
+  if (building.research) {
+    return { allowed: false, reason: 'Research in progress' };
+  }
+
+  const queue = building.trainingQueue ?? [];
+  if (queue.length >= 5) {
+    return { allowed: false, reason: 'Queue is full' };
+  }
+
+  const unitData = getUnitData(unitType, building.faction);
+  if (!unitData) {
+    return { allowed: false, reason: 'Unknown unit' };
+  }
+
+  // Faction validation
+  if (
+    unitData.faction !== player.faction ||
+    unitData.faction !== building.faction
+  ) {
+    return { allowed: false, reason: 'Faction mismatch' };
+  }
+
+  // Age validation
+  if (unitData.age > player.age) {
+    return { allowed: false, reason: `Requires Age ${unitData.age}` };
+  }
+
+  // Building validation: unitData.from must match building type
+  if (unitData.from !== building.type) {
+    return { allowed: false, reason: `Trained at ${unitData.from}` };
+  }
+
+  // Resource validation
+  const lacksFood = player.food < unitData.food;
+  const lacksGold = player.gold < unitData.gold;
+  if (lacksFood || lacksGold) {
+    return {
+      allowed: false,
+      reason: `Not enough ${lacksFood && lacksGold ? 'food and gold' : lacksFood ? 'food' : 'gold'}`,
+    };
+  }
+
+  return { allowed: true };
+}
+
+/**
+ * Validates and queues a unit training command.
+ *
+ * Deducts cost immediately upon queueing.
+ */
+export function applyTrainCommand(world: World, cmd: TrainCommand): boolean {
+  const availability = getTrainAvailability(
+    world,
+    cmd.player,
+    cmd.buildingId,
+    cmd.unitType,
+  );
+  if (!availability.allowed) {
+    return false;
+  }
+
+  const player = world.players[cmd.player];
+  const building = world.getEntity(cmd.buildingId) as BuildingEntity;
+  const unitData = getUnitData(cmd.unitType, building.faction)!;
+
+  // Deduct resources
+  player.food -= unitData.food;
+  player.gold -= unitData.gold;
+
+  // Add to training queue
+  building.trainingQueue = building.trainingQueue ?? [];
+  building.trainingQueue.push({
+    unitType: cmd.unitType,
+    progress: 0,
+    food: unitData.food,
+    gold: unitData.gold,
+  });
+
+  return true;
+}
+
+/**
+ * Cancels a training queue item with 100% resource refund.
+ *
+ * If slotIndex is omitted, cancels the last item in the queue.
+ */
+export function applyCancelTrainCommand(
+  world: World,
+  cmd: CancelTrainCommand,
+): boolean {
+  const player = world.players[cmd.player];
+  if (!player) {
+    return false;
+  }
+
+  const building = world.getEntity(cmd.buildingId);
+  if (
+    !building ||
+    building.kind !== 'building' ||
+    building.player !== cmd.player ||
+    !building.trainingQueue ||
+    building.trainingQueue.length === 0
+  ) {
+    return false;
+  }
+
+  let targetIndex: number;
+  if (cmd.slotIndex !== undefined) {
+    if (cmd.slotIndex < 0 || cmd.slotIndex >= building.trainingQueue.length) {
+      return false;
+    }
+    targetIndex = cmd.slotIndex;
+  } else {
+    targetIndex = building.trainingQueue.length - 1;
+  }
+
+  const [removed] = building.trainingQueue.splice(targetIndex, 1);
+  if (removed) {
+    player.food += removed.food;
+    player.gold += removed.gold;
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Advances unit production for all buildings in the world.
+ *
+ * Rules:
+ * - Cap pause: if adding the unit would exceed popCap, training progress pauses.
+ * - Low Faith: if player.lowFaith is true, progress is halved (0.025s / tick vs 0.05s / tick).
+ * - On completion, spawns collision-safe on the building perimeter.
+ * - If building has a rally point, issues a ground move order.
+ */
+export function updateProduction(world: World): void {
+  for (let i = 0; i < world.entities.length; i++) {
+    const building = world.entities[i];
+    if (
+      !building ||
+      building.kind !== 'building' ||
+      !building.built ||
+      building.hp <= 0 ||
+      !building.trainingQueue ||
+      building.trainingQueue.length === 0 ||
+      building.research
+    ) {
+      continue;
+    }
+
+    const player = world.players[building.player];
+    if (!player || player.eliminated) {
+      continue;
+    }
+
+    const item = building.trainingQueue[0];
+    const unitData = getUnitData(item.unitType, building.faction);
+    if (!unitData) {
+      building.trainingQueue.shift();
+      continue;
+    }
+
+    // Population cap pause
+    if (player.pop + unitData.pop > player.popCap) {
+      if (building.popBlocked !== true) {
+        world.emitEvent({
+          kind: 'populationCapped',
+          player: building.player,
+          buildingId: building.id,
+          x: building.x + building.width / 2,
+          z: building.z + building.height / 2,
+        });
+      }
+      building.popBlocked = true;
+      continue;
+    }
+
+    // Advance progress (halved if in Low Faith state)
+    const progressDelta = player.lowFaith ? SIM_DT * 0.5 : SIM_DT;
+    item.progress += progressDelta;
+    building.popBlocked = false;
+
+    // Check completion
+    if (item.progress >= unitData.trainTime - 1e-6) {
+      const spawnPos = findSpawnPosition(world, building, unitData.radius);
+      if (!spawnPos) {
+        // Paused at completion if no passable tile is currently available
+        item.progress = unitData.trainTime;
+        continue;
+      }
+
+      // Pop from queue
+      building.trainingQueue.shift();
+
+      // Spawn unit
+      const unit = world.spawnUnit(
+        building.player,
+        item.unitType,
+        spawnPos.x,
+        spawnPos.z,
+        building.faction,
+      );
+      player.unitsTrained++;
+
+      // Apply rally (ground, live-unit, or live-building target) if set
+      applyRallyOrder(world, building, unit);
+    }
+  }
+}
+
+/**
+ * Validates and stores a building rally point.
+ *
+ * Requires a finite ground coordinate (clamped to the map) and an owned
+ * production building. When `targetId` names a live unit or building, the
+ * rally also follows that entity by identity; the ground coordinate is kept as
+ * the fallback if the target later dies or its ID is recycled. A missing or
+ * invalid target stores a plain ground rally, clearing any previous target.
+ */
+export function setRally(world: World, cmd: SetRallyCommand): boolean {
+  if (!Number.isFinite(cmd.x) || !Number.isFinite(cmd.z)) {
+    return false;
+  }
+
+  const building = world.getEntity(cmd.buildingId);
+  if (
+    !building ||
+    building.kind !== 'building' ||
+    building.player !== cmd.player ||
+    !isProductionType(building.type)
+  ) {
+    return false;
+  }
+
+  const size = world.map.size;
+  const rally: RallyPoint = {
+    x: Math.max(0, Math.min(size, cmd.x)),
+    z: Math.max(0, Math.min(size, cmd.z)),
+  };
+
+  if (cmd.targetId !== undefined && Number.isInteger(cmd.targetId)) {
+    const target = world.getEntity(cmd.targetId);
+    if (
+      target &&
+      (target.kind === 'unit' || target.kind === 'building') &&
+      target.hp > 0 &&
+      target.player === building.player
+    ) {
+      rally.targetId = target.id;
+      rally.targetRef = target;
+    }
+  }
+
+  building.rallyPoint = rally;
+  return true;
+}

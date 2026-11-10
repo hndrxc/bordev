@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "id": "crown_storehouse",
+  "pages": [
+    {
+      "image": "crown_storehouse_0.png",
+      "mask": "crown_storehouse_0_mask.png",
+      "shadow": "crown_storehouse_0_shadow.png"
+    }
+  ],
+  "fps": 12,
+  "anims": {
+    "construct": {
+      "frames": 3,
+      "loop": false,
+      "dirs": 1
+    },
+    "damaged": {
+      "frames": 1,
+      "loop": false,
+      "dirs": 1
+    },
+    "idle": {
+      "frames": 1,
+      "loop": true,
+      "dirs": 1
+    },
+    "rubble": {
+      "frames": 1,
+      "loop": false,
+      "dirs": 1
+    }
+  },
+  "frames": {
+    "construct/0/0": {
+      "page": 0,
+      "x": 258,
+      "y": 209,
+      "w": 239,
+      "h": 163,
+      "ax": 96,
+      "ay": 114
+    },
+    "construct/0/1": {
+      "page": 0,
+      "x": 2,
+      "y": 413,
+      "w": 239,
+      "h": 164,
+      "ax": 96,
+      "ay": 114
+    },
+    "construct/0/2": {
+      "page": 0,
+      "x": 2,
+      "y": 2,
+      "w": 254,
+      "h": 208,
+      "ax": 96,
+      "ay": 157
+    },
+    "damaged/0/0": {
+      "page": 0,
+      "x": 2,
+      "y": 212,
+      "w": 248,
+      "h": 199,
+      "ax": 87,
+      "ay": 151
+    },
+    "idle/0/0": {
+      "page": 0,
+      "x": 258,
+      "y": 2,
+      "w": 245,
+      "h": 205,
+      "ax": 87,
+      "ay": 157
+    },
+    "rubble/0/0": {
+      "page": 0,
+      "x": 243,
+      "y": 413,
+      "w": 155,
+      "h": 85,
+      "ax": 73,
+      "ay": 47
+    }
+  }
+}

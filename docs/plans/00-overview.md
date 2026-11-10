@@ -8,26 +8,27 @@ A single-player 2.5D real-time strategy game in the browser: Command & Conquer's
 
 ## Locked decisions
 
-| Area | Decision |
-|---|---|
-| Rendering style | Pre-rendered sprites (Blender → PNG atlases), drawn by Babylon.js on a flat 3D ground plane with an orthographic camera |
-| Projection | 2:1 dimetric isometric, flat terrain, no elevation |
-| Tile size | 96×48 px at zoom 1.0 (1080p native), camera zoom range 0.5–1.5 |
-| Facings | 8 directions for all mobile units; buildings/doodads 1 direction |
-| Art source | Agent-written Blender Python (bpy) scripts, headless Cycles CPU renders |
-| Setting | Historical-flavoured medieval, 2 asymmetric factions: Crown, Clans |
-| Resources | Gold (mined, hauled by ox-carts to drop-offs), Food (farms worked by peasants), Faith (power-grid style supply/usage) |
-| Construction | AoE-style: peasants place foundations and build them |
-| Modes | Skirmish vs AI only, 2–4 players, 1 human |
-| Scale | 128×128 tiles, 150 pop cap per player, ≤ 600 units on map |
-| Systems in scope | Fog of war + explored shroud, 3 ages, upgrades, walls/gates/towers |
-| Out of scope | Multiplayer, save/load, replays, campaign, map editor, naval, heroes, localisation |
-| Victory | A player is eliminated when they own no Town Center (completed or under construction); last team standing wins |
-| AI | Easy / Normal / Hard, no resource cheats |
-| Stack | TypeScript, Vite, Babylon.js (`@babylonjs/core`), React 19 HUD/menus, zustand, Vitest, Playwright |
-| Platform | Web (itch.io) first; Electron desktop wrapper (Windows x64 NSIS, Linux x64 AppImage) |
-| Audio | None until Pre-release; then CC0 SFX/music |
-| Execution | AI agents implement, user reviews; no calendar. Each phase is sized for one agent task |
+| Area             | Decision                                                                                                                                              |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Rendering style  | Pre-rendered sprites (Blender → PNG atlases), drawn by Babylon.js on a flat 3D ground plane with an orthographic camera                               |
+| Art direction    | Polished stylised low-poly, not realism; baked Blender lighting plus one runtime colour grade, no dynamic lights; see [Art direction](#art-direction) |
+| Projection       | 2:1 dimetric isometric, flat terrain, no elevation                                                                                                    |
+| Tile size        | 96×48 px at zoom 1.0 (1080p native), camera zoom range 0.5–1.5                                                                                        |
+| Facings          | 8 directions for all mobile units; buildings/doodads 1 direction                                                                                      |
+| Art source       | Agent-written Blender Python (bpy) scripts, headless Cycles CPU renders                                                                               |
+| Setting          | Historical-flavoured medieval, 2 asymmetric factions: Crown, Clans                                                                                    |
+| Resources        | Gold (mined, hauled by ox-carts to drop-offs), Food (farms worked by peasants), Faith (power-grid style supply/usage)                                 |
+| Construction     | AoE-style: peasants place foundations and build them                                                                                                  |
+| Modes            | Skirmish vs AI only, 2–4 players, 1 human                                                                                                             |
+| Scale            | 128×128 tiles, 150 pop cap per player, ≤ 600 units on map                                                                                             |
+| Systems in scope | Fog of war + explored shroud, 3 ages, upgrades, walls/gates/towers                                                                                    |
+| Out of scope     | Multiplayer, save/load, replays, campaign, map editor, naval, heroes, localisation                                                                    |
+| Victory          | A player is eliminated when they own no Town Center (completed or under construction); last team standing wins                                        |
+| AI               | Easy / Normal / Hard, no resource cheats                                                                                                              |
+| Stack            | TypeScript, Vite, Babylon.js (`@babylonjs/core`), React 19 HUD/menus, zustand, Vitest, Playwright                                                     |
+| Platform         | Web (itch.io) first; Electron desktop wrapper (Windows x64 NSIS, Linux x64 AppImage)                                                                  |
+| Audio            | None until Pre-release; then CC0 SFX/music                                                                                                            |
+| Execution        | AI agents implement, user reviews; no calendar. Each phase is sized for one agent task                                                                |
 
 ## Game design
 
@@ -46,112 +47,115 @@ A single-player 2.5D real-time strategy game in the browser: Command & Conquer's
 
 ### Ages
 
-| Age | Crown name | Clans name | Cost (food/gold) | Research time | Requirement |
-|---|---|---|---|---|---|
-| I | Hamlet | Camp | start | — | — |
-| II | Borough | Steading | 500 / 200 | 40 s at Town Center | 2 distinct completed buildings among {barracks-type, range-type, storehouse-type, faith-type} |
-| III | Kingdom | Warhold | 800 / 600 | 60 s at Town Center | completed stable-type + 1 more distinct building from the Age II list |
+| Age | Crown name | Clans name | Cost (food/gold) | Research time       | Requirement                                                                                   |
+| --- | ---------- | ---------- | ---------------- | ------------------- | --------------------------------------------------------------------------------------------- |
+| I   | Hamlet     | Camp       | start            | —                   | —                                                                                             |
+| II  | Borough    | Steading   | 500 / 200        | 40 s at Town Center | 2 distinct completed buildings among {barracks-type, range-type, storehouse-type, faith-type} |
+| III | Kingdom    | Warhold    | 800 / 600        | 60 s at Town Center | completed stable-type + 1 more distinct building from the Age II list                         |
 
 Type mapping: barracks-type = `barracks` / `mead_hall`; range-type = `archery_range` / `hunters_lodge`; storehouse-type = `storehouse` / `hoard`; faith-type = `chapel` / `war_shrine`; stable-type = `stable` / `horse_pen`.
 
 ### Combat model
 
 - Attack types: `melee`, `pierce`, `siege`. Armor: melee armor (M) and pierce armor (P). Siege damage ignores armor.
-- Damage per hit = `max(1, attack − armor[type]) + Σ bonus[tag]` over every tag the target has (siege: `attack + Σ bonus`). Low Faith never changes damage, only rates.
+- Damage per hit = `max(1, attack − armor[type]) + Σ bonus[tag]` over every tag the target has (siege: `attack + Σ bonus`). Low Faith never changes damage and affects building attack rates only; unit attack rates and damages have no changes.
 - Tags: `infantry`, `cavalry`, `archer`, `siege`, `vehicle`, `worker`, `building`.
-- Ranged attacks spawn a homing projectile (speed 8 tiles/s; trebuchet 5 tiles/s with parabolic visual arc); they never miss. Melee hits land on the attack frame (frame 5 of 8) if the target is still within `radiusA + radiusB + 0.3` tiles.
+- Ranged attacks spawn a homing projectile (speed 8 tiles/s; trebuchet 5 tiles/s with parabolic visual arc); they never miss. Range-0 attackers (battering ram) strike in melee reach regardless of damage type. Melee hits land on animation frame 5 at 12 fps if the target is still within `radiusA + radiusB + 0.3` tiles; attack and die clocks align damage and impacts on frame 5.
 - Line of sight (tiles): infantry 6, archers range + 2, cavalry 7, carts 4, siege 6, buildings 4, towers 8, Town Center 8.
-- Stances: units auto-acquire targets within LOS when idle or attack-moving; Hold Position units only attack within range and never move.
-- Units killed play `die`, leave a corpse for 10 s (fades last 2 s). Buildings at 0 HP become rubble for 20 s.
+- Auto-acquisition: scans on staggered `(tick + id) % 10` ticks for idle/stop/attack-move/hold units and for towers/Keeps without a target; considers in-range or engageable candidates only; walls and gates are never auto-acquired; priority is hostile units > attacking buildings > other buildings, tie-broken by nearest then lower entity id.
+- Stances and retaliation: idle and stop units retaliate and chase; hold units retaliate only within attack range and never move; attack-move interrupts for combat, then resumes its route. Retaliation replaces an auto-acquired building or unhittable target; explicit attack targets are kept. Re-issuing an attack on the current goal keeps the in-progress swing and cooldown. Unreachable explicit targets move once toward the nearest reachable point without repathing storms; minRange units (trebuchet) reposition to the nearest reachable legal firing tile or give up. Low Faith halves completed tower/Keep attack rate only; unit rates and all damage are unchanged.
+- Breach module: attacks on enclosed targets route via `canEngage` and `resolveAttackTarget` to the first wall from the attacker side on a minimum-walls route (tie-broken by shortest route from the attacker), sticky per attacker while the wall lives and grid revision is unchanged; melee reach requires the goal tile or an edge-adjacent tile in the attacker's area (diagonal-only contact excluded).
+- Sanctuary heals friendly non-siege units exact integer HP once per second (N HP for N completed Chapels within 5 tiles of footprint), additively, capped at max HP. Construction-site damage persists while building.
+- Units killed play `die`, leave a corpse for 10 s (fades last 2 s); buildings at 0 HP become rubble for 20 s. Remains carry an explicit snapshot `remains` flag, are not pickable, cast no shadows via per-instance shadow suppression, and fade with dithered discard.
 
 ### Units — Crown
 
 Speed in tiles/s, times in seconds, armor M/P. "From" = training building.
 
-| id | Name | Age | From | Food | Gold | Train | HP | Atk | Type | Range | Cooldown | Armor | Speed | Radius | Tags | Bonus | Pop |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| peasant | Peasant | I | keep | 50 | 0 | 20 | 25 | 3 | melee | 0 | 2.0 | 0/0 | 1.0 | 0.2 | infantry, worker | — | 1 |
-| ox_cart | Ox Cart | I | keep | 60 | 40 | 25 | 80 | 0 | — | — | — | 0/2 | 1.1 (0.8 loaded) | 0.4 | vehicle | — | 1 |
-| spearman | Spearman | I | barracks | 35 | 25 | 20 | 45 | 3 | melee | 0 | 2.0 | 0/0 | 1.0 | 0.2 | infantry | cavalry +12 | 1 |
-| man_at_arms | Man-at-Arms | II | barracks | 60 | 20 | 21 | 60 | 6 | melee | 0 | 2.0 | 1/1 | 0.9 | 0.2 | infantry | building +2 | 1 |
-| halberdier | Halberdier | III | barracks | 40 | 30 | 22 | 60 | 5 | melee | 0 | 3.0 | 0/1 | 1.0 | 0.2 | infantry | cavalry +24 | 1 |
-| longbowman | Longbowman | I | archery_range | 25 | 45 | 27 | 30 | 5 | pierce | 6 | 2.0 | 0/0 | 0.96 | 0.2 | infantry, archer | — | 1 |
-| crossbowman | Crossbowman | II | archery_range | 30 | 50 | 30 | 38 | 7 | pierce | 5 | 2.5 | 0/1 | 0.9 | 0.2 | infantry, archer | cavalry +3 | 1 |
-| sergeant | Mounted Sergeant | II | stable | 80 | 0 | 30 | 65 | 4 | melee | 0 | 2.0 | 0/2 | 1.5 | 0.35 | cavalry | archer +4 | 1 |
-| knight | Knight | II | stable | 60 | 75 | 30 | 100 | 10 | melee | 0 | 1.8 | 2/2 | 1.35 | 0.35 | cavalry | — | 1 |
-| trebuchet | Trebuchet | III | siege_workshop | 200 | 200 | 50 | 150 | 200 | siege | 12 (min 4) | 10.0 | 2/150 | 0.8 | 0.45 | siege | building +250 | 2 |
+| id          | Name             | Age | From           | Food | Gold | Train | HP  | Atk | Type   | Range      | Cooldown | Armor | Speed            | Radius | Tags             | Bonus         | Pop |
+| ----------- | ---------------- | --- | -------------- | ---- | ---- | ----- | --- | --- | ------ | ---------- | -------- | ----- | ---------------- | ------ | ---------------- | ------------- | --- |
+| peasant     | Peasant          | I   | keep           | 50   | 0    | 20    | 25  | 3   | melee  | 0          | 2.0      | 0/0   | 1.0              | 0.2    | infantry, worker | —             | 1   |
+| ox_cart     | Ox Cart          | I   | keep           | 60   | 40   | 25    | 80  | 0   | —      | —          | —        | 0/2   | 1.1 (0.8 loaded) | 0.4    | vehicle          | —             | 1   |
+| spearman    | Spearman         | I   | barracks       | 35   | 25   | 20    | 45  | 3   | melee  | 0          | 2.0      | 0/0   | 1.0              | 0.2    | infantry         | cavalry +12   | 1   |
+| man_at_arms | Man-at-Arms      | II  | barracks       | 60   | 20   | 21    | 60  | 6   | melee  | 0          | 2.0      | 1/1   | 0.9              | 0.2    | infantry         | building +2   | 1   |
+| halberdier  | Halberdier       | III | barracks       | 40   | 30   | 22    | 60  | 5   | melee  | 0          | 3.0      | 0/1   | 1.0              | 0.2    | infantry         | cavalry +24   | 1   |
+| longbowman  | Longbowman       | I   | archery_range  | 25   | 45   | 27    | 30  | 5   | pierce | 6          | 2.0      | 0/0   | 0.96             | 0.2    | infantry, archer | —             | 1   |
+| crossbowman | Crossbowman      | II  | archery_range  | 30   | 50   | 30    | 38  | 7   | pierce | 5          | 2.5      | 0/1   | 0.9              | 0.2    | infantry, archer | cavalry +3    | 1   |
+| sergeant    | Mounted Sergeant | II  | stable         | 80   | 0    | 30    | 65  | 4   | melee  | 0          | 2.0      | 0/2   | 1.5              | 0.35   | cavalry          | archer +4     | 1   |
+| knight      | Knight           | II  | stable         | 60   | 75   | 30    | 100 | 10  | melee  | 0          | 1.8      | 2/2   | 1.35             | 0.35   | cavalry          | —             | 1   |
+| trebuchet   | Trebuchet        | III | siege_workshop | 200  | 200  | 50    | 150 | 200 | siege  | 12 (min 4) | 10.0     | 2/150 | 0.8              | 0.45   | siege            | building +250 | 2   |
 
 ### Units — Clans
 
-| id | Name | Age | From | Food | Gold | Train | HP | Atk | Type | Range | Cooldown | Armor | Speed | Radius | Tags | Bonus | Pop |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| thrall | Thrall | I | great_hall | 45 | 0 | 18 | 25 | 3 | melee | 0 | 2.0 | 0/0 | 1.05 | 0.2 | infantry, worker | — | 1 |
-| haul_wagon | Haul Wagon | I | great_hall | 55 | 35 | 22 | 70 | 0 | — | — | — | 0/1 | 1.2 (0.9 loaded) | 0.4 | vehicle | — | 1 |
-| axeman | Axeman | I | mead_hall | 40 | 15 | 18 | 50 | 5 | melee | 0 | 2.0 | 0/0 | 1.05 | 0.2 | infantry | building +3 | 1 |
-| shield_bearer | Shield-Bearer | I | mead_hall | 30 | 30 | 20 | 50 | 3 | melee | 0 | 2.0 | 1/2 | 0.95 | 0.2 | infantry | cavalry +12 | 1 |
-| berserker | Berserker | II | mead_hall | 65 | 30 | 22 | 70 | 9 | melee | 0 | 1.8 | 0/0 | 1.1 | 0.2 | infantry | — (regenerates 0.5 HP/s) | 1 |
-| javelineer | Javelineer | I | hunters_lodge | 35 | 30 | 22 | 40 | 4 | pierce | 4 | 2.0 | 0/1 | 1.05 | 0.2 | infantry, archer | infantry +3 | 1 |
-| hunter | Hunter | II | hunters_lodge | 25 | 45 | 27 | 32 | 5 | pierce | 6 | 2.0 | 0/0 | 1.0 | 0.2 | infantry, archer | — | 1 |
-| horse_raider | Horse Raider | II | horse_pen | 70 | 0 | 26 | 60 | 5 | melee | 0 | 2.0 | 0/1 | 1.6 | 0.35 | cavalry | archer +4, worker +3 | 1 |
-| war_rider | War Rider | II | horse_pen | 70 | 65 | 30 | 95 | 11 | melee | 0 | 1.9 | 1/1 | 1.4 | 0.35 | cavalry | — | 1 |
-| battering_ram | Battering Ram | III | ram_shed | 160 | 75 | 40 | 175 | 2 | siege | 0 | 5.0 | 0/180 | 0.6 | 0.45 | siege | building +125 | 2 |
+| id            | Name          | Age | From          | Food | Gold | Train | HP  | Atk | Type   | Range | Cooldown | Armor | Speed            | Radius | Tags             | Bonus                    | Pop |
+| ------------- | ------------- | --- | ------------- | ---- | ---- | ----- | --- | --- | ------ | ----- | -------- | ----- | ---------------- | ------ | ---------------- | ------------------------ | --- |
+| thrall        | Thrall        | I   | great_hall    | 45   | 0    | 18    | 25  | 3   | melee  | 0     | 2.0      | 0/0   | 1.05             | 0.2    | infantry, worker | —                        | 1   |
+| haul_wagon    | Haul Wagon    | I   | great_hall    | 55   | 35   | 22    | 70  | 0   | —      | —     | —        | 0/1   | 1.2 (0.9 loaded) | 0.4    | vehicle          | —                        | 1   |
+| axeman        | Axeman        | I   | mead_hall     | 40   | 15   | 18    | 50  | 5   | melee  | 0     | 2.0      | 0/0   | 1.05             | 0.2    | infantry         | building +3              | 1   |
+| shield_bearer | Shield-Bearer | I   | mead_hall     | 30   | 30   | 20    | 50  | 3   | melee  | 0     | 2.0      | 1/2   | 0.95             | 0.2    | infantry         | cavalry +12              | 1   |
+| berserker     | Berserker     | II  | mead_hall     | 65   | 30   | 22    | 70  | 9   | melee  | 0     | 1.8      | 0/0   | 1.1              | 0.2    | infantry         | — (regenerates 0.5 HP/s) | 1   |
+| javelineer    | Javelineer    | I   | hunters_lodge | 35   | 30   | 22    | 40  | 4   | pierce | 4     | 2.0      | 0/1   | 1.05             | 0.2    | infantry, archer | infantry +3              | 1   |
+| hunter        | Hunter        | II  | hunters_lodge | 25   | 45   | 27    | 32  | 5   | pierce | 6     | 2.0      | 0/0   | 1.0              | 0.2    | infantry, archer | —                        | 1   |
+| horse_raider  | Horse Raider  | II  | horse_pen     | 70   | 0    | 26    | 60  | 5   | melee  | 0     | 2.0      | 0/1   | 1.6              | 0.35   | cavalry          | archer +4, worker +3     | 1   |
+| war_rider     | War Rider     | II  | horse_pen     | 70   | 65   | 30    | 95  | 11  | melee  | 0     | 1.9      | 1/1   | 1.4              | 0.35   | cavalry          | —                        | 1   |
+| battering_ram | Battering Ram | III | ram_shed      | 160  | 75   | 40    | 175 | 2   | siege  | 0     | 5.0      | 0/180 | 0.6              | 0.45   | siege            | building +125            | 2   |
 
 ### Buildings — Crown (stone, armor 3/8 unless noted)
 
 Faith: + produces, − consumes. Build time is for one peasant; n builders take `3T/(n+2)`.
 
-| id | Name | Age | Size | Gold | Food | Build | HP | Faith | Pop | Role |
-|---|---|---|---|---|---|---|---|---|---|---|
-| keep | Keep (Town Center) | I (additional: II) | 4×4 | 300 | 100 | 150 | 2400 | +5 | +10 | Trains peasant, ox_cart; researches ages; gold drop-off; shoots 5 pierce, range 6, cooldown 2 |
-| cottage | Cottage | I | 2×2 | 30 | 0 | 25 | 550 | 0 | +10 | Housing |
-| farm | Farm | I | 2×2 | 60 | 0 | 15 | 300 | 0 | 0 | 0.5 food/s with one farmer; armor 0/0 |
-| storehouse | Storehouse | I | 2×2 | 100 | 0 | 35 | 1000 | 0 | 0 | Gold drop-off; cart upgrade |
-| chapel | Chapel | I | 2×2 | 120 | 0 | 40 | 900 | +15 | 0 | Sanctuary aura |
-| barracks | Barracks | I | 3×3 | 150 | 0 | 50 | 1200 | −2 | 0 | Infantry |
-| archery_range | Archery Range | I | 3×3 | 150 | 0 | 50 | 1200 | −2 | 0 | Archers |
-| stable | Stable | II | 3×3 | 175 | 0 | 50 | 1200 | −3 | 0 | Cavalry |
-| siege_workshop | Siege Workshop | III | 3×3 | 200 | 0 | 60 | 1500 | −4 | 0 | Trebuchet |
-| stone_tower | Stone Tower | II | 1×1 | 125 | 0 | 80 | 1000 | −2 | 0 | 6 pierce, range 7, cooldown 2 |
-| stone_wall | Stone Wall | II | 1×1 per tile | 5 | 0 | 8 | 800 | 0 | 0 | Armor 8/10; drag-placed line |
-| stone_gate | Stone Gate | II | 3×1 or 1×3 | 30 | 0 | 60 | 1800 | 0 | 0 | Armor 8/10; passable for owner and allies only |
+| id             | Name               | Age                | Size         | Gold | Food | Build | HP   | Faith | Pop | Role                                                                                          |
+| -------------- | ------------------ | ------------------ | ------------ | ---- | ---- | ----- | ---- | ----- | --- | --------------------------------------------------------------------------------------------- |
+| keep           | Keep (Town Center) | I (additional: II) | 4×4          | 300  | 100  | 150   | 2400 | +5    | +10 | Trains peasant, ox_cart; researches ages; gold drop-off; shoots 5 pierce, range 6, cooldown 2 |
+| cottage        | Cottage            | I                  | 2×2          | 30   | 0    | 25    | 550  | 0     | +10 | Housing                                                                                       |
+| farm           | Farm               | I                  | 2×2          | 60   | 0    | 15    | 300  | 0     | 0   | 0.5 food/s with one farmer; armor 0/0                                                         |
+| storehouse     | Storehouse         | I                  | 2×2          | 100  | 0    | 35    | 1000 | 0     | 0   | Gold drop-off; cart upgrade                                                                   |
+| chapel         | Chapel             | I                  | 2×2          | 120  | 0    | 40    | 900  | +15   | 0   | Sanctuary aura                                                                                |
+| barracks       | Barracks           | I                  | 3×3          | 150  | 0    | 50    | 1200 | −2    | 0   | Infantry                                                                                      |
+| archery_range  | Archery Range      | I                  | 3×3          | 150  | 0    | 50    | 1200 | −2    | 0   | Archers                                                                                       |
+| stable         | Stable             | II                 | 3×3          | 175  | 0    | 50    | 1200 | −3    | 0   | Cavalry                                                                                       |
+| siege_workshop | Siege Workshop     | III                | 3×3          | 200  | 0    | 60    | 1500 | −4    | 0   | Trebuchet                                                                                     |
+| stone_tower    | Stone Tower        | II                 | 1×1          | 125  | 0    | 80    | 1000 | −2    | 0   | 6 pierce, range 7, cooldown 2                                                                 |
+| stone_wall     | Stone Wall         | II                 | 1×1 per tile | 5    | 0    | 8     | 800  | 0     | 0   | Armor 8/10; drag-placed line                                                                  |
+| stone_gate     | Stone Gate         | II                 | 3×1 or 1×3   | 30   | 0    | 60    | 1800 | 0     | 0   | Armor 8/10; passable for owner and allies only                                                |
 
 ### Buildings — Clans (wood, armor 1/5 unless noted)
 
-| id | Name | Age | Size | Gold | Food | Build | HP | Faith | Pop | Role |
-|---|---|---|---|---|---|---|---|---|---|---|
-| great_hall | Great Hall (Town Center) | I (additional: II) | 4×4 | 250 | 100 | 110 | 1900 | +5 | +10 | Trains thrall, haul_wagon; ages; gold drop-off; shoots 5 pierce, range 6, cooldown 2 |
-| longhouse | Longhouse | I | 2×2 | 25 | 0 | 18 | 400 | 0 | +10 | Housing |
-| field | Field | I | 2×2 | 50 | 0 | 12 | 250 | 0 | 0 | 0.5 food/s with one farmer; armor 0/0 |
-| hoard | Hoard | I | 2×2 | 80 | 0 | 25 | 750 | 0 | 0 | Gold drop-off; wagon upgrade |
-| war_shrine | War Shrine | I | 2×2 | 100 | 0 | 30 | 700 | +10 | 0 | Battle Fervor source |
-| mead_hall | Mead Hall | I | 3×3 | 120 | 0 | 35 | 900 | −2 | 0 | Infantry |
-| hunters_lodge | Hunter's Lodge | I | 3×3 | 120 | 0 | 35 | 900 | −2 | 0 | Ranged |
-| horse_pen | Horse Pen | II | 3×3 | 140 | 0 | 35 | 900 | −3 | 0 | Cavalry |
-| ram_shed | Ram Shed | III | 3×3 | 160 | 0 | 42 | 1100 | −4 | 0 | Battering ram |
-| watchtower | Watchtower | I | 1×1 | 100 | 0 | 55 | 700 | −2 | 0 | 5 pierce, range 6, cooldown 2 |
-| palisade | Palisade | I | 1×1 per tile | 3 | 0 | 5 | 250 | 0 | 0 | Armor 2/5; drag-placed line |
-| palisade_gate | Palisade Gate | I | 3×1 or 1×3 | 20 | 0 | 40 | 900 | 0 | 0 | Passable for owner and allies only |
+| id            | Name                     | Age                | Size         | Gold | Food | Build | HP   | Faith | Pop | Role                                                                                 |
+| ------------- | ------------------------ | ------------------ | ------------ | ---- | ---- | ----- | ---- | ----- | --- | ------------------------------------------------------------------------------------ |
+| great_hall    | Great Hall (Town Center) | I (additional: II) | 4×4          | 250  | 100  | 110   | 1900 | +5    | +10 | Trains thrall, haul_wagon; ages; gold drop-off; shoots 5 pierce, range 6, cooldown 2 |
+| longhouse     | Longhouse                | I                  | 2×2          | 25   | 0    | 18    | 400  | 0     | +10 | Housing                                                                              |
+| field         | Field                    | I                  | 2×2          | 50   | 0    | 12    | 250  | 0     | 0   | 0.5 food/s with one farmer; armor 0/0                                                |
+| hoard         | Hoard                    | I                  | 2×2          | 80   | 0    | 25    | 750  | 0     | 0   | Gold drop-off; wagon upgrade                                                         |
+| war_shrine    | War Shrine               | I                  | 2×2          | 100  | 0    | 30    | 700  | +10   | 0   | Battle Fervor source                                                                 |
+| mead_hall     | Mead Hall                | I                  | 3×3          | 120  | 0    | 35    | 900  | −2    | 0   | Infantry                                                                             |
+| hunters_lodge | Hunter's Lodge           | I                  | 3×3          | 120  | 0    | 35    | 900  | −2    | 0   | Ranged                                                                               |
+| horse_pen     | Horse Pen                | II                 | 3×3          | 140  | 0    | 35    | 900  | −3    | 0   | Cavalry                                                                              |
+| ram_shed      | Ram Shed                 | III                | 3×3          | 160  | 0    | 42    | 1100 | −4    | 0   | Battering ram                                                                        |
+| watchtower    | Watchtower               | I                  | 1×1          | 100  | 0    | 55    | 700  | −2    | 0   | 5 pierce, range 6, cooldown 2                                                        |
+| palisade      | Palisade                 | I                  | 1×1 per tile | 3    | 0    | 5     | 250  | 0     | 0   | Armor 2/5; drag-placed line                                                          |
+| palisade_gate | Palisade Gate            | I                  | 3×1 or 1×3   | 20   | 0    | 40    | 900  | 0     | 0   | Passable for owner and allies only                                                   |
 
 ### Upgrades
 
-| Faction | id | Name | Building | Age | Food | Gold | Time | Effect |
-|---|---|---|---|---|---|---|---|---|
-| Crown | heavy_plough | Heavy Plough | keep | II | 100 | 100 | 30 | Farms +20 % food |
-| Crown | crop_rotation | Crop Rotation | keep | III | 250 | 150 | 45 | Farms +20 % food (stacks additively) |
-| Crown | iron_axles | Iron Axles | storehouse | II | 100 | 100 | 30 | Carts +25 capacity, +10 % speed |
-| Crown | gambeson | Padded Gambeson | barracks | II | 100 | 50 | 40 | Infantry +1 pierce armor |
-| Crown | chainmail | Chainmail | barracks | III | 200 | 100 | 50 | Infantry +1/+1 armor |
-| Crown | bodkin | Bodkin Arrows | archery_range | II | 100 | 100 | 35 | Archers +1 attack, +1 range |
-| Crown | barding | Barding | stable | III | 150 | 150 | 50 | Cavalry +2 melee armor, +20 HP |
-| Crown | devotion | Devotion | chapel | II | 100 | 100 | 30 | Chapels +5 Faith; Sanctuary 2 HP/s |
-| Clans | slash_burn | Slash-and-Burn | great_hall | II | 100 | 100 | 30 | Fields +20 % food |
-| Clans | tended_fields | Tended Fields | great_hall | III | 250 | 150 | 45 | Fields +20 % food |
-| Clans | sledge_runners | Sledge Runners | hoard | II | 100 | 100 | 30 | Wagons +25 capacity, +10 % speed |
-| Clans | hide_armor | Hide Armor | mead_hall | II | 100 | 50 | 40 | Infantry +1 pierce armor |
-| Clans | scale_armor | Scale Armor | mead_hall | III | 200 | 100 | 50 | Infantry +1/+1 armor |
-| Clans | barbed_javelins | Barbed Javelins | hunters_lodge | II | 100 | 100 | 35 | Ranged +1 attack; javelineer +1 range |
-| Clans | steppe_breeding | Steppe Breeding | horse_pen | III | 150 | 150 | 50 | Cavalry +15 % speed, +15 HP |
-| Clans | blood_rites | Blood Rites | war_shrine | II | 100 | 100 | 30 | War Shrines +5 Faith; Battle Fervor +2 attack instead of +1 |
+| Faction | id              | Name            | Building      | Age | Food | Gold | Time | Effect                                                      |
+| ------- | --------------- | --------------- | ------------- | --- | ---- | ---- | ---- | ----------------------------------------------------------- |
+| Crown   | heavy_plough    | Heavy Plough    | keep          | II  | 100  | 100  | 30   | Farms +20 % food                                            |
+| Crown   | crop_rotation   | Crop Rotation   | keep          | III | 250  | 150  | 45   | Farms +20 % food (stacks additively)                        |
+| Crown   | iron_axles      | Iron Axles      | storehouse    | II  | 100  | 100  | 30   | Carts +25 capacity, +10 % speed                             |
+| Crown   | gambeson        | Padded Gambeson | barracks      | II  | 100  | 50   | 40   | Infantry +1 pierce armor                                    |
+| Crown   | chainmail       | Chainmail       | barracks      | III | 200  | 100  | 50   | Infantry +1/+1 armor                                        |
+| Crown   | bodkin          | Bodkin Arrows   | archery_range | II  | 100  | 100  | 35   | Archers +1 attack, +1 range                                 |
+| Crown   | barding         | Barding         | stable        | III | 150  | 150  | 50   | Cavalry +2 melee armor, +20 HP                              |
+| Crown   | devotion        | Devotion        | chapel        | II  | 100  | 100  | 30   | Chapels +5 Faith; Sanctuary 2 HP/s                          |
+| Clans   | slash_burn      | Slash-and-Burn  | great_hall    | II  | 100  | 100  | 30   | Fields +20 % food                                           |
+| Clans   | tended_fields   | Tended Fields   | great_hall    | III | 250  | 150  | 45   | Fields +20 % food                                           |
+| Clans   | sledge_runners  | Sledge Runners  | hoard         | II  | 100  | 100  | 30   | Wagons +25 capacity, +10 % speed                            |
+| Clans   | hide_armor      | Hide Armor      | mead_hall     | II  | 100  | 50   | 40   | Infantry +1 pierce armor                                    |
+| Clans   | scale_armor     | Scale Armor     | mead_hall     | III | 200  | 100  | 50   | Infantry +1/+1 armor                                        |
+| Clans   | barbed_javelins | Barbed Javelins | hunters_lodge | II  | 100  | 100  | 35   | Ranged +1 attack; javelineer +1 range                       |
+| Clans   | steppe_breeding | Steppe Breeding | horse_pen     | III | 150  | 150  | 50   | Cavalry +15 % speed, +15 HP                                 |
+| Clans   | blood_rites     | Blood Rites     | war_shrine    | II  | 100  | 100  | 30   | War Shrines +5 Faith; Battle Fervor +2 attack instead of +1 |
 
 ### Terrain
 
@@ -159,10 +163,11 @@ Tile codes (Uint8): `0 GRASS`, `1 DIRT`, `2 SAND`, `3 SHALLOW` (passable, speed 
 
 ### Controls
 
-- Left click select; drag box-select (own units only; buildings only if no units in box); Shift adds/removes; double-click selects all own units of that type on screen; Ctrl+0–9 assigns group, 0–9 selects, double-tap centres camera.
-- Right click context: ground → move; enemy → attack; own unfinished/damaged building with peasants → build/repair; unworked farm with peasant → farm; gold mine with cart → pin mine; from production building → set rally point. Shift+right-click queues waypoints/orders.
-- Command card: 3×5 grid bound to `Q W E R T / A S D F G / Z X C V B`. Unit cards: Q Move, W Stop, E Hold, R Attack-move. Peasant card: A Economic buildings submenu, S Military buildings submenu, Esc back.
-- Camera: arrow keys, screen-edge scroll (8 px margin), middle-mouse drag pan, wheel zoom 0.5–1.5 around cursor. `.` cycles idle peasants, `H` centres on Town Center, `Space` jumps to latest alert, `F10`/`Esc` opens game menu, `Delete` destroys selection.
+- Left click select; drag box-select (own units only; buildings only if no units in box); Shift adds/removes; double-click selects all own units of that type on screen; Ctrl+0–9 (or Meta+0–9) assigns group, 0–9 recalls, double-tap centres camera (non-repeat presses whose input-event timestamps are within 300 ms; render-queue handling delay does not affect the window).
+- Right click context: ground → move; enemy → sends attack to units that can attack and move to target position for units that cannot (attack marker shown only when at least one unit attacks); own unfinished/damaged building with peasants → build/repair; unworked farm with peasant → farm; gold mine with cart → pin mine; own production building(s) → set rally point for all selected production buildings. Shift+right-click queues waypoints/orders.
+- Command card: 3×5 grid bound by physical key position (`e.code`: `KeyQ` … `KeyB`, layout-independent). Autorepeat is ignored for one-shot actions. Unit cards: Q Move, W Stop, E Hold, R Attack-move. Peasant card: A Economic buildings submenu, S Military buildings submenu, Esc back. Key `G` runs the card's G action when present; when the slot is empty, `G` toggles the debug grid only in debug builds (`import.meta.env.DEV` or `?debug=1`).
+- Camera: arrow keys, screen-edge scroll (8 px margin, stopped on window blur and pointer window exit), middle-mouse drag pan, wheel zoom 0.5–1.5 around cursor. `.` cycles idle peasants (starting at the first idle peasant), `H` centres on Town Center, `Space` jumps to the latest positioned alert, and `Delete` destroys selection. `F10` opens the pause menu. `Esc` first cancels placement, then backs out of a command submenu/mode (also cancelling a selection drag), then cancels a selection drag, otherwise opens the menu. While paused, `Esc`/`F10` closes the menu and other gameplay keys are ignored.
+- Building placement: choose a building from the peasant command card, then left-click a snapped footprint; green/red ghosts show advisory validity. `Escape` or right-click cancels, `R` rotates only while placement is active, and Shift keeps placement active. Wall/palisade drags emit straight or L-shaped tile runs; gate orientation follows the nearest wall run and can be toggled with `R`. Selection changes clear placement.
 
 ## Technical architecture
 
@@ -172,18 +177,18 @@ Tile codes (Uint8): `0 GRASS`, `1 DIRT`, `2 SAND`, `3 SHALLOW` (passable, speed 
 bordev/
   package.json  tsconfig.json  vite.config.ts  vitest.config.ts  playwright.config.ts  eslint.config.js  .prettierrc  index.html
   src/
-    main.tsx            React root
-    app/                screens: MainMenu, SkirmishSetup, GameScreen, Results, Settings
-    ui/                 HUD components: TopBar, SelectionPanel, CommandCard, Minimap, Alerts; zustand store hud.ts
-    game/               GameSession: owns Sim, Renderer, Input; fixed-step loop; HUD snapshots
-    input/              CameraController, SelectionController, OrderController, Hotkeys, PlacementController
-    render/             Renderer, IsoCamera, Terrain, SpriteBatch, AtlasCache, FogTexture, Overlays (selection ellipses, health bars, placement ghost, rally lines)
+    main.tsx            React root: StrictMode + App
+    app/                App screen state + SkirmishConfig; MainMenu, SkirmishSetup, GameScreen, GameMenu, Results (Settings remains future work)
+    ui/                 HudRoot, TopBar, SelectionPanel, CommandCard, Portrait, Minimap, AlertToasts; hud.ts store, commandSlots.ts
+    game/               GameSession: owns Sim, Renderer, InputController; fixed-step loop, pause/outcome; alerts.ts, matchResult.ts, urlFlags.ts
+    input/              CameraController, SelectionController, OrderController, Hotkeys (single keyboard dispatcher), PlacementController
+    render/             Renderer, playerColours.ts (central palette), IsoCamera, Terrain, SpriteBatch, AtlasCache, FogTexture, Overlays (selection ellipses, health bars, placement ghost, rally lines)
     sim/                PURE TypeScript. Must not import babylon, react, DOM or src/render|ui|input (enforced by eslint no-restricted-imports)
-      sim.ts world.ts entity.ts commands.ts rng.ts map.ts grid.ts spatialHash.ts
+      sim.ts world.ts entity.ts commands.ts headless.ts rng.ts map.ts grid.ts spatialHash.ts
       path/ (astar.ts, components.ts, pathQueue.ts)
-      systems/ (movement.ts, economy.ts, construction.ts, production.ts, combat.ts, projectiles.ts, faith.ts, fog.ts, victory.ts, auras.ts)
-      ai/ (aiPlayer.ts, economyManager.ts, buildOrder.ts, militaryManager.ts, defenseManager.ts, techManager.ts, difficulty.ts, buildOrders/*.json)
-    data/               units.ts buildings.ts upgrades.ts ages.ts factions.ts (tables above as typed consts)
+      systems/ (movement.ts, economy.ts, construction.ts, production.ts, research.ts, upgrades.ts, rally.ts, combat.ts, projectiles.ts, faith.ts, fog.ts, victory.ts, auras.ts)
+      ai/ (aiPlayer.ts, perception.ts, sitePlanner.ts, economyManager.ts, militaryManager.ts, buildOrder.ts, difficulty.ts, buildOrders/*.json)
+    data/               roles.ts (role lookups), units.ts, buildings.ts, upgrades.ts, ages.ts, factions.ts (tables above as typed consts)
     assets/             atlas manifest types + loader
   art/
     manifest.json       every renderable asset
@@ -204,67 +209,182 @@ bordev/
 
 M0 development setup: Node 26 (`.nvmrc` pins 26.8.1), npm 12, then `npm ci`. Run `npm run dev` for development. Browser tests require `npx playwright install --with-deps chromium` (Linux system dependencies need sudo), followed by `npm run build && npm run e2e`. CI performs these steps on Ubuntu.
 
+Playwright runs one worker: simultaneous SwiftShader worlds contend for CPU and can starve browser queries on headless hosts. The suite retains real mouse/keyboard interaction and WebGL rendering; it does not use retries or replace the renderer with mocks.
+
 TypeScript 7.0.2 runs typecheck/build. Current typescript-eslint 8.70.1 requires the TypeScript 6 compiler API, so `tools/eslint/` is an npm workspace with TypeScript 6.0.3 solely for linting. The `ts-api-utils` override keeps that parser dependency from resolving against the incompatible TypeScript 7 API. Do not use `--force` or `--legacy-peer-deps`. npm 12 explicitly permits the pinned esbuild install script via `allowScripts`.
 
-All fixed script names are reserved in M0. Art, map generation, headless simulation, benchmarks, balance, and desktop commands target their planned entrypoints; those implementations and desktop dependencies arrive in their owning later milestones. M0 does not supply fake implementations.
+`tsc -b` covers three projects: `tsconfig.app.json` (browser `src/` outside sim/data, excluding tests), `tsconfig.sim.json` (all of `src/sim` and `src/data`, including their tests; ES2023 only, no DOM or Node types) and `tsconfig.node.json` (configs, `tools/`, `tests/`, and every other `src/**/*.test.ts`). New Vitest files are type-checked by whichever project owns their directory.
+
+All fixed script names were reserved in M0. M1 implemented `art:build`, `art:pack`, and `art:terrain`; M2 implemented two-player `map:gen`; M3 implemented `bench:sim`; M9 implements `sim:headless` with Crown Normal AI and the menu-to-results skirmish flow. Balance and desktop commands remain assigned to their respective milestones.
+
+M1 art setup: Blender 5.2 LTS must be available as `blender` on `PATH` (verified with 5.2.2 on this machine). Run `npm run art:build && npm run art:pack` to generate sprites, all six terrain textures, and atlases. Generated `public/atlases/` and `public/terrain/` files belong in version control; raw renders, logs, and caches live in ignored `build/`. `npm test` consumes the generated public files and does not require Blender.
+
+Both art commands accept `-- --asset calib_tile` (or another manifest id) for an incremental sprite build. `npm run art:terrain` regenerates terrain independently. For individual animation/facing renders, use `blender -b --factory-startup -t 2 --python-exit-code 1 --python art/blender/render_asset.py -- --asset crown_peasant --out build/preview --only-anim walk --only-dir 2`; this deliberately does not certify the full-asset cache.
+
+Builds run at most four Blender processes with two threads each, log to `build/logs/<id>.log`, and only write success hashes after every expected output exists. The raw cache includes the Blender version, manifest entry, asset script, renderer, shared libraries, and build tool; terrain has its own source hash. Atlas caching hashes raw frame contents, manifest, packer/schema, sharp versions, and the resolved `maxrects-packer` version. Packing requires the complete-render `.hash` marker before consulting its cache; missing expected outputs force regeneration. Blender animation descriptors must match manifest animation names, frame counts and loop flags. Removing `build/` forces a complete render/repack without deleting the tracked public assets.
 
 ### Simulation contract
 
 - Fixed tick 20 Hz (`SIM_DT = 0.05` s). `Sim.step()` advances exactly one tick. The render loop uses an accumulator and interpolates positions with `alpha = acc / SIM_DT`.
 - All randomness through `Rng` (mulberry32, seeded per match). Same seed + same commands ⇒ same outcome on the same machine (tested).
-- Input and AI mutate state only via `sim.issue(cmd: Command)`; commands apply at the start of the next tick. `Command` is a discriminated union on `kind`: `move | attackMove | attack | stop | hold | build | repair | farm | pinMine | train | cancelTrain | research | cancelResearch | setRally | delete`. Every command carries `player: number`, and unit commands carry `ids: number[]` and `queued: boolean`.
-- Entities: dense array indexed by numeric id with a free list; each entity is a plain object with `kind: 'unit' | 'building' | 'mine' | 'projectile' | 'doodad'` and optional component fields. No class hierarchy.
-- Grid: `Uint8Array(128*128)` flags — bit0 terrain-blocked, bit1 building-blocked, bit2 gate. A gate tile is passable for units whose owner is the gate owner or an ally.
-- Pathfinding: 8-neighbour A* (octile heuristic, binary heap, no diagonal corner cutting) + line-of-sight string pulling. Connected-component labels recomputed on building placement/destruction; a target in another component is replaced by the nearest tile (BFS from target) in the start component. Path requests are queued and processed up to 25 000 node expansions per tick.
-- Movement: waypoint seek + separation steering from a spatial hash (cell 2 tiles); clamp out of blocked tiles; stuck detection (progress < 0.1 tiles in 2 s) triggers a repath. Group moves assign formation slots (box, spacing 0.6 tiles, facing move direction, greedy nearest assignment) and path each unit to its slot.
-- Fog: per player `Uint8Array(128*128)`: 0 unexplored, 1 explored, 2 visible; recomputed every 4 ticks from LOS circles. Enemy buildings and mines seen once are remembered as ghosts with their last-seen state per player.
-- AI players run inside the sim at their decision interval and issue normal commands. AI sees terrain, mines and enemy start positions; enemy units/buildings only through its own fog.
+- Input and AI mutate state only via `sim.issue(cmd: Command)`; commands apply at the start of the next tick. `Command` is a discriminated union on `kind`: `move | attackMove | attack | stop | hold | build | repair | farm | pinMine | train | cancelTrain | research | cancelResearch | setRally | delete | surrender`. Every command carries `player: number`, and unit commands carry `ids: number[]` and `queued: boolean`. Surrender is `{ kind: 'surrender'; player: number }` and eliminates that player when applied.
+- Entities use a dense array indexed by numeric ID with a free list; each entity is a plain object with `kind: 'unit' | 'building' | 'mine' | 'projectile' | 'doodad'` and optional component fields. Death removes an entity from the live grid, population and identity immediately; corpses and rubble are timed remains, not reusable live entities.
+- Grid: `Uint8Array(128*128)` flags — bit0 terrain-blocked, bit1 building-blocked, bit2 gate. `World.setTeam` is the only alliance write path, syncing player teams and grid alliances immediately and bumping grid revision. Completed gate passability is always player/team-aware and independent of its visual open frame: owner/allied units pass; hostile units remain blocked. The gate appears open when an owner/allied unit is within 1 tile of its footprint. Gate atlas direction is 6 for vertical and 0 for horizontal.
+- Pathfinding: 8-neighbour A* (octile heuristic, binary heap, no diagonal corner cutting) + line-of-sight string pulling. Connected-component labels use a single shared per-world cache (`PathQueue`) recomputed on building placement/destruction; a target in another component is replaced by the nearest tile in the start component. Breach module (`canEngage`, `resolveAttackTarget`): attacks on enclosed targets route to the first wall from the attacker side on a minimum-walls route (tie-broken by shortest route from the attacker), sticky per attacker while the wall lives and grid revision is unchanged; melee reach requires the goal tile or an edge-adjacent tile in the attacker's area (diagonal-only contact excluded); unreachable targets return undefined without per-tick flood searches. Path requests are queued and processed up to 25 000 node expansions per tick.
+- Movement: waypoint seek + separation steering from a spatial hash (cell 2 tiles); clamp out of blocked tiles. Auto-acquisition scans on staggered `(tick + id) % 10` ticks for idle/stop/attack-move/hold units and for towers/Keeps without a target; evaluates in-range or engageable candidates only; walls/gates are never auto-acquired; priorities: units > attacking buildings > other buildings, tie-broken by nearest then lower entity id. Per-entity attack cooldown persists across retargeting, and re-issuing an attack on the current goal keeps the active swing. Retaliation: idle/stop/attack-move (and hold units within attack range) switch to a hostile attacker if their current target was auto-acquired and is a building or unhittable; explicit attack orders are kept. Range-0 attackers (battering ram) strike in melee reach regardless of damage type. Unreachable explicit targets move once toward the nearest reachable point without repathing storms; minRange units reposition to the nearest reachable legal firing tile or give up. Stuck detection (progress < 0.1 tiles in 2 s) triggers a repath. Group moves assign formation slots (box, spacing 0.6 tiles, facing move direction, greedy nearest assignment) and path each unit to its slot.
+- Exploration: each player owns map-sized `visible` and monotone `explored` Uint8Arrays, a three-state `fog` byte array (0 unexplored / 128 explored-hidden / 255 visible), and `fogRevision`. Data-defined LOS disks share allied vision without terrain occlusion; buildings reveal from their footprint centre. Placement requires every footprint tile explored, not currently visible. Detached location-keyed building/mine memories retain last-seen HP, construction, orientation, gate and resource state; unseen destruction clears only when the remembered footprint is revisited.
+- Crown Normal AI is implemented inside the sim; Clans AI remains Beta (`AI for clans is not available until Beta`). Decision ticks satisfy `(world.tick + player * 15) % 30 === 0`; eliminated players and ended matches skip AI updates. AI issues ordinary commands for the next tick, uses no resource cheats or `Math.random`, and sees terrain, mines and enemy start positions; hostile units/buildings are read only by `perception.ts` through visibility and remembered building ghosts. Economy and military decisions share a spending budget. Current tuned Normal settings target 12 peasants and 4 carts, first attack at tick 9000 or army size 10, minimum wave size 3, and age-2 man-at-arms weight 3. The prescribed headless runs decided 10/10 AI-vs-AI seeds and 3/3 passive-human seeds without errors or timeouts; the full Alpha exit gate, including the user's full Normal match, is not thereby satisfied.
+
+Runtime: `new Sim(map, seed = 1, playerFactions?, ai?)` defaults every player to Crown; optional faction configuration supports the Clans tables. The fourth argument is `Readonly<Record<number, AiDifficulty>>`, currently with difficulty `'normal'`; for example `new Sim(map, 3, undefined, { 1: 'normal' })` controls player 1 with Crown Normal AI. Missing player indices throw `AI player <n> does not exist on this map`; unsupported faction build orders throw the Beta error. Omitting the AI map keeps players passive unless commands are issued. `issue` copies commands and applies them at the next tick (unimplemented kinds throw). Consume sim events with `drainEvents()`.
+
+`GameSession(canvas, options?)` owns the running match: `mapUrl` defaults to `/maps/alpha_test.json`, `seed` to 7, and `maxAccumulator` to 0.25 seconds. Options also accept `debugScene`, `ai?: Readonly<Record<number, AiDifficulty>>`, `playerColours?: readonly PlayerColourId[]` (default `['blue', 'red']`), and `onMatchEnd?: (result: MatchResult) => void`. It forwards the AI map to `new Sim(gameMap, seed, undefined, ai)`, keeps the human/viewer as player 0, exposes resolved `session.playerColours`, and configures renderer tints. Map-load failure is exposed as `session.loadError`.
+
+M5 state and work contracts:
+
+- Units carry identity-checked work targets (`targetId` plus `targetRef`) for `build`, `repair`, `farm`, and `pinMine`; shared work helpers approach a reachable perimeter and preserve queued jobs. Movement arrival does not complete a work order. Move/stop/hold clear active work animation and cart transient state without discarding carried gold; stopped carts do not automatically restart.
+- Buildings carry `orientation: 'horizontal' | 'vertical'` and a paid `trainingQueue` of `{unitType, progress, food, gold}` items. Build commands accept orientation and an optional `targetId` to resume an unfinished site without charging again. Completion transitions once, fills HP, accounts supply/faith only for completed buildings, and emits one `buildingCompleted` event.
+- Placement checks integer bounds, faction/age, resources, passability, occupancy and explored footprint tiles. Units are displaced to reachable free positions rather than blocking placement. Only arrived builders contribute to `3T/(n+2)` construction; repair is free at half build rate; construction-site damage persists while building. Cancelling an untouched site refunds 100 %, otherwise 50 %. One eligible unqueued farm builder starts farming on completion.
+- Cart state records phase (`toMine`, `waiting`, `loading`, `toDropOff`, `unloading`, `idle`), numeric `carriedGold`, timers and identity-checked mine/drop-off/pin references. Gold leaves a mine at completed loading and enters the stockpile at completed unloading. `foodCollected` and `goldCollected` count actual farm generation and delivered gold, excluding starting stock.
+- Faith and population recompute from live units and completed buildings, with a hard population cap of 150. `lowFaith` is true when used exceeds produced. Generic unit training was brought forward from M6 for the M5 extra-cart and Low Faith requirements; that historical change provides faction/building/age/cost validation, queues of at most five, 100 % cancellation refunds, population-cap pause, collision-safe spawning and ground rally orders. Current training and research progress at 0.05 s/tick normally and 0.025 s/tick in Low Faith.
+- Ages progress through `age_2` and `age_3`, researched at the Town Center subject to the age table's building requirements. Each producer may have one paid active research; research and unit training are mutually exclusive at a producer. Cancelling research or deleting its producer refunds 100 %. Completed upgrades are tracked as a set. Heavy Plough adds 20 % of the base farm rate, producing a 1.2 multiplier; farm-rate modifiers stack additively and other upgrades remain Beta.
+- Advanced rallies can target an owned unit or building by identity (`targetId`): snapshots resolve the live target position, newly trained units move to the target unit's position at spawn time or a reachable building perimeter. Enemy targets use ground coordinates rather than live references. Stale targets or targets no longer owned fall back to the rally's stored ground position. Trained units do not continuously follow targets or issue combat orders; combat orders are implemented in M7 and mine auto-assignment remains Beta.
+- Tick order: commands → movement → fog → combat → projectiles → auras → gates → construction → economy → faith → research → production → remains → victory → AI decisions → tick increment. AI-issued commands therefore apply on the following step. Starting vision is initialized after bases spawn. Commands use the visibility shown in the preceding snapshot; fog is recomputed before combat. Sanctuary heals exact integer HP once per second (N HP for N completed Chapels within 5 tiles of footprint).
+
+M9 outcome and statistics contracts (`src/sim/systems/victory.ts`):
+
+- Removing a player's last Town Center eliminates them; unfinished Town Centers still count as owned. `eliminatePlayer(world, player)` is idempotent and emits `{ kind: 'playerEliminated', player }` once, without a winner field. Surrender uses the same elimination path.
+- `world.outcome` starts as `null`. When fewer than two non-eliminated teams remain, `updateVictory` sets `{ winnerTeam: number | null; endTick: number }` and emits `{ kind: 'matchEnded'; winnerTeam; tick }` exactly once. No teams remaining means a draw (`winnerTeam: null`). `endTick` is the victory-check tick, before the step's increment. `Sim.step()` itself does not stop after an outcome; callers stop stepping completed matches.
+- `summarizeMatch(world)` returns `{ winnerTeam; endTick; tick; players }`, with nullable `winnerTeam` and `endTick` while undecided. Each player summary contains `player`, `faction`, `team`, `eliminated`, `age`, `foodCollected`, `goldCollected`, `unitsTrained` and `unitsLost`. `unitsTrained` counts completed production only, excluding starting units and direct/cheat spawns; `unitsLost` counts unit removals including combat deaths and `delete`.
+- Production emits `populationCapped` once when a queued unit becomes population-blocked, including player, building ID and footprint-centre coordinates; progressing again clears the transition flag. Faith emits `faithLow` on a player's false-to-true Low Faith transition. The game-layer `AlertFeed` consumes these transitions for viewer-owned toasts.
+
+M9 headless matches:
+
+```sh
+npm run sim:headless -- --map alpha_test --p1 crown:normal --p2 crown:normal --seeds 1-10
+npm run sim:headless -- --map alpha_test --p1 none --p2 crown:normal --seeds 1-3 --max-ticks 30000
+```
+
+`--map <id|path>` defaults to `alpha_test`; a `.json` value resolves as a path from the working directory, otherwise it resolves under `public/maps/`. `--p1` through `--p4` address zero-based sim players 0 through 3, subject to the map's player count. Unspecified slots use `crown:normal`; `none` retains a passive Crown player with a normal starting base, not an empty slot. `clans:normal` parses but reports the unavailable-until-Beta error per seed. `--seeds n` or inclusive ascending `a-b` defaults to seed 1, `--max-ticks` defaults to 72000 (60 minutes at 20 Hz), and `--help` lists options.
+
+Text output reports each seed's winner, `TIMEOUT` or `ERROR`, match time and per-player economy/production/loss/age statistics, followed by decided/timeout/error totals. `--json` instead returns `{ map, maxTicks, results, decided, timedOut, errors }`. Exit status is 0 only when every seed has a non-null winner with no timeout or error; draws also exit 1. Both prescribed commands passed: AI-vs-AI seeds 1–10 all ended in P1 wins at 37048 ticks (30:52), and passive-human seeds 1–3 all ended in P2 wins at 17945 ticks (14:57), with no timeouts or errors.
+
+The Node-free `runHeadlessMatch(map, { seed, slots, maxTicks })` in `src/sim/headless.ts` shares this runner with sim callers. Each `SlotSpec` is `{ kind: 'none'; faction }` or `{ kind: 'ai'; faction; difficulty }`; slot count must equal `map.players`, otherwise the returned error is `Expected <n> player slots for map <id>, got <m>`. It stops on an outcome or the tick limit, drains events every 200 ticks, and catches exceptions as `error: String(err)`. Its result extends the match summary with `seed`, `timedOut` and nullable `error`.
+
+Run `npm run bench:sim -- --units 300`; optional flags are `--scenario move|combat` (default `move`), `--ticks`, `--warmup`, `--seed`, `--map <path>`, and `--max-ms`. Defaults: scenario `move`, 300 measured ticks, 50 warmup ticks, seed 42, `public/maps/alpha_test.json`, 4 ms limit. The `move` scenario maintains random movement traffic across passable ground. The `combat` scenario stages two opposing armies totalling `--units` (divided evenly between Player 0 and Player 1) using mixed Crown combat units (`spearman`, `longbowman`, `man_at_arms`, `crossbowman`, `knight`) given initial `attackMove` orders toward each other, plus a breach test of 20 Player 0 `man_at_arms` attacking a Player 1 unit enclosed in a closed 5×5 `stone_wall` perimeter to continuously exercise breach resolution. The report includes tick percentiles and path-expansion counters; at 300 or more units a missed average limit exits nonzero.
+
+M8 adds isolated `updateFog` timings outside the whole-tick timer, including mask rasterization and ghost maintenance. At 300 or more units, average fog update must be ≤ 0.5 ms; `--max-fog-ms` overrides that benchmark threshold. Whole-tick timing still includes its normal fog update.
+
+### Game flow and HUD
+
+`App` starts at the main menu, not a running match. **Skirmish** opens the two-slot setup: Alpha Test, Crown human (player 0), Crown Normal AI (player 1), and a human colour choice (Blue by default). Map, faction and difficulty controls are fixed for Alpha. **Start** creates a random seed from 1 through 1,000,000 and passes `{ mapUrl, seed, humanColour, opponent: 'normal' }` to `GameScreen`; **Back** returns to the menu. Main-menu **Quit** is unavailable in the browser and labelled for the desktop build.
+
+`src/render/playerColours.ts` owns `PlayerColourId`, ordered `PLAYER_COLOURS`, and `getPlayerColour(id)`. The current order is Blue, Red, Green, Yellow; entries contain sprite tint, CSS colour and ghost CSS colour. Setup and `GameScreen` choose the first palette colour different from the human's for the opponent: Blue human → Red AI; Red, Green or Yellow human → Blue AI. Renderer `setPlayerTints` and the minimap's live/ghost colours use the same session palette, as do result swatches. These are current Alpha colours; the locked Beta art-direction values below remain future work.
+
+The fixed-step loop advances `Sim` at 20 Hz, drains sim events every active frame into a reusable buffer, exposes a reused interpolated `snapshot`, passes clamped frame `dt` to input before rendering, and drives explicit Renderer frames. The Zustand HUD samples every two ticks (10 Hz). `openMenu()` pauses a loaded, unfinished match and sets HUD `menuOpen`; the full-screen `GameMenu` overlay blocks canvas interaction. **Resume** calls `closeMenu()`, clears the accumulator and resumes without catch-up; **Surrender** closes the menu and issues player 0's ordinary surrender command; **Quit to menu** disposes the game through the app screen transition. Paused and ended sessions keep rendering and updating the frame clock but skip simulation, HUD publication and input updates.
+
+The deciding tick stops the game loop. Draining `matchEnded` marks the session ended and calls `onMatchEnd` once with `buildMatchResult(summarizeMatch(world), ...)`. `MatchResult` contains viewer-relative `outcome: 'victory' | 'defeat' | 'draw'`, `durationTicks`, and player summaries extended with labels (`You`, `Normal AI`, otherwise `Player <n>`) and colours. `Results` shows Victory/Defeat/Draw, match time `mm:ss`, and a table of colour, units trained/lost and food/gold gathered, plus **Main menu**. Training excludes starting/direct-spawn units; losses include combat deaths and deletion.
+
+`AlertFeed(0)` maps viewer-owned `underAttack`, `ageReached`, `populationCapped` and `faithLow` to **Under attack**, faction age-name **reached**, **Not enough population** and **Not enough faith** toasts. Under-attack alerts within 15 tiles of a raised alert are suppressed for 200 ticks. Resource rejections preserve **Not enough food**, **Not enough gold**, or **Not enough food and gold**; **Insufficient resources** and wall-run shortages become **Not enough resources**. Disabled card clicks/hotkeys and failed placement use `session.reject(reason)`, falling back to `showStatus(reason)` for other reasons; ordinary status messages retain their restarted 4-second expiry.
+
+The HUD keeps the newest four alerts and expires them after 5 seconds during HUD publication (publication pauses with the menu). `AlertToasts` appears below the top bar; clicking a positioned alert centres the camera. `Space` calls `jumpToLatestAlert()` for the latest positioned alert, ignoring newer positionless faith/resource alerts; that remembered position remains available after its toast expires.
+
+Contextual orders route enemy targets to identity-checked hostile unit/building attacks for units that can attack and move orders to target position for units that cannot (displaying the attack marker only when at least one unit attacks); Shift queues orders and nonqueued replacements clear the prior queue. Unfinished owned buildings route to build, damaged completed buildings to repair, farms to farm, and cart mine targets to pinMine; Shift queues work. Owned production buildings retain ground-rally precedence, with advanced owned unit/building rally targets resolved by identity. For mixed building selections, train and research slots use the first selected building's type; other selected types do not displace its hotkeys. Rally, delete and cancellation remain shared selection actions. Command-card clicks and physical hotkeys share `OrderController.executeSlot` with typed building/unit payloads. Available construction, unit-training, age and upgrade/research actions are enabled; unavailable age-gated or Beta content remains disabled with reasons surfaced through `session.reject` (shortage toast or ordinary status).
+
+M7 browser visual scenarios use the real fixed clock and real mouse/keyboard/card orders on isolated grass x 50..99, z 0..25. The World API stages entities only; animations and lifetimes advance through the Sim step loop.
 
 ### Rendering contract
 
 - One Babylon `Engine` + `Scene`. Orthographic camera, pitch 30° below horizontal, yaw 45°, so a 1×1 world tile projects to a 96×48 px diamond at zoom 1. Pixels per world unit `PPU = 96/√2 ≈ 67.882`. Ortho bounds = `±canvasPx/2 / (PPU·zoom)`.
 - Axis convention (acceptance-tested): world +X projects to screen (+48, +24) px and world +Z to screen (−48, +24) px per tile at zoom 1; tile (0,0) is the top corner of the map.
 - Terrain: one 128×128 ground mesh, `ShaderMaterial` blending tiling ground textures by two RGBA splat textures (splat0 = grass, dirt, sand, shallow; splat1 = water, rock-ground, unused, unused) built CPU-side at 4 texels per tile with bilinear filtering and noise-perturbed lookup; ground texture repeats once per 4 tiles; water animates UV. Terrain renders in rendering group 0 with depth write off.
-- Sprites: one `SpriteBatch` per atlas page = a unit quad with thin instances. Per-instance attributes: `iPos` (vec3 world anchor), `iUV` (vec4 atlas rect), `iSize` (vec4 w, h, anchorX, anchorY in px), `iTint` (vec4 team rgb, alpha). Vertex shader builds a camera-facing quad; the whole quad has the anchor's depth. Fragment: discard alpha < 0.5, alpha blend, depth test + write. Team colour: `rgb = mix(base.rgb, base.rgb * team * 1.25, mask.r)` from the page's mask texture. Instance buffers are rebuilt every frame from interpolated sim state.
+- Sprites: one `SpriteBatch` per atlas page = a unit quad with thin instances. Per-instance attributes: `iPos` (vec3 world anchor), `iUV` (vec4 atlas rect), `iSize` (vec4 w, h, anchorX, anchorY in px), `iTint` (vec4 team rgb, alpha). Vertex shader builds a camera-facing quad; the whole quad has the anchor's depth. Fragment: discard alpha < 0.5, alpha blend, depth test + write. Team colour: `rgb = mix(base.rgb, base.rgb * team * 1.25, mask.r)` from the page's mask texture. Instance buffers are updated in place each frame from interpolated sim state; capacity grows only when necessary.
 - Unit shadows are procedural ellipse quads (alpha 0.35, sized from unit radius) drawn after terrain, before sprites, no depth write. Building/doodad shadows come from a rendered shadow atlas layer drawn in the same pass.
-- Overlays: selection ellipses (under sprites), health bars and rally lines (on top, no depth test), placement ghost (building sprite, 50 % alpha, tinted green valid / red invalid per footprint tile).
-- Picking: screen → ground by ray/plane(y=0) math. Entity picking tests the cursor against each visible entity's trimmed sprite rect and chooses the one with the greatest iso depth (front-most).
+- Combat rendering uses pooled thin-instance arrows and stones from already-interpolated projectile snapshots (no second interpolation). Attack and die clocks subtract 1 tick (`snapshot.tick - 1 - start + snapshot.alpha`) to align damage and impacts with animation frame index 5. Remains carry an explicit snapshot `remains` flag; ID-keyed overlays, health bars, selection rings, the minimap, and entity picking skip remains. Remains cast no shadows via per-instance shadow suppression (`iShadowAlpha <= 0.0`) and skip procedural unit shadows; fading remains use a 4×4 Bayer matrix dithered discard so dissolving corpses and rubble never write depth or occlude geometry behind them.
+- Overlays: `Overlays` entry module delegates to a pure geometry builder (`src/render/overlays/geometryBuilder.ts`) and shares `ThinInstancePool` with `SpriteBatch` and `UnitShadows`. Pools are pre-sized (ellipses and health bars ≥ 256, line segments ≥ 2048) and updated in place without reallocation after initial warmup (keeping WebGL `createBuffer`/`deleteBuffer` counters at 0/0 during active movement): selection ellipses (rendering group 1, under sprites, thin instances), billboarded health bars (rendering group 3, on top, thin instances; anchored to a stable per-asset sprite top derived from atlas frame bounds rather than the current animation frame), drag selection marquee (group 3 quad), and order/rally lines (rendering group 3 dynamic lines; end-of-route cross coloured by the final queued order). Building selection rings use radius 0.8·width to enclose the footprint diamond and clear building sprites (visible around the Keep).
+- Static doodads (trees, rocks, gold mines) and props derive dynamically from all loaded atlases containing an `idle/0/0` frame (`this.loadedAtlases`) rather than hard-coded lists.
+- Placement overlays reuse pre-sized thin-instance pools for green/red footprint ghosts, wire outlines and drag tiles. Construction sprites use progress frames at 0/50/100 %; arrived workers use `work`, moving units use `walk`, and carts use the non-looping `load` clip during loading, clamping its final frame rather than repeatedly refilling.
+- Picking: screen → ground by ray/plane(y=0) math. Entity picking performs exact trimmed-frame picking against cached screen-space bounding boxes computed from each visible entity's trimmed atlas frame (`w, h, ax, ay` in px) and chooses the frontmost entity with the greatest iso depth; remains are excluded from picking.
+- Camera control: `CameraController` owns all camera user input: mouse wheel zoom (clamped 0.5–1.5 around cursor), middle-mouse drag pan with pointer capture, keyboard arrow keys (forwarded by `Hotkeys`), screen-edge scroll (8 px margin, stopped on window blur and pointer window exit), `H` key centring on Town Center, and double-tapping control groups (0–9) to centre on group members. Camera `centerOn(x, z)` centres the target point within the unobscured playfield band between the HUD bars using top/bottom insets reported by the HUD (the minimap camera outline projects the same band). `IsoCamera` maintains no user input listeners, providing projection only (orthographic Babylon camera setup, bounds clamping, world ↔ screen ↔ ground coordinate conversions).
 - Fog: `R8` 128×128 texture (0 / 128 / 255) with linear filtering; terrain darkens explored to 50 % desaturated, unexplored to black; sprites of non-visible enemies are not submitted.
+
+### Art direction
+
+Target: polished, stylised low-poly medieval — chunky, readable shapes with a deliberate finish. Not realism and not micro-detail: anything invisible at zoom 0.5 is not modelled. Implementation is scheduled as Beta M1 (Art direction and lighting pass). Until its goalposts pass, the Rendering contract and Sprite pipeline sections describe the current build; M1 then rewrites them to the values below.
+
+- **Shapes**: every asset reads by silhouette alone at zoom 0.5. Primary forms are few and large; secondary forms (bands, trims, caps, rims) are oversized about 1.5× realistic scale; tertiary detail (individual bricks, rivets, planks narrower than 0.05 world units) is omitted.
+- **Edges and joins**: boxes, cylinders and cones larger than 0.1 world units carry an angle-limited bevel (width 0.02–0.04, 2 segments) so edges catch the key light. Parts never simply stack: they meet through an overlap, band, footing or trim.
+- **Characters**: stylised proportions — head 1.12× and hands 1.2× the Alpha size, tapered limbs, slightly flared tunics. Idle poses are relaxed (arms held slightly away from the body, small weight shift); walks add a torso twist in phase with the legs. Never ramrod-straight.
+- **Buildings**: each has one focal point (gate, door or altar) and one silhouette peak (spire, conical cap or chimney). Roofs have an eave overhang and a ridge cap; a large roof plane is broken by a dormer, chimney or ridge feature.
+- **Palette**: materials keep the `PALETTE` hue families in `art/blender/lib/materials.py`. Adjacent materials differ in value by ≥ 0.1 so cloth, wood, stone and metal separate under baked light. Team colour is an accent on tabards, shields and banners, not the dominant mass.
+- **Player colours**: player 0 `[0.30, 0.48, 0.78]`, player 1 `[0.78, 0.30, 0.26]`; sprite team gain 1.1 (`rgb = mix(base.rgb, base.rgb * team * 1.1, mask.r)`). Later colour lists (Beta team colours, Pre-release colourblind palette) use HSV saturation 0.55–0.70 and value 0.75–0.85.
+- **Baked lighting** (`lib/rig.py`): the key sun keeps its direction (location (−3, −4, 8)) and 5° angle; energy rises from 3.0 to 3.2. Add a `Cool fill` SUN at (4, 3, 5) aimed at the origin, energy 0.6, colour (0.80, 0.87, 1.0). Add a `Warm rim` SUN at (−4, 4, 3) aimed at the origin, energy 1.0, colour (1.0, 0.90, 0.75). Both added lights have shadows disabled (`light.use_shadow = False`; unverified on Blender 5.2 — confirm first, fallback `light.cycles.cast_shadow = False`). World ambient stays colour (0.78, 0.84, 1.0), with strength reduced from 0.4 to 0.3. Only the key sun casts shadows, so the shadow pass and the sun-ray projection in `rig.render_bounds` stay unchanged.
+- **Look** (`lib/look.py`): anisotropic Kuwahara size 6 → 4 for crisper edges after the 50 % downscale. Freestyle lines (thickness 2.0, colour (0.08, 0.06, 0.05)) and the `Standard` view transform are unchanged.
+- **Terrain textures** (`render_terrain.py`): quieter ground so sprites carry the detail. Use grass palette `3c5232, 526843, 687c52, 82905f`, broad scale 2.0; dirt palette `5e4a39, 715a44, 876f53, 9c8462`, broad scale 2.4. Pattern weights become 0.9 broad / 0.1 grain. Other terrain types are unchanged. Target: grass and dirt greyscale luminance standard deviation ≤ 65 % of the Alpha textures.
+- **Runtime colour grade**: one Babylon `ImageProcessingPostProcess` on the iso camera with contrast 1.08, exposure 1.0, colour curves enabled with `globalSaturation = -8`, vignette enabled (weight 1.2, black, multiply) and tone mapping off. It grades the whole 3D canvas, including terrain, sprites and in-world overlays. The React HUD and minimap are separate DOM/canvas elements and are not graded.
+- **Tile grid**: always visible in all builds as a subtle ground layer — colour (0.10, 0.09, 0.07), alpha 0.15, rendering group 1 (above terrain, beneath sprites), so it never crosses units or buildings. The cyan Keep footprints are debug-only: hidden by default and toggled by `G` in debug builds when the command-card slot is empty.
 
 ### Sprite pipeline
 
-- `art/manifest.json` entry: `{ "id": "crown_knight", "kind": "unit|building|doodad|icon|calibration", "script": "assets/crown_knight.py", "frame": 128|192|256|…, "dirs": 8|1, "anims": { "idle": {"frames":4,"loop":true}, "walk": {"frames":8,"loop":true}, "attack": {"frames":8,"loop":false}, "die": {"frames":8,"loop":false} } }`. Workers add `work` (8, loop). Carts: `idle` 1, `walk` 8, `load` 4. Buildings: `construct` 3 frames (0 %, 50 %, 100 % scaffold), `idle` 1, `damaged` 1, `rubble` 1. Doodads: `idle` 1 with 4 variants as separate ids.
+- `art/manifest.json` entry: `{ "id": "crown_knight", "kind": "unit|building|doodad|icon|calibration", "script": "assets/crown_knight.py", "frame": 128|192|256|…, "dirs": 8|1, "facings"?: [0..dirs-1], "anims": { "idle": {"frames":4,"loop":true}, "walk": {"frames":8,"loop":true}, "attack": {"frames":8,"loop":false}, "die": {"frames":8,"loop":false} } }`. Manifest entries may specify an optional `facings` array (strictly ascending subset of 8 directions, valid only with `dirs: 8`); Blender rendering, atlas packing, and schema validation process only listed facings. Gate entry (`crown_stone_gate`) uses `dirs: 8` with `facings: [0, 6]` and defines 1-frame `open` and `damaged_open` animations in addition to the standard building set. Workers add `work` (8, loop). Carts: `idle` 1, `walk` 8, `load` 4 (`loop: false`, final frame holds). Buildings: `construct` 3 frames (0 %, 50 %, 100 % scaffold), `idle` 1, `damaged` 1, `rubble` 1. Doodads: `idle` 1 with 4 variants as separate ids.
 - Blender scene rig (`lib/rig.py`): orthographic camera rotation (60°, 0°, 45°) (tuned until the calibration test passes), `ortho_scale = frame / PPU`, sun from screen upper-left (strength 3.0, angle 5°) + world ambient 0.4, shadow-catcher plane at z = 0 for building/doodad shadow pass only.
-- Look (`lib/look.py`): Cycles CPU, 32 samples, OIDN denoise, view transform `Standard`, film transparent, render at 2× frame size, Freestyle silhouette/crease/border lines thickness 2.0 colour (0.08, 0.06, 0.05), compositor via `scene.compositing_node_group`: Kuwahara (anisotropic, size 6) on RGB, original alpha re-applied. Freestyle-with-Cycles output is unverified on Blender 5.2 — confirm in Alpha M1; if lines are missing, replace Freestyle with an inverted-hull outline (Solidify modifier, thickness 0.02, flipped normals, black emission material) applied by `look.py` to every mesh.
+- Look (`lib/look.py`): Cycles CPU, 32 samples, OIDN denoise, view transform `Standard`, film transparent, render at 2× frame size, Freestyle silhouette/crease/border lines thickness 2.0 colour (0.08, 0.06, 0.05), compositor via `scene.compositing_node_group`: Kuwahara (anisotropic, size 6) on RGB, original alpha re-applied. Freestyle-with-Cycles was confirmed on Blender 5.2.2 by an on/off render comparison; no inverted-hull fallback is needed. Calibration uses unfiltered emission materials without strokes or denoising so it measures projection rather than the art style.
 - Passes per frame: `body` (normal), `mask` (all materials → black emission except material named `TEAM` → white emission, 16 samples). Buildings/doodads additionally `shadow` (asset `visible_camera = False`, shadow catcher on).
+  - The shadow compositor converts the denoised Shadow Catcher illumination ratio to black alpha, subtracting a 5% residual sampling floor to avoid a faint catcher rectangle. Projected geometry/sun-ray render borders skip empty pixels while retaining the full 2× square image and origin; shadows retain a penumbra margin. Blender X/−Y map to world X/Z, Blender Z is height, and the origin projects to the image centre.
 - 8 facings are produced by rotating the model, never the camera or light. Direction index 0 = facing screen-down, increasing clockwise on screen (1 = down-left, 2 = left, … 7 = down-right). In-game facing = `round(screenAngle/45°) mod 8` of the screen-projected velocity.
-- Output: `build/renders/<id>/<pass>/<anim>/<dir>/<frame>.png`. `tools/pack-atlas.ts` downscales 50 % (sharp lanczos3), trims transparent borders, packs into 2048×2048 pages (maxrects, padding 2), writes `public/atlases/<id>_<page>.png`, `<id>_<page>_mask.png`, optional `<id>_<page>_shadow.png`, and `public/atlases/<id>.json`: `{ "version":1, "id", "pages":[…], "fps":12, "anims":{name:{frames,loop,dirs}}, "frames":{ "<anim>/<dir>/<frame>": {"page","x","y","w","h","ax","ay"} } }` where `ax, ay` is the anchor (projected world origin) inside the trimmed frame.
+- Output: `build/renders/<id>/<pass>/<anim>/<dir>/<frame>.png`. `tools/pack-atlas.ts` downscales 50 % (sharp lanczos3), trims transparent borders, packs into content-sized pages up to 2048×2048 (maxrects, padding 2, `smart: true, pot: false`), writes `public/atlases/<id>_<page>.png`, `<id>_<page>_mask.png`, optional `<id>_<page>_shadow.png`, and `public/atlases/<id>.json`: `{ "version":1, "id", "pages":[…], "fps":12, "facings"?:[…], "anims":{name:{frames,loop,dirs}}, "frames":{ "<anim>/<dir>/<frame>": {"page","x","y","w","h","ax","ay"} } }` where `ax, ay` is the anchor (projected world origin) inside the trimmed frame.
+  - A page entry is `{ "image": "<id>_<page>.png", "mask": "<id>_<page>_mask.png", "shadow"?: "<id>_<page>_shadow.png" }`, with paths relative to the atlas JSON. All layers use identical frame rectangles. Trimming uses the union of body/mask alpha ≥ 64 (preserving subpixel antialiased tips while excluding low-alpha Lanczos ringing) and any nonzero shadow alpha (preserving soft shadows). The sprite shader still discards alpha < 0.5. Anchors may lie outside the trimmed rectangle.
+  - Atlas JSON does not store page dimensions. Normalise pixel rectangles by each loaded PNG's source dimensions (`Texture.getBaseSize()`), not its potentially power-of-two-resized GPU dimensions (`getSize()`).
+  - Unit anchors are their ground positions. Building, mine and doodad anchors are footprint centres: top-left tile + `(width/2, height/2)`, with a 1×1 footprint for doodads. This preserves Blender's projected origin after trimming.
 - `tools/art-build.ts` runs `blender -b --factory-startup --python art/blender/render_asset.py -- --asset <id> --out build/renders/<id>`, 4 processes in parallel with `-t 2` threads each, skipping assets whose script + lib hash (stored in `build/renders/<id>/.hash`) is unchanged.
-- Icons: per unit/building/upgrade a 64×64 portrait (kind `icon`), packed into `public/atlases/icons.json`.
+- Icons: per unit/building/upgrade a 64×64 portrait (kind `icon`), packed into `public/atlases/icons.json`. Portraits crop loaded atlas frames (e.g. `walk/0/0` for units, `idle/0/0` for buildings) using frame metadata and atlas sheet dimensions until dedicated icon assets arrive.
 - Terrain textures: `render_terrain.py` renders 512×512 seamless top-down textures using 4D noise on a torus mapping (vector = (cos u, sin u, cos v), W = sin v), Kuwahara-filtered, to `public/terrain/<type>.png`.
 
 ### Map format
 
-`public/maps/<id>.json`: `{ "version":1, "id", "name", "size":128, "players":2|3|4, "tiles":"<base64 Uint8Array 16384>", "goldMines":[[x,y],…], "starts":[[x,y],…], "doodads":[[x,y,"tree_1"],…] }`. Coordinates are top-left tiles. `tools/mapgen.ts --seed N --players P --out id` generates rotationally symmetric maps satisfying the start-state guarantees; forests/rocks get doodads automatically.
+`public/maps/<id>.json`: `{ "version":1, "id", "name", "size":128, "players":2|3|4, "tiles":"<base64 Uint8Array 16384>", "goldMines":[[x,y],…], "starts":[[x,y],…], "doodads":[[x,y,"tree_1"],…] }`. Coordinates are top-left tiles, not render anchors: Keeps use a 4×4 footprint, gold mines 2×2, and doodads 1×1; render them at the footprint centre.
+
+M2 supplies the deterministic Alpha generator: `npm run map:gen -- --seed 1 --players 2 --out alpha_test`. It generates a rotationally symmetric 128×128 two-player map with all seven terrain codes, three mines per start plus four contested mines, start clearings, forest detour corridors, and automatic tree/rock doodads. The committed seed-1 map has 316 doodads. Player counts other than two are rejected; the full 2/3/4-player generator remains Beta work.
 
 ### Debug hooks
 
-With `import.meta.env.DEV` or URL `?debug=1`: `window.__bordev = { session, sim, issue(cmd), cheats: { resources(n), reveal(), instantBuild(on) }, stats() }`. Playwright specs drive the game through these hooks.
+`readUrlFlags()` in `src/game/urlFlags.ts` centralises URL semantics: `debug = import.meta.env.DEV || debug=1`; `debugScene` requires both explicit `debug=1` and `debugScene=1` (development mode alone does not enable it); `startSandbox` requires debug mode plus `start=sandbox`. Production without `debug=1` ignores `start=sandbox`. Normal development and `/?debug=1` still start at the menu.
+
+For a direct debug match, use `/?debug=1&start=sandbox`: Alpha Test, seed 7, Blue human and passive Red opponent. Add `&debugScene=1` only when the seeded debug scene/grid is wanted. In development, `/?start=sandbox` also works because debug mode is already enabled.
+
+With debug mode enabled, the mounted game exposes `window.__bordev = { session, renderer, sim, issue(cmd), cheats: { resources(n), spawnPeasants(count, x, z), age(2 | 3) }, stats(), recordEvents() }`; menu/setup have no live game hook. Playwright specs drive the game through these hooks. `GameSession` drains sim events every active frame, so specs that observe events across real frames call `recordEvents()` first: it (re)starts recording and returns the array that receives every subsequently drained event in order.
+
+Cheats:
+
+- `__bordev.cheats.resources(n)` immediately sets food and gold to `n` for all players and triggers a HUD publication.
+- `__bordev.cheats.spawnPeasants(count, x, z): number[]` spawns up to `count` peasants for player 0 at passable locations around (x, z), updates the session snapshot, publishes the HUD, and returns the array of created entity numeric IDs actually spawned.
+- `__bordev.cheats.age(2 | 3)` sets player 0's age immediately and publishes the HUD, enabling age-gated cards without performing age research.
+- Unavailable cheats: `reveal()` and `instantBuild(on)` are not exposed. Scouting uses real LOS; normal construction uses real simulation timing rather than an instant-build debug path.
+
+M3 exposes `session`, a live `sim` getter (null while loading), `issue`, and `stats`. `session.snapshot` contains `tick`, interpolation `alpha`, entity previous/current/interpolated coordinates, and player-0 fog/revision metadata. It excludes unseen hostile entities and includes detached remembered structures/mines marked `ghost`; ghosts have no picking or HP/selection overlays. `stats()` reports load/error/disposal state, frame count, tick, simulation time, FPS and accumulator.
+
+M2 adds `session.renderer`, including the scene, camera and loaded world. `stats().renderer` reports readiness, loaded atlas/page counts, visible sprites/shadows, draw calls, geometry counts, frame timings, camera view and depth-probe IDs. Normal sessions start without debug walkers or the debug grid. Explicit `?debug=1&debugScene=1` (or a direct `GameSessionOptions.debugScene` override) enables the seeded Crown debug scene and grid without consuming the simulation RNG; the URL flags do not themselves skip the menu unless `start=sandbox` is also present. In debug builds, `G` toggles the tile grid and cyan Keep footprints; middle-drag pans and wheel zooms around the cursor, clamped to 0.5–1.5.
 
 ### Testing strategy
 
 - Vitest for `src/sim`, `src/data` validation, atlas/map parsers, iso math. Tests assert observable sim outcomes (a unit arrives, gold increases, a building dies), not internals.
 - Playwright (Chromium headless, SwiftShader WebGL) for boot + one scripted skirmish smoke per stage.
+- Browser progression scenarios may use the exposed `__bordev.sim` to set up completed buildings and fast-forward fixed ticks for timing-insensitive setup, research and arrival checks. Orders under test still use real mouse/keyboard interaction; construction scenarios retain real construction timing.
 - Headless AI-vs-AI in Node via `sim:headless` is the main integration test for economy, combat and AI.
 - Visual checks: screenshot via Playwright or the agent browser, compared by eye at stage gates.
 
 ## Stage gates
 
-| Stage | One-line goal | Gate owner |
-|---|---|---|
-| Alpha | Every core system works end to end with the Crown faction; ugly but complete loop vs Normal AI | User plays one full match |
-| Beta | Content complete: both factions, final art, 3 AI difficulties, 4 maps, balance and performance targets hit | User plays both factions, reviews balance report |
-| Pre-release | Ship-quality: audio, menus/settings, polish, accessibility, desktop builds, external playtest fixes | User signs off RC build |
-| Release | 1.0.0 published on itch.io (web + desktop) with post-launch hotfix process | User publishes |
+| Stage       | One-line goal                                                                                              | Gate owner                                       |
+| ----------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| Alpha       | Every core system works end to end with the Crown faction; ugly but complete loop vs Normal AI             | User plays one full match                        |
+| Beta        | Content complete: both factions, final art, 3 AI difficulties, 4 maps, balance and performance targets hit | User plays both factions, reviews balance report |
+| Pre-release | Ship-quality: audio, menus/settings, polish, accessibility, desktop builds, external playtest fixes        | User signs off RC build                          |
+| Release     | 1.0.0 published on itch.io (web + desktop) with post-launch hotfix process                                 | User publishes                                   |
+
+Alpha automated verification is complete: `npm run build` passed with the existing nonfatal 500 kB chunk warning; `npm run e2e` passed all 30 tests (28 legacy plus two Alpha tests) in 12.5 minutes. The Alpha browser tests trained all 10 Crown unit types through actual command-card clicks, destroyed the enemy Keep using an actual trebuchet right-click attack and reached Victory, and verified pause/resume plus surrender to Defeat. Production-preview manual checks also covered menu flow, colours/minimap, shortage toasts, pause, Space alert navigation and results.
+
+Final `npm run typecheck && npm run lint && npm test` passed, including 506 tests across 40 files. `npm run bench:sim -- --units 300` passed at 3.903 ms average whole-tick time and 0.419 ms isolated fog time, with zero pending paths. The M5 `6000 ticks` goalpost passed (1 test passed, 3 skipped): a standard start built two farms and a cottage, trained an extra cart, and collected at least 250 food and 500 gold within 6000 ticks.
+
+- [x] User-owned Alpha exit gate: user confirmed completion of a full browser match against Normal AI. All Alpha exit gates are complete; Beta entry criteria are met, but Beta has not started.
 
 Rules for agents: each phase is one task; mark `- [x]` in the stage file when its goalposts pass; never start a stage before the previous stage's exit gate is checked by the user; any design change edits this overview first.

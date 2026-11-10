@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "id": "crown_barracks",
+  "pages": [
+    {
+      "image": "crown_barracks_0.png",
+      "mask": "crown_barracks_0_mask.png",
+      "shadow": "crown_barracks_0_shadow.png"
+    }
+  ],
+  "fps": 12,
+  "anims": {
+    "construct": {
+      "frames": 3,
+      "loop": false,
+      "dirs": 1
+    },
+    "damaged": {
+      "frames": 1,
+      "loop": false,
+      "dirs": 1
+    },
+    "idle": {
+      "frames": 1,
+      "loop": true,
+      "dirs": 1
+    },
+    "rubble": {
+      "frames": 1,
+      "loop": false,
+      "dirs": 1
+    }
+  },
+  "frames": {
+    "construct/0/0": {
+      "page": 0,
+      "x": 2,
+      "y": 2,
+      "w": 360,
+      "h": 245,
+      "ax": 144,
+      "ay": 172
+    },
+    "construct/0/1": {
+      "page": 0,
+      "x": 2,
+      "y": 249,
+      "w": 360,
+      "h": 245,
+      "ax": 144,
+      "ay": 172
+    },
+    "construct/0/2": {
+      "page": 0,
+      "x": 364,
+      "y": 2,
+      "w": 360,
+      "h": 259,
+      "ax": 144,
+      "ay": 186
+    },
+    "damaged/0/0": {
+      "page": 0,
+      "x": 2,
+      "y": 496,
+      "w": 318,
+      "h": 258,
+      "ax": 136,
+      "ay": 185
+    },
+    "idle/0/0": {
+      "page": 0,
+      "x": 364,
+      "y": 263,
+      "w": 279,
+      "h": 259,
+      "ax": 136,
+      "ay": 186
+    },
+    "rubble/0/0": {
+      "page": 0,
+      "x": 322,
+      "y": 524,
+      "w": 254,
+      "h": 104,
+      "ax": 130,
+      "ay": 58
+    }
+  }
+}

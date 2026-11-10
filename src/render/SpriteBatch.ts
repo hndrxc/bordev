@@ -1,0 +1,393 @@
+import { Engine } from '@babylonjs/core/Engines/engine';
+import { Effect } from '@babylonjs/core/Materials/effect';
+import { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial';
+import { Vector3 } from '@babylonjs/core/Maths/math.vector';
+import { Mesh } from '@babylonjs/core/Meshes/mesh';
+import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
+import type { Scene } from '@babylonjs/core/scene';
+import type { AtlasFrame } from '../assets/atlas';
+import type { LoadedAtlasPage } from './AtlasCache';
+import { ISO_RIGHT_BASIS, ISO_UP_BASIS, PPU } from './iso';
+import {
+  ThinInstancePool,
+  initIdentityMatrices,
+  type ThinInstanceAttributeSpec,
+} from './ThinInstancePool';
+
+export interface RenderSprite {
+  asset: string;
+  animation: string;
+  facing: number;
+  x: number;
+  z: number;
+  tint: readonly [number, number, number];
+  alpha: number;
+  radius?: number;
+  shadowAlpha?: number;
+  fogged?: boolean;
+}
+
+const BODY_SHADER_KEY = 'bordevSpriteBody';
+const SHADOW_SHADER_KEY = 'bordevSpriteShadow';
+
+const RIGHT_BASIS = new Vector3(
+  ISO_RIGHT_BASIS.x,
+  ISO_RIGHT_BASIS.y,
+  ISO_RIGHT_BASIS.z,
+);
+const UP_BASIS = new Vector3(ISO_UP_BASIS.x, ISO_UP_BASIS.y, ISO_UP_BASIS.z);
+
+function ensureSpriteShaders(): void {
+  if (!Effect.ShadersStore[`${BODY_SHADER_KEY}VertexShader`]) {
+    Effect.ShadersStore[`${BODY_SHADER_KEY}VertexShader`] = `
+precision highp float;
+attribute vec3 position;
+attribute vec2 uv;
+attribute vec4 world0;
+attribute vec4 world1;
+attribute vec4 world2;
+attribute vec4 world3;
+attribute vec3 iPos;
+attribute vec4 iUV;
+attribute vec4 iSize;
+attribute vec4 iTint;
+attribute float iShadowAlpha;
+
+uniform mat4 viewProjection;
+uniform vec3 uRightBasis;
+uniform vec3 uUpBasis;
+uniform float uPPU;
+
+varying vec2 vUV;
+varying vec4 vTint;
+
+void main() {
+    mat4 finalWorld = mat4(world0, world1, world2, world3);
+    float dx = (uv.x * iSize.x - iSize.z) / uPPU;
+    float dy = (iSize.w - uv.y * iSize.y) / uPPU;
+    vec3 worldPos = iPos + dx * uRightBasis + dy * uUpBasis;
+    gl_Position = viewProjection * (finalWorld * vec4(worldPos, 1.0));
+    vUV = iUV.xy + uv * iUV.zw;
+    vTint = iTint;
+}
+`;
+  }
+
+  if (!Effect.ShadersStore[`${BODY_SHADER_KEY}FragmentShader`]) {
+    Effect.ShadersStore[`${BODY_SHADER_KEY}FragmentShader`] = `
+precision highp float;
+varying vec2 vUV;
+varying vec4 vTint;
+
+uniform sampler2D bodyTexture;
+uniform sampler2D maskTexture;
+
+void main() {
+    vec4 base = texture2D(bodyTexture, vUV);
+    if (base.a < 0.5) {
+        discard;
+    }
+    vec4 mask = texture2D(maskTexture, vUV);
+    vec3 team = vTint.rgb;
+    vec3 color = mix(base.rgb, clamp(base.rgb * team * 1.25, 0.0, 1.0), mask.r);
+    float alpha = abs(vTint.a);
+    if (alpha < 0.005) {
+        discard;
+    }
+    if (alpha < 0.999) {
+        vec2 c = floor(mod(gl_FragCoord.xy, 4.0));
+        float val = 0.0;
+        if (c.y < 2.0) {
+            if (c.y < 1.0) {
+                val = (c.x < 2.0) ? ((c.x < 1.0) ? 0.0 : 8.0) : ((c.x < 3.0) ? 2.0 : 10.0);
+            } else {
+                val = (c.x < 2.0) ? ((c.x < 1.0) ? 12.0 : 4.0) : ((c.x < 3.0) ? 14.0 : 6.0);
+            }
+        } else {
+            if (c.y < 3.0) {
+                val = (c.x < 2.0) ? ((c.x < 1.0) ? 3.0 : 11.0) : ((c.x < 3.0) ? 1.0 : 9.0);
+            } else {
+                val = (c.x < 2.0) ? ((c.x < 1.0) ? 15.0 : 7.0) : ((c.x < 3.0) ? 13.0 : 5.0);
+            }
+        }
+        if ((val + 0.5) / 16.0 >= alpha) {
+            discard;
+        }
+    }
+    if (vTint.a < 0.0) {
+        float gray = dot(color, vec3(0.299, 0.587, 0.114));
+        color = mix(color, vec3(gray), 0.5) * 0.5;
+    }
+    gl_FragColor = vec4(color, 1.0);
+}
+`;
+  }
+
+  if (!Effect.ShadersStore[`${SHADOW_SHADER_KEY}VertexShader`]) {
+    Effect.ShadersStore[`${SHADOW_SHADER_KEY}VertexShader`] = `
+precision highp float;
+attribute vec3 position;
+attribute vec2 uv;
+attribute vec4 world0;
+attribute vec4 world1;
+attribute vec4 world2;
+attribute vec4 world3;
+attribute vec3 iPos;
+attribute vec4 iUV;
+attribute vec4 iSize;
+attribute vec4 iTint;
+attribute float iShadowAlpha;
+
+uniform mat4 viewProjection;
+uniform vec3 uRightBasis;
+uniform vec3 uUpBasis;
+uniform float uPPU;
+
+varying vec2 vUV;
+varying vec4 vTint;
+varying float vShadowAlpha;
+
+void main() {
+    if (iShadowAlpha <= 0.0) {
+        gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+        vUV = vec2(0.0);
+        vTint = vec4(0.0);
+        vShadowAlpha = 0.0;
+        return;
+    }
+    mat4 finalWorld = mat4(world0, world1, world2, world3);
+    float dx = (uv.x * iSize.x - iSize.z) / uPPU;
+    float dy = (iSize.w - uv.y * iSize.y) / uPPU;
+    vec3 worldPos = iPos + dx * uRightBasis + dy * uUpBasis;
+    gl_Position = viewProjection * (finalWorld * vec4(worldPos, 1.0));
+    vUV = iUV.xy + uv * iUV.zw;
+    vTint = iTint;
+    vShadowAlpha = iShadowAlpha;
+}
+`;
+  }
+
+  if (!Effect.ShadersStore[`${SHADOW_SHADER_KEY}FragmentShader`]) {
+    Effect.ShadersStore[`${SHADOW_SHADER_KEY}FragmentShader`] = `
+precision highp float;
+varying vec2 vUV;
+varying vec4 vTint;
+varying float vShadowAlpha;
+
+uniform sampler2D shadowTexture;
+
+void main() {
+    if (vShadowAlpha <= 0.0) {
+        discard;
+    }
+    vec4 shadow = texture2D(shadowTexture, vUV);
+    float alpha = shadow.a * abs(vTint.a) * vShadowAlpha;
+    if (alpha < 0.005) {
+        discard;
+    }
+    if (vTint.a < 0.0) {
+        alpha *= 0.5;
+    }
+    gl_FragColor = vec4(0.0, 0.0, 0.0, alpha);
+}
+`;
+  }
+}
+
+function createUnitQuad(mesh: Mesh): void {
+  const vertexData = new VertexData();
+  vertexData.positions = [0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0];
+  vertexData.uvs = [0, 0, 1, 0, 1, 1, 0, 1];
+  vertexData.indices = [0, 1, 2, 0, 2, 3];
+  vertexData.applyToMesh(mesh);
+}
+
+export class SpriteBatch {
+  private readonly page: LoadedAtlasPage;
+  private readonly bodyMesh: Mesh;
+  private readonly shadowMesh?: Mesh;
+  private readonly bodyMaterial: ShaderMaterial;
+  private readonly shadowMaterial?: ShaderMaterial;
+  private readonly pool: ThinInstancePool;
+
+  constructor(scene: Scene, page: LoadedAtlasPage) {
+    this.page = page;
+    ensureSpriteShaders();
+
+    // Setup body material and mesh (rendering group 2: sprites with depth test & write)
+    this.bodyMaterial = new ShaderMaterial(
+      'SpriteBodyMaterial',
+      scene,
+      {
+        vertex: BODY_SHADER_KEY,
+        fragment: BODY_SHADER_KEY,
+      },
+      {
+        attributes: [
+          'position',
+          'uv',
+          'world0',
+          'world1',
+          'world2',
+          'world3',
+          'iPos',
+          'iUV',
+          'iSize',
+          'iTint',
+          'iShadowAlpha',
+        ],
+        uniforms: ['viewProjection', 'uRightBasis', 'uUpBasis', 'uPPU'],
+        samplers: ['bodyTexture', 'maskTexture'],
+      },
+    );
+
+    this.bodyMaterial.setTexture('bodyTexture', page.body);
+    this.bodyMaterial.setTexture('maskTexture', page.mask);
+    this.bodyMaterial.setVector3('uRightBasis', RIGHT_BASIS);
+    this.bodyMaterial.setVector3('uUpBasis', UP_BASIS);
+    this.bodyMaterial.setFloat('uPPU', PPU);
+    this.bodyMaterial.disableDepthWrite = false;
+    this.bodyMaterial.forceDepthWrite = true;
+    this.bodyMaterial.alphaMode = Engine.ALPHA_COMBINE;
+    this.bodyMaterial.needAlphaBlending = () => true;
+    this.bodyMaterial.backFaceCulling = false;
+
+    this.bodyMesh = new Mesh('SpriteBodyMesh', scene);
+    this.bodyMesh.renderingGroupId = 2;
+    this.bodyMesh.alwaysSelectAsActiveMesh = true;
+    this.bodyMesh.doNotSyncBoundingInfo = true;
+    this.bodyMesh.isVisible = false;
+    createUnitQuad(this.bodyMesh);
+    this.bodyMesh.material = this.bodyMaterial;
+
+    // Setup shadow material and mesh if shadow texture is available
+    // (rendering group 1: shadows with alpha blend, depth test, NO depth write)
+    if (page.shadow) {
+      this.shadowMaterial = new ShaderMaterial(
+        'SpriteShadowMaterial',
+        scene,
+        {
+          vertex: SHADOW_SHADER_KEY,
+          fragment: SHADOW_SHADER_KEY,
+        },
+        {
+          attributes: [
+            'position',
+            'uv',
+            'world0',
+            'world1',
+            'world2',
+            'world3',
+            'iPos',
+            'iUV',
+            'iSize',
+            'iTint',
+            'iShadowAlpha',
+          ],
+          uniforms: ['viewProjection', 'uRightBasis', 'uUpBasis', 'uPPU'],
+          samplers: ['shadowTexture'],
+        },
+      );
+
+      this.shadowMaterial.setTexture('shadowTexture', page.shadow);
+      this.shadowMaterial.setVector3('uRightBasis', RIGHT_BASIS);
+      this.shadowMaterial.setVector3('uUpBasis', UP_BASIS);
+      this.shadowMaterial.setFloat('uPPU', PPU);
+      this.shadowMaterial.disableDepthWrite = true;
+      this.shadowMaterial.forceDepthWrite = false;
+      this.shadowMaterial.alphaMode = Engine.ALPHA_COMBINE;
+      this.shadowMaterial.needAlphaBlending = () => true;
+      this.shadowMaterial.backFaceCulling = false;
+
+      this.shadowMesh = new Mesh('SpriteShadowMesh', scene);
+      this.shadowMesh.renderingGroupId = 1;
+      this.shadowMesh.alwaysSelectAsActiveMesh = true;
+      this.shadowMesh.doNotSyncBoundingInfo = true;
+      this.shadowMesh.isVisible = false;
+      createUnitQuad(this.shadowMesh);
+      this.shadowMesh.material = this.shadowMaterial;
+    }
+
+    const meshes = this.shadowMesh
+      ? [this.bodyMesh, this.shadowMesh]
+      : [this.bodyMesh];
+
+    const attributes: ThinInstanceAttributeSpec[] = [
+      { name: 'matrix', stride: 16, static: true, init: initIdentityMatrices },
+      { name: 'iPos', stride: 3 },
+      { name: 'iUV', stride: 4 },
+      { name: 'iSize', stride: 4 },
+      { name: 'iTint', stride: 4 },
+      { name: 'iShadowAlpha', stride: 1 },
+    ];
+
+    this.pool = new ThinInstancePool({
+      meshes,
+      attributes,
+      initialCapacity: 64,
+    });
+  }
+
+  beginFrame(): void {
+    this.pool.beginFrame();
+  }
+
+  add(
+    frame: AtlasFrame,
+    sprite: RenderSprite,
+    shadowAlpha: number = 1.0,
+  ): void {
+    const index = this.pool.alloc();
+
+    const pos = this.pool.getBuffer('iPos');
+    const uv = this.pool.getBuffer('iUV');
+    const size = this.pool.getBuffer('iSize');
+    const tint = this.pool.getBuffer('iTint');
+    const shadowAlphaBuf = this.pool.getBuffer('iShadowAlpha');
+    // iPos: world anchor coordinates
+    const offsetPos = index * 3;
+    pos[offsetPos + 0] = sprite.x;
+    pos[offsetPos + 1] = 0.0;
+    pos[offsetPos + 2] = sprite.z;
+
+    // iUV: normalized by actual loaded page dimensions
+    const offsetUV = index * 4;
+    uv[offsetUV + 0] = frame.x / this.page.width;
+    uv[offsetUV + 1] = frame.y / this.page.height;
+    uv[offsetUV + 2] = frame.w / this.page.width;
+    uv[offsetUV + 3] = frame.h / this.page.height;
+
+    // iSize: pixel dimensions and anchor offsets
+    const offsetSize = index * 4;
+    size[offsetSize + 0] = frame.w;
+    size[offsetSize + 1] = frame.h;
+    size[offsetSize + 2] = frame.ax;
+    size[offsetSize + 3] = frame.ay;
+
+    // iTint: team color RGB and alpha
+    const offsetTint = index * 4;
+    tint[offsetTint + 0] = sprite.tint[0];
+    tint[offsetTint + 1] = sprite.tint[1];
+    tint[offsetTint + 2] = sprite.tint[2];
+    tint[offsetTint + 3] = sprite.fogged
+      ? -Math.max(1e-4, sprite.alpha)
+      : sprite.alpha;
+
+    // iShadowAlpha: per-instance shadow suppression
+    shadowAlphaBuf[index] =
+      sprite.shadowAlpha !== undefined ? sprite.shadowAlpha : shadowAlpha;
+  }
+
+  endFrame(): void {
+    this.pool.endFrame();
+  }
+
+  dispose(): void {
+    this.bodyMesh.dispose();
+    this.bodyMaterial.dispose();
+    this.shadowMesh?.dispose();
+    this.shadowMaterial?.dispose();
+  }
+}
+
+export { UnitShadows } from './UnitShadows';

@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "id": "crown_cottage",
+  "pages": [
+    {
+      "image": "crown_cottage_0.png",
+      "mask": "crown_cottage_0_mask.png",
+      "shadow": "crown_cottage_0_shadow.png"
+    }
+  ],
+  "fps": 12,
+  "anims": {
+    "construct": {
+      "frames": 3,
+      "loop": false,
+      "dirs": 1
+    },
+    "damaged": {
+      "frames": 1,
+      "loop": false,
+      "dirs": 1
+    },
+    "idle": {
+      "frames": 1,
+      "loop": true,
+      "dirs": 1
+    },
+    "rubble": {
+      "frames": 1,
+      "loop": false,
+      "dirs": 1
+    }
+  },
+  "frames": {
+    "construct/0/0": {
+      "page": 0,
+      "x": 252,
+      "y": 2,
+      "w": 239,
+      "h": 163,
+      "ax": 96,
+      "ay": 114
+    },
+    "construct/0/1": {
+      "page": 0,
+      "x": 252,
+      "y": 167,
+      "w": 239,
+      "h": 166,
+      "ax": 96,
+      "ay": 114
+    },
+    "construct/0/2": {
+      "page": 0,
+      "x": 2,
+      "y": 2,
+      "w": 248,
+      "h": 186,
+      "ax": 98,
+      "ay": 133
+    },
+    "damaged/0/0": {
+      "page": 0,
+      "x": 2,
+      "y": 370,
+      "w": 238,
+      "h": 174,
+      "ax": 87,
+      "ay": 128
+    },
+    "idle/0/0": {
+      "page": 0,
+      "x": 2,
+      "y": 190,
+      "w": 240,
+      "h": 178,
+      "ax": 90,
+      "ay": 133
+    },
+    "rubble/0/0": {
+      "page": 0,
+      "x": 244,
+      "y": 335,
+      "w": 153,
+      "h": 77,
+      "ax": 66,
+      "ay": 39
+    }
+  }
+}

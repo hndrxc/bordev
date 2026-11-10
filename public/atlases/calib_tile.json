@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "id": "calib_tile",
+  "pages": [
+    {
+      "image": "calib_tile_0.png",
+      "mask": "calib_tile_0_mask.png"
+    }
+  ],
+  "fps": 12,
+  "anims": {
+    "idle": {
+      "frames": 1,
+      "loop": true,
+      "dirs": 1
+    }
+  },
+  "frames": {
+    "idle/0/0": {
+      "page": 0,
+      "x": 2,
+      "y": 2,
+      "w": 96,
+      "h": 48,
+      "ax": 48,
+      "ay": 24
+    }
+  }
+}

@@ -1,0 +1,383 @@
+import type { Faction } from '../data/types.js';
+import type { GameMap } from './map.js';
+import { World } from './world.js';
+import type { PathQueue } from './path/pathQueue.js';
+import { Rng } from './rng.js';
+import { AiPlayer } from './ai/aiPlayer.js';
+import type { AiDifficulty } from './ai/difficulty.js';
+import {
+  type Command,
+  type SimEvent,
+  cloneCommand,
+  isSupportedCommandKind,
+} from './commands.js';
+import type { UnitEntity } from './entity.js';
+import {
+  assignFormationSlots,
+  clearActiveWorkAndCartTransientState,
+  updateMovement,
+} from './systems/movement.js';
+import {
+  applyBuildCommand,
+  applyRepairCommand,
+  cancelConstruction,
+  updateConstruction,
+} from './systems/construction.js';
+import {
+  applyFarmCommand,
+  applyPinMineCommand,
+  updateEconomy,
+} from './systems/economy.js';
+import { updateFaith } from './systems/faith.js';
+import {
+  applyCancelTrainCommand,
+  applyTrainCommand,
+  setRally,
+  updateProduction,
+} from './systems/production.js';
+import {
+  cancelResearch,
+  issueResearch,
+  refundResearch,
+  stepResearch,
+} from './systems/research.js';
+import { applyAttackCommand, updateCombat } from './systems/combat.js';
+import { updateRemains } from './systems/damage.js';
+import { updateProjectiles } from './systems/projectiles.js';
+import { updateAuras } from './systems/auras.js';
+import { updateGates } from './systems/gates.js';
+import { updateFog } from './systems/fog.js';
+import { eliminatePlayer, updateVictory } from './systems/victory.js';
+export const SIM_DT = 0.05;
+
+export class Sim {
+  readonly world: World;
+  readonly pathQueue: PathQueue;
+  readonly rng: Rng;
+
+  private pendingCommands: Command[] = [];
+  private readonly aiPlayers: AiPlayer[] = [];
+  private readonly issueAiCommand = (cmd: Command): void => {
+    this.issue(cmd);
+  };
+
+  constructor(
+    map: GameMap,
+    seed = 1,
+    playerFactions?: Record<number, Faction>,
+    ai?: Readonly<Record<number, AiDifficulty>>,
+  ) {
+    this.rng = new Rng(seed);
+    this.world = new World(map, this.rng, playerFactions);
+    this.pathQueue = this.world.pathQueue;
+    if (ai) {
+      for (const [id, difficulty] of Object.entries(ai)) {
+        const player = Number(id);
+        const state = this.world.players[player];
+        if (!state) {
+          throw new Error(`AI player ${player} does not exist on this map`);
+        }
+        this.aiPlayers.push(new AiPlayer(player, difficulty, state.faction));
+      }
+    }
+  }
+
+  issue(cmd: Command): void {
+    if (!isSupportedCommandKind(cmd.kind)) {
+      throw new Error(`Command kind '${cmd.kind}' is not implemented yet`);
+    }
+    this.pendingCommands.push(cloneCommand(cmd));
+  }
+
+  updateFog(): void {
+    updateFog(this.world);
+  }
+
+  step(): void {
+    const commandsToProcess = this.pendingCommands;
+    this.pendingCommands = [];
+
+    for (let i = 0; i < commandsToProcess.length; i++) {
+      this.applyCommand(commandsToProcess[i]);
+    }
+
+    updateMovement(this.world);
+    updateFog(this.world);
+    updateCombat(this.world);
+    updateProjectiles(this.world);
+    updateAuras(this.world);
+    updateGates(this.world);
+    updateConstruction(this.world);
+    updateEconomy(this.world);
+    updateFaith(this.world);
+    stepResearch(this.world);
+    updateProduction(this.world);
+    updateRemains(this.world);
+    updateVictory(this.world);
+    for (const ai of this.aiPlayers) {
+      ai.update(this.world, this.issueAiCommand);
+    }
+    this.world.tick++;
+  }
+
+  drainEvents(target?: SimEvent[]): SimEvent[] {
+    const events = this.world.events;
+    if (target) {
+      target.length = 0;
+      const len = events.length;
+      for (let i = 0; i < len; i++) {
+        target.push(events[i]);
+      }
+      events.length = 0;
+      return target;
+    }
+    const drained = [...events];
+    events.length = 0;
+    return drained;
+  }
+
+  private applyCommand(cmd: Command): void {
+    switch (cmd.kind) {
+      case 'move':
+      case 'attackMove':
+        this.applyMoveCommand(cmd);
+        break;
+      case 'attack':
+        applyAttackCommand(this.world, cmd);
+        break;
+      case 'stop':
+        this.applyStopCommand(cmd);
+        break;
+      case 'hold':
+        this.applyHoldCommand(cmd);
+        break;
+      case 'delete':
+        this.applyDeleteCommand(cmd);
+        break;
+      case 'setRally':
+        setRally(this.world, cmd);
+        break;
+      case 'build':
+        applyBuildCommand(this.world, cmd);
+        break;
+      case 'repair':
+        applyRepairCommand(this.world, cmd);
+        break;
+      case 'farm':
+        applyFarmCommand(this.world, cmd);
+        break;
+      case 'pinMine':
+        applyPinMineCommand(this.world, cmd);
+        break;
+      case 'train':
+        applyTrainCommand(this.world, cmd);
+        break;
+      case 'cancelTrain':
+        applyCancelTrainCommand(this.world, cmd);
+        break;
+      case 'research':
+        issueResearch(this.world, cmd);
+        break;
+      case 'cancelResearch':
+        cancelResearch(this.world, cmd);
+        break;
+      case 'surrender':
+        eliminatePlayer(this.world, cmd.player);
+        break;
+      default:
+        throw new Error(`Unsupported command: ${(cmd as Command).kind}`);
+    }
+  }
+
+  private applyMoveCommand(
+    cmd: Extract<Command, { kind: 'move' | 'attackMove' }>,
+  ): void {
+    const units: UnitEntity[] = [];
+    for (let i = 0; i < cmd.ids.length; i++) {
+      const ent = this.world.entities[cmd.ids[i]];
+      if (ent && ent.kind === 'unit' && ent.player === cmd.player) {
+        units.push(ent);
+      }
+    }
+
+    if (units.length === 0) return;
+
+    if (units.length === 1) {
+      const unit = units[0];
+      const isBusy =
+        unit.order !== undefined &&
+        unit.order.kind !== 'idle' &&
+        unit.order.kind !== 'stop' &&
+        unit.order.kind !== 'hold';
+      if (cmd.queued && isBusy) {
+        unit.orders.push({
+          kind: cmd.kind,
+          x: cmd.x,
+          z: cmd.z,
+        });
+      } else {
+        clearActiveWorkAndCartTransientState(unit);
+        unit.combat = undefined;
+        unit.order = { kind: cmd.kind, x: cmd.x, z: cmd.z };
+        unit.orders.length = 0;
+        unit.orderGeneration++;
+        unit.formationSlotX = undefined;
+        unit.formationSlotZ = undefined;
+        unit.path = undefined;
+        unit.stuckTicks = 0;
+        unit.stuckProgressX = unit.x;
+        unit.stuckProgressZ = unit.z;
+        unit.stuckLastCheckTick = this.world.tick;
+        unit.pathTarget = undefined;
+        this.world.pathQueue.cancel(unit.id);
+        this.world.pathQueue.request(
+          unit.id,
+          unit.x,
+          unit.z,
+          cmd.x,
+          cmd.z,
+          unit.player,
+        );
+        unit.pathPending = true;
+      }
+      return;
+    }
+
+    // Group move: assign formation slots
+    const slots = assignFormationSlots(
+      units,
+      cmd.x,
+      cmd.z,
+      this.world.grid,
+      cmd.player,
+    );
+
+    for (let i = 0; i < units.length; i++) {
+      const unit = units[i];
+      const slot = slots[i];
+      const targetX = slot ? slot.x : cmd.x;
+      const targetZ = slot ? slot.z : cmd.z;
+
+      const isBusy =
+        unit.order !== undefined &&
+        unit.order.kind !== 'idle' &&
+        unit.order.kind !== 'stop' &&
+        unit.order.kind !== 'hold';
+      if (cmd.queued && isBusy) {
+        unit.orders.push({
+          kind: cmd.kind,
+          x: targetX,
+          z: targetZ,
+        });
+      } else {
+        clearActiveWorkAndCartTransientState(unit);
+        unit.combat = undefined;
+        unit.order = { kind: cmd.kind, x: targetX, z: targetZ };
+        unit.orders.length = 0;
+        unit.orderGeneration++;
+        unit.formationSlotX = targetX;
+        unit.formationSlotZ = targetZ;
+        unit.stuckTicks = 0;
+        unit.stuckProgressX = unit.x;
+        unit.stuckProgressZ = unit.z;
+        unit.stuckLastCheckTick = this.world.tick;
+        unit.path = undefined;
+        unit.pathTarget = undefined;
+        this.world.pathQueue.cancel(unit.id);
+        this.world.pathQueue.request(
+          unit.id,
+          unit.x,
+          unit.z,
+          targetX,
+          targetZ,
+          unit.player,
+        );
+        unit.pathPending = true;
+      }
+    }
+  }
+
+  private applyStopCommand(cmd: Extract<Command, { kind: 'stop' }>): void {
+    for (let i = 0; i < cmd.ids.length; i++) {
+      const ent = this.world.entities[cmd.ids[i]];
+      if (ent && ent.kind === 'unit' && ent.player === cmd.player) {
+        const isBusy =
+          ent.order !== undefined &&
+          ent.order.kind !== 'idle' &&
+          ent.order.kind !== 'stop' &&
+          ent.order.kind !== 'hold';
+        if (cmd.queued && isBusy) {
+          ent.orders.push({ kind: 'stop' });
+        } else {
+          clearActiveWorkAndCartTransientState(ent);
+          ent.combat = undefined;
+          ent.order = { kind: 'stop' };
+          ent.orders.length = 0;
+          ent.orderGeneration++;
+          ent.formationSlotX = undefined;
+          ent.formationSlotZ = undefined;
+          ent.path = undefined;
+          ent.pathTarget = undefined;
+          ent.pathPending = false;
+          this.world.pathQueue.cancel(ent.id);
+        }
+      }
+    }
+  }
+
+  private applyHoldCommand(cmd: Extract<Command, { kind: 'hold' }>): void {
+    for (let i = 0; i < cmd.ids.length; i++) {
+      const ent = this.world.entities[cmd.ids[i]];
+      if (ent && ent.kind === 'unit' && ent.player === cmd.player) {
+        const isBusy =
+          ent.order !== undefined &&
+          ent.order.kind !== 'idle' &&
+          ent.order.kind !== 'stop' &&
+          ent.order.kind !== 'hold';
+        if (cmd.queued && isBusy) {
+          ent.orders.push({ kind: 'hold' });
+        } else {
+          clearActiveWorkAndCartTransientState(ent);
+          ent.combat = undefined;
+          ent.order = { kind: 'hold' };
+          ent.orders.length = 0;
+          ent.orderGeneration++;
+          ent.formationSlotX = undefined;
+          ent.formationSlotZ = undefined;
+          ent.path = undefined;
+          ent.pathTarget = undefined;
+          ent.pathPending = false;
+          this.world.pathQueue.cancel(ent.id);
+        }
+      }
+    }
+  }
+
+  private applyDeleteCommand(cmd: Extract<Command, { kind: 'delete' }>): void {
+    for (let i = 0; i < cmd.ids.length; i++) {
+      const ent = this.world.entities[cmd.ids[i]];
+      if (ent && 'player' in ent && ent.player === cmd.player) {
+        if (ent.kind === 'building') {
+          if (!ent.built) {
+            cancelConstruction(this.world, ent);
+            continue;
+          } else {
+            if (ent.trainingQueue && ent.trainingQueue.length > 0) {
+              const pState = this.world.players[ent.player];
+              if (pState) {
+                for (let q = 0; q < ent.trainingQueue.length; q++) {
+                  const item = ent.trainingQueue[q];
+                  pState.food += item.food;
+                  pState.gold += item.gold;
+                }
+              }
+              ent.trainingQueue.length = 0;
+            }
+            refundResearch(this.world, ent);
+          }
+        }
+        this.world.removeEntity(ent.id);
+      }
+    }
+  }
+}

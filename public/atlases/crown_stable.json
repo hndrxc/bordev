@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "id": "crown_stable",
+  "pages": [
+    {
+      "image": "crown_stable_0.png",
+      "mask": "crown_stable_0_mask.png",
+      "shadow": "crown_stable_0_shadow.png"
+    }
+  ],
+  "fps": 12,
+  "anims": {
+    "construct": {
+      "frames": 3,
+      "loop": false,
+      "dirs": 1
+    },
+    "damaged": {
+      "frames": 1,
+      "loop": false,
+      "dirs": 1
+    },
+    "idle": {
+      "frames": 1,
+      "loop": true,
+      "dirs": 1
+    },
+    "rubble": {
+      "frames": 1,
+      "loop": false,
+      "dirs": 1
+    }
+  },
+  "frames": {
+    "construct/0/0": {
+      "page": 0,
+      "x": 366,
+      "y": 2,
+      "w": 360,
+      "h": 244,
+      "ax": 144,
+      "ay": 172
+    },
+    "construct/0/1": {
+      "page": 0,
+      "x": 2,
+      "y": 251,
+      "w": 361,
+      "h": 246,
+      "ax": 145,
+      "ay": 172
+    },
+    "construct/0/2": {
+      "page": 0,
+      "x": 2,
+      "y": 2,
+      "w": 362,
+      "h": 247,
+      "ax": 145,
+      "ay": 172
+    },
+    "damaged/0/0": {
+      "page": 0,
+      "x": 366,
+      "y": 248,
+      "w": 356,
+      "h": 231,
+      "ax": 154,
+      "ay": 161
+    },
+    "idle/0/0": {
+      "page": 0,
+      "x": 2,
+      "y": 499,
+      "w": 338,
+      "h": 231,
+      "ax": 137,
+      "ay": 161
+    },
+    "rubble/0/0": {
+      "page": 0,
+      "x": 342,
+      "y": 499,
+      "w": 242,
+      "h": 133,
+      "ax": 113,
+      "ay": 68
+    }
+  }
+}

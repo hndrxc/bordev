@@ -15,5 +15,5 @@
     "lib": ["ES2023"],
     "types": []
   },
-  "include": ["src/sim/**/*.ts", "src/data/**/*.ts"]
+  "include": ["src/sim/**/*", "src/data/**/*"]
 }

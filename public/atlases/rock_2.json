@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "id": "rock_2",
+  "pages": [
+    {
+      "image": "rock_2_0.png",
+      "mask": "rock_2_0_mask.png",
+      "shadow": "rock_2_0_shadow.png"
+    }
+  ],
+  "fps": 12,
+  "anims": {
+    "idle": {
+      "frames": 1,
+      "loop": true,
+      "dirs": 1
+    }
+  },
+  "frames": {
+    "idle/0/0": {
+      "page": 0,
+      "x": 2,
+      "y": 2,
+      "w": 113,
+      "h": 104,
+      "ax": 46,
+      "ay": 81
+    }
+  }
+}

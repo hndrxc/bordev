@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "id": "crown_siege_workshop",
+  "pages": [
+    {
+      "image": "crown_siege_workshop_0.png",
+      "mask": "crown_siege_workshop_0_mask.png",
+      "shadow": "crown_siege_workshop_0_shadow.png"
+    }
+  ],
+  "fps": 12,
+  "anims": {
+    "construct": {
+      "frames": 3,
+      "loop": false,
+      "dirs": 1
+    },
+    "damaged": {
+      "frames": 1,
+      "loop": false,
+      "dirs": 1
+    },
+    "idle": {
+      "frames": 1,
+      "loop": true,
+      "dirs": 1
+    },
+    "rubble": {
+      "frames": 1,
+      "loop": false,
+      "dirs": 1
+    }
+  },
+  "frames": {
+    "construct/0/0": {
+      "page": 0,
+      "x": 2,
+      "y": 271,
+      "w": 360,
+      "h": 244,
+      "ax": 144,
+      "ay": 172
+    },
+    "construct/0/1": {
+      "page": 0,
+      "x": 364,
+      "y": 271,
+      "w": 360,
+      "h": 244,
+      "ax": 144,
+      "ay": 172
+    },
+    "construct/0/2": {
+      "page": 0,
+      "x": 2,
+      "y": 2,
+      "w": 372,
+      "h": 267,
+      "ax": 144,
+      "ay": 195
+    },
+    "damaged/0/0": {
+      "page": 0,
+      "x": 2,
+      "y": 517,
+      "w": 317,
+      "h": 279,
+      "ax": 136,
+      "ay": 194
+    },
+    "idle/0/0": {
+      "page": 0,
+      "x": 726,
+      "y": 2,
+      "w": 315,
+      "h": 280,
+      "ax": 136,
+      "ay": 195
+    },
+    "rubble/0/0": {
+      "page": 0,
+      "x": 726,
+      "y": 284,
+      "w": 246,
+      "h": 143,
+      "ax": 131,
+      "ay": 82
+    }
+  }
+}

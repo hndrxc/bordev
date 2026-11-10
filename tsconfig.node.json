@@ -12,8 +12,12 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
-    "lib": ["ES2023", "DOM"],
-    "types": ["node"]
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "types": ["node", "vite/client"]
   },
-  "include": ["*.config.ts", "tools/**/*.ts", "tests/**/*.ts"]
+  // Node-run code: configs, tools, Playwright specs, and Vitest specs outside sim/data
+  // (sim/data specs stay in tsconfig.sim.json so they remain DOM-free).
+  "include": ["*.config.ts", "tools/**/*.ts", "tests/**/*.ts", "src/**/*.test.ts"],
+  "exclude": ["src/sim", "src/data"]
 }
