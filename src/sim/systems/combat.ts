@@ -893,7 +893,7 @@ function updateUnitCombat(world: World, unit: UnitEntity): void {
           areHostile(world, unit, target) &&
           isInAttackRange(unit, target)
         ) {
-          const dmg = calculateDamage(unit, target);
+          const dmg = calculateDamage(world, unit, target);
           if (!isRangedAttacker(unit)) {
             applyDamage(world, target, dmg, unit);
           } else {
@@ -968,7 +968,7 @@ function updateBuildingCombat(world: World, b: BuildingEntity): void {
     target = findNearestEnemyForBuilding(world, b, range);
   }
   if (target) {
-    const dmg = calculateDamage(b, target);
+    const dmg = calculateDamage(world, b, target);
     spawnProjectile(world, b, target, dmg);
     if (b.combat) {
       b.combat.targetRef = target;

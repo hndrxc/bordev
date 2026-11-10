@@ -1,4 +1,5 @@
 import type { Faction } from '../data/types.js';
+import { FACTIONS } from '../data/factions.js';
 import { getUnitData } from '../data/units.js';
 import { getBuildingData } from '../data/buildings.js';
 import type { GameMap } from './map.js';
@@ -42,6 +43,10 @@ export interface PlayerState {
   ghosts: Map<string, FogGhost>;
   upgrades: Set<string>;
   farmFoodRateMultiplier: number;
+  /** Extra attack granted by the Battle Fervor upgrade; 0 when not researched. */
+  battleFervorUpgradeAttack: number;
+  /** Extra faith produced per building type, keyed by building type id. */
+  buildingFaithBonus: Map<string, number>;
 }
 
 export class World {
@@ -61,7 +66,7 @@ export class World {
   constructor(
     map: GameMap,
     rng: Rng,
-    playerFactions?: Record<number, Faction>,
+    playerFactions?: Readonly<Record<number, Faction>>,
   ) {
     this.map = map;
     this.grid = new Grid(map);
@@ -183,6 +188,7 @@ export class World {
       pierceArmor: uData?.pierceArmor,
       bonus: uData?.bonus,
       loadedSpeed: uData?.loadedSpeed,
+      regenHpPerSec: uData.regenHpPerSec,
     };
 
     if (id < this.entities.length) {
@@ -463,7 +469,9 @@ export class World {
     return ent;
   }
 
-  private initPlayers(playerFactions?: Record<number, Faction>): void {
+  private initPlayers(
+    playerFactions?: Readonly<Record<number, Faction>>,
+  ): void {
     const count = this.map.players;
     const totalTiles = this.map.size * this.map.size;
     for (let i = 0; i < count; i++) {
@@ -495,6 +503,8 @@ export class World {
         ghosts: new Map<string, FogGhost>(),
         upgrades: new Set<string>(),
         farmFoodRateMultiplier: 1,
+        battleFervorUpgradeAttack: 0,
+        buildingFaithBonus: new Map<string, number>(),
       });
     }
   }
@@ -517,11 +527,19 @@ export class World {
       if (!start) continue;
       const [sx, sz] = start;
       const player = this.players[p];
-      const tcType = player.faction === 'crown' ? 'keep' : 'great_hall';
-      this.spawnBuilding(p, tcType, sx, sz, true, undefined, player.faction);
+      const ids = FACTIONS[player.faction];
+      this.spawnBuilding(
+        p,
+        ids.townCenterId,
+        sx,
+        sz,
+        true,
+        undefined,
+        player.faction,
+      );
 
-      const peasantType = player.faction === 'crown' ? 'peasant' : 'thrall';
-      const cartType = player.faction === 'crown' ? 'ox_cart' : 'haul_wagon';
+      const peasantType = ids.workerId;
+      const cartType = ids.cartId;
 
       // 4 peasants and 1 cart placed near TC on passable tiles
       const peasantOffsets: [number, number][] = [

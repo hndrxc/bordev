@@ -116,6 +116,10 @@ export interface UnitEntity {
   formationSlotZ?: number;
   workAnimation?: 'work' | 'load';
   workStartedTick?: number;
+  /** Passive healing per second; undefined when the unit does not regenerate. */
+  regenHpPerSec?: number;
+  /** Fractional regeneration accumulated toward the next whole HP. */
+  regenProgress?: number;
   cart?: CartState;
   combat?: CombatState;
   /** Persistent across target changes and clearCombat; earliest tick the next swing may start. */

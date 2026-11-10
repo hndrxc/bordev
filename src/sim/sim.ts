@@ -45,6 +45,7 @@ import { applyAttackCommand, updateCombat } from './systems/combat.js';
 import { updateRemains } from './systems/damage.js';
 import { updateProjectiles } from './systems/projectiles.js';
 import { updateAuras } from './systems/auras.js';
+import { updateRegeneration } from './systems/regeneration.js';
 import { updateGates } from './systems/gates.js';
 import { updateFog } from './systems/fog.js';
 import { eliminatePlayer, updateVictory } from './systems/victory.js';
@@ -64,7 +65,7 @@ export class Sim {
   constructor(
     map: GameMap,
     seed = 1,
-    playerFactions?: Record<number, Faction>,
+    playerFactions?: Readonly<Record<number, Faction>>,
     ai?: Readonly<Record<number, AiDifficulty>>,
   ) {
     this.rng = new Rng(seed);
@@ -106,6 +107,7 @@ export class Sim {
     updateCombat(this.world);
     updateProjectiles(this.world);
     updateAuras(this.world);
+    updateRegeneration(this.world);
     updateGates(this.world);
     updateConstruction(this.world);
     updateEconomy(this.world);
