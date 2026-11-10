@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "id": "clans_war_shrine",
+  "pages": [
+    {
+      "image": "clans_war_shrine_0.png",
+      "mask": "clans_war_shrine_0_mask.png",
+      "shadow": "clans_war_shrine_0_shadow.png"
+    }
+  ],
+  "fps": 12,
+  "anims": {
+    "construct": {
+      "frames": 3,
+      "loop": false,
+      "dirs": 1
+    },
+    "damaged": {
+      "frames": 1,
+      "loop": false,
+      "dirs": 1
+    },
+    "idle": {
+      "frames": 1,
+      "loop": true,
+      "dirs": 1
+    },
+    "rubble": {
+      "frames": 1,
+      "loop": false,
+      "dirs": 1
+    }
+  },
+  "frames": {
+    "construct/0/0": {
+      "page": 0,
+      "x": 2,
+      "y": 2,
+      "w": 253,
+      "h": 176,
+      "ax": 96,
+      "ay": 114
+    },
+    "construct/0/1": {
+      "page": 0,
+      "x": 2,
+      "y": 180,
+      "w": 253,
+      "h": 190,
+      "ax": 96,
+      "ay": 128
+    },
+    "construct/0/2": {
+      "page": 0,
+      "x": 257,
+      "y": 2,
+      "w": 253,
+      "h": 224,
+      "ax": 96,
+      "ay": 162
+    },
+    "damaged/0/0": {
+      "page": 0,
+      "x": 2,
+      "y": 372,
+      "w": 238,
+      "h": 219,
+      "ax": 93,
+      "ay": 157
+    },
+    "idle/0/0": {
+      "page": 0,
+      "x": 257,
+      "y": 228,
+      "w": 234,
+      "h": 224,
+      "ax": 93,
+      "ay": 162
+    },
+    "rubble/0/0": {
+      "page": 0,
+      "x": 242,
+      "y": 454,
+      "w": 183,
+      "h": 93,
+      "ax": 59,
+      "ay": 43
+    }
+  }
+}

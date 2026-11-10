@@ -1,4 +1,5 @@
 import { expect, type Page } from '@playwright/test';
+import type { Faction } from '../../../src/data/types';
 import type { GameSession, SessionStats } from '../../../src/game/GameSession';
 
 export interface SetupResult {
@@ -72,11 +73,29 @@ function collectBrowserErrors(page: Page): SetupResult {
   return { consoleErrors, pageErrors };
 }
 
-/** Starts a Normal AI skirmish through the main menu. */
-export async function startSkirmish(page: Page): Promise<SetupResult> {
+/**
+ * Starts a Normal AI skirmish through the main menu. Factions are only
+ * selected when provided; otherwise the setup screen defaults (Crown) apply.
+ */
+export async function startSkirmish(
+  page: Page,
+  options?: { humanFaction?: Faction; opponentFaction?: Faction },
+): Promise<SetupResult> {
   const errors = collectBrowserErrors(page);
   await page.goto('/?debug=1');
   await page.getByRole('button', { name: 'Skirmish', exact: true }).click();
+  if (options?.humanFaction) {
+    await page
+      .getByTestId('slot-0')
+      .getByLabel('Faction')
+      .selectOption(options.humanFaction);
+  }
+  if (options?.opponentFaction) {
+    await page
+      .getByTestId('slot-1')
+      .getByLabel('Faction')
+      .selectOption(options.opponentFaction);
+  }
   await page.getByRole('button', { name: 'Start', exact: true }).click();
   await waitForSessionLoaded(page);
   return errors;

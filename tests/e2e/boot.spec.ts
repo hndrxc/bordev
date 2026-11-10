@@ -37,15 +37,6 @@ test('boots a skirmish from the main menu without browser errors', async ({
   await expect(
     opponent.getByRole('heading', { name: 'Normal AI', exact: true }),
   ).toBeVisible();
-  for (const slot of [human, opponent]) {
-    const faction = slot.getByRole('combobox', {
-      name: 'Faction',
-      exact: true,
-    });
-    await expect(faction).toBeDisabled();
-    await expect(faction).toHaveValue('crown');
-    await expect(faction.locator('option')).toHaveText(['Crown']);
-  }
   const difficulty = opponent.getByRole('combobox', {
     name: 'Difficulty',
     exact: true,

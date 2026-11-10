@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "id": "clans_watchtower",
+  "pages": [
+    {
+      "image": "clans_watchtower_0.png",
+      "mask": "clans_watchtower_0_mask.png",
+      "shadow": "clans_watchtower_0_shadow.png"
+    }
+  ],
+  "fps": 12,
+  "anims": {
+    "construct": {
+      "frames": 3,
+      "loop": false,
+      "dirs": 1
+    },
+    "damaged": {
+      "frames": 1,
+      "loop": false,
+      "dirs": 1
+    },
+    "idle": {
+      "frames": 1,
+      "loop": true,
+      "dirs": 1
+    },
+    "rubble": {
+      "frames": 1,
+      "loop": false,
+      "dirs": 1
+    }
+  },
+  "frames": {
+    "construct/0/0": {
+      "page": 0,
+      "x": 201,
+      "y": 207,
+      "w": 178,
+      "h": 162,
+      "ax": 48,
+      "ay": 137
+    },
+    "construct/0/1": {
+      "page": 0,
+      "x": 397,
+      "y": 2,
+      "w": 178,
+      "h": 164,
+      "ax": 48,
+      "ay": 137
+    },
+    "construct/0/2": {
+      "page": 0,
+      "x": 2,
+      "y": 2,
+      "w": 197,
+      "h": 206,
+      "ax": 48,
+      "ay": 176
+    },
+    "damaged/0/0": {
+      "page": 0,
+      "x": 2,
+      "y": 210,
+      "w": 197,
+      "h": 196,
+      "ax": 45,
+      "ay": 169
+    },
+    "idle/0/0": {
+      "page": 0,
+      "x": 201,
+      "y": 2,
+      "w": 194,
+      "h": 203,
+      "ax": 45,
+      "ay": 176
+    },
+    "rubble/0/0": {
+      "page": 0,
+      "x": 397,
+      "y": 168,
+      "w": 84,
+      "h": 53,
+      "ax": 34,
+      "ay": 31
+    }
+  }
+}

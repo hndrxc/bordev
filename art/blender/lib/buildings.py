@@ -5,7 +5,8 @@ from lib import anim
 from lib.model import root, box, ico, cylinder, cone, beam, roof, flag, mesh, wheel
 
 
-def states(name, size=None, width=None, depth=None, scaffold_height=None, extra_roots=None):
+def states(name, size=None, width=None, depth=None, scaffold_height=None, extra_roots=None,
+           rubble_mats=("STONE_DARK", "STONE")):
     if size is not None:
         if width is None:
             width = size
@@ -70,7 +71,7 @@ def states(name, size=None, width=None, depth=None, scaffold_height=None, extra_
             x, y = rng.uniform(-half * 0.85, half * 0.85), rng.uniform(-half * 0.85, half * 0.85)
             chunk = ico("Rubble masonry", (x, y, 0.10 + rng.random() * 0.1),
                         (size * 0.10, size * 0.075, 0.12 + rng.random() * 0.12),
-                        "STONE_DARK" if index % 3 == 0 else "STONE", rubble)
+                        rubble_mats[0] if index % 3 == 0 else rubble_mats[1], rubble)
             chunk.rotation_euler.z = rng.random() * math.tau
         for index in range(4):
             plank = box("Broken roof timber", (rng.uniform(-half, half), rng.uniform(-half, half), 0.21),
@@ -82,7 +83,7 @@ def states(name, size=None, width=None, depth=None, scaffold_height=None, extra_
             y = rng.uniform(-half_y * 0.85, half_y * 0.85)
             chunk = ico("Rubble masonry", (x, y, 0.10 + rng.random() * 0.1),
                         (size * 0.10, size * 0.075, 0.12 + rng.random() * 0.12),
-                        "STONE_DARK" if index % 3 == 0 else "STONE", rubble)
+                        rubble_mats[0] if index % 3 == 0 else rubble_mats[1], rubble)
             chunk.rotation_euler.z = rng.random() * math.tau
         for index in range(5):
             plank = box("Broken gate timber", (rng.uniform(-half_x * 0.85, half_x * 0.85), rng.uniform(-half_y * 0.85, half_y * 0.85), 0.18),

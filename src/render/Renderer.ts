@@ -28,6 +28,8 @@ import {
   CORPSE_FADE_SEC,
   RUBBLE_DURATION_SEC,
 } from '../data/combat';
+import { ALL_BUILDINGS } from '../data/buildings';
+import { ALL_UNITS } from '../data/units';
 import { SIM_DT } from '../sim/sim';
 
 const FALLBACK_ATTACK_DURATION_TICKS = Math.ceil(
@@ -80,26 +82,16 @@ export interface PlacementPreviewItem {
   readonly valid: boolean;
 }
 
-export const REQUIRED_ATLASES = [
-  'crown_keep',
-  'crown_peasant',
-  'crown_spearman',
-  'crown_man_at_arms',
-  'crown_halberdier',
-  'crown_longbowman',
-  'crown_crossbowman',
-  'crown_sergeant',
-  'crown_knight',
-  'crown_trebuchet',
-  'crown_ox_cart',
-  'crown_cottage',
-  'crown_farm',
-  'crown_storehouse',
-  'crown_chapel',
-  'crown_barracks',
-  'crown_archery_range',
-  'crown_stable',
-  'crown_siege_workshop',
+/** Atlas asset id for a faction unit or building: `<faction>_<id>`. */
+function factionAssetId(data: {
+  readonly faction: string;
+  readonly id: string;
+}): string {
+  return `${data.faction}_${data.id}`;
+}
+
+/** Shared mine, doodad and calibration atlases that belong to no faction. */
+const NEUTRAL_ATLAS_IDS = [
   'gold_mine',
   'tree_1',
   'tree_2',
@@ -109,64 +101,45 @@ export const REQUIRED_ATLASES = [
   'rock_2',
   'calib_tile',
   'calib_arrow',
-  'crown_stone_wall',
-  'crown_stone_gate',
-  'crown_stone_tower',
 ] as const;
+
+const FACTION_ASSET_IDS: readonly string[] = [
+  ...ALL_UNITS,
+  ...ALL_BUILDINGS,
+].map(factionAssetId);
+
+export const REQUIRED_ATLASES: readonly string[] = [
+  ...FACTION_ASSET_IDS,
+  ...NEUTRAL_ATLAS_IDS,
+];
+
+/** Atlas ids of static building art, including the neutral gold mine. */
+const BUILDING_ASSET_IDS: ReadonlySet<string> = new Set([
+  ...ALL_BUILDINGS.map(factionAssetId),
+  'gold_mine',
+]);
+
+/** Atlas ids of gates, which render the horizontal (0) and vertical (6) facings. */
+const GATE_ASSET_IDS: ReadonlySet<string> = new Set(
+  ALL_BUILDINGS.filter((b) => b.isGate).map(factionAssetId),
+);
 
 const TINT_NEUTRAL: readonly [number, number, number] = [1.0, 1.0, 1.0];
 
-const TYPE_TO_ASSET: Record<string, string> = {
-  spearman: 'crown_spearman',
-  ox_cart: 'crown_ox_cart',
-  peasant: 'crown_peasant',
-  keep: 'crown_keep',
-  cottage: 'crown_cottage',
-  farm: 'crown_farm',
-  storehouse: 'crown_storehouse',
-  chapel: 'crown_chapel',
-  barracks: 'crown_barracks',
-  archery_range: 'crown_archery_range',
-  stable: 'crown_stable',
-  siege_workshop: 'crown_siege_workshop',
-  man_at_arms: 'crown_man_at_arms',
-  halberdier: 'crown_halberdier',
-  longbowman: 'crown_longbowman',
-  crossbowman: 'crown_crossbowman',
-  sergeant: 'crown_sergeant',
-  knight: 'crown_knight',
-  trebuchet: 'crown_trebuchet',
-  crown_spearman: 'crown_spearman',
-  crown_ox_cart: 'crown_ox_cart',
-  crown_peasant: 'crown_peasant',
-  crown_keep: 'crown_keep',
-  crown_cottage: 'crown_cottage',
-  crown_farm: 'crown_farm',
-  crown_storehouse: 'crown_storehouse',
-  crown_chapel: 'crown_chapel',
-  crown_barracks: 'crown_barracks',
-  crown_archery_range: 'crown_archery_range',
-  crown_stable: 'crown_stable',
-  crown_siege_workshop: 'crown_siege_workshop',
-  crown_man_at_arms: 'crown_man_at_arms',
-  crown_halberdier: 'crown_halberdier',
-  crown_longbowman: 'crown_longbowman',
-  crown_crossbowman: 'crown_crossbowman',
-  crown_sergeant: 'crown_sergeant',
-  crown_knight: 'crown_knight',
-  crown_trebuchet: 'crown_trebuchet',
-  gold_mine: 'gold_mine',
-  stone_wall: 'crown_stone_wall',
-  stone_gate: 'crown_stone_gate',
-  stone_tower: 'crown_stone_tower',
-  crown_stone_wall: 'crown_stone_wall',
-  crown_stone_gate: 'crown_stone_gate',
-  crown_stone_tower: 'crown_stone_tower',
-};
+/** Entity type (data id or full asset id) to atlas asset id. */
+const TYPE_TO_ASSET: ReadonlyMap<string, string> = new Map<string, string>([
+  ...FACTION_ASSET_IDS.map((id): [string, string] => [id, id]),
+  ...[...ALL_UNITS, ...ALL_BUILDINGS].map((d): [string, string] => [
+    d.id,
+    factionAssetId(d),
+  ]),
+  ...NEUTRAL_ATLAS_IDS.map((id): [string, string] => [id, id]),
+]);
 
 function getAssetForEntity(entity: { kind?: string; type?: string }): string {
-  if (entity.type && TYPE_TO_ASSET[entity.type]) {
-    return TYPE_TO_ASSET[entity.type];
+  const mapped = entity.type ? TYPE_TO_ASSET.get(entity.type) : undefined;
+  if (mapped) {
+    return mapped;
   }
   if (entity.kind === 'unit') {
     return 'crown_peasant';
@@ -532,22 +505,9 @@ export class Renderer {
     this.assetSpriteTopPx.clear();
     for (const [assetId, loaded] of this.loadedAtlases.entries()) {
       let maxAy = 0;
-      const isBuilding =
-        assetId === 'crown_keep' ||
-        assetId === 'crown_cottage' ||
-        assetId === 'crown_farm' ||
-        assetId === 'crown_storehouse' ||
-        assetId === 'crown_chapel' ||
-        assetId === 'crown_barracks' ||
-        assetId === 'crown_archery_range' ||
-        assetId === 'crown_stable' ||
-        assetId === 'crown_siege_workshop' ||
-        assetId === 'crown_stone_wall' ||
-        assetId === 'crown_stone_gate' ||
-        assetId === 'crown_stone_tower' ||
-        assetId === 'gold_mine';
+      const isBuilding = BUILDING_ASSET_IDS.has(assetId);
       if (isBuilding) {
-        const usedDirs = assetId === 'crown_stone_gate' ? [0, 6] : [0];
+        const usedDirs = GATE_ASSET_IDS.has(assetId) ? [0, 6] : [0];
         for (const dir of usedDirs) {
           const frame = loaded.atlas.frames[`idle/${dir}/0`];
           if (frame && frame.ay > maxAy) {

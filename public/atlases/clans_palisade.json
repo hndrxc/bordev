@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "id": "clans_palisade",
+  "pages": [
+    {
+      "image": "clans_palisade_0.png",
+      "mask": "clans_palisade_0_mask.png",
+      "shadow": "clans_palisade_0_shadow.png"
+    }
+  ],
+  "fps": 12,
+  "anims": {
+    "construct": {
+      "frames": 3,
+      "loop": false,
+      "dirs": 1
+    },
+    "damaged": {
+      "frames": 1,
+      "loop": false,
+      "dirs": 1
+    },
+    "idle": {
+      "frames": 1,
+      "loop": true,
+      "dirs": 1
+    },
+    "rubble": {
+      "frames": 1,
+      "loop": false,
+      "dirs": 1
+    }
+  },
+  "frames": {
+    "construct/0/0": {
+      "page": 0,
+      "x": 2,
+      "y": 228,
+      "w": 119,
+      "h": 82,
+      "ax": 49,
+      "ay": 56
+    },
+    "construct/0/1": {
+      "page": 0,
+      "x": 2,
+      "y": 2,
+      "w": 157,
+      "h": 111,
+      "ax": 50,
+      "ay": 84
+    },
+    "construct/0/2": {
+      "page": 0,
+      "x": 2,
+      "y": 115,
+      "w": 157,
+      "h": 111,
+      "ax": 50,
+      "ay": 84
+    },
+    "damaged/0/0": {
+      "page": 0,
+      "x": 161,
+      "y": 2,
+      "w": 154,
+      "h": 110,
+      "ax": 47,
+      "ay": 84
+    },
+    "idle/0/0": {
+      "page": 0,
+      "x": 161,
+      "y": 114,
+      "w": 154,
+      "h": 110,
+      "ax": 47,
+      "ay": 84
+    },
+    "rubble/0/0": {
+      "page": 0,
+      "x": 123,
+      "y": 228,
+      "w": 90,
+      "h": 61,
+      "ax": 38,
+      "ay": 36
+    }
+  }
+}

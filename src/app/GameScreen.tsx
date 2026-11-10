@@ -20,7 +20,8 @@ export function GameScreen({ config, onMatchEnd, onQuit }: GameScreenProps) {
   const [session, setSession] = useState<GameSession | null>(null);
   const menuOpen = useHudStore((state) => state.menuOpen);
   const onMatchEndRef = useRef(onMatchEnd);
-  const { mapUrl, seed, humanColour, opponent } = config;
+  const { mapUrl, seed, humanColour, humanFaction, opponent, opponentFaction } =
+    config;
   const { debugScene } = readUrlFlags();
 
   useEffect(() => {
@@ -39,6 +40,7 @@ export function GameScreen({ config, onMatchEnd, onQuit }: GameScreenProps) {
       seed,
       ai: opponent === 'normal' ? { 1: 'normal' } : undefined,
       playerColours: [humanColour, opponentColour.id],
+      playerFactions: [humanFaction, opponentFaction],
       debugScene,
       onMatchEnd: (result) => onMatchEndRef.current(result),
     };
@@ -49,7 +51,15 @@ export function GameScreen({ config, onMatchEnd, onQuit }: GameScreenProps) {
       setSession(null);
       gameSession.dispose();
     };
-  }, [mapUrl, seed, humanColour, opponent, debugScene]);
+  }, [
+    mapUrl,
+    seed,
+    humanColour,
+    humanFaction,
+    opponent,
+    opponentFaction,
+    debugScene,
+  ]);
 
   return (
     <main className="game-screen">

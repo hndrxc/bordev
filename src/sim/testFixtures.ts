@@ -47,7 +47,11 @@ export function makeOpenSim(
     factions?: Readonly<Record<number, Faction>>;
   } = {},
 ): Sim {
-  const sim = new Sim(makeOpenMap(options), options.seed ?? 1, options.factions);
+  const sim = new Sim(
+    makeOpenMap(options),
+    options.seed ?? 1,
+    options.factions,
+  );
   if (options.explored) {
     for (let p = 0; p < sim.world.players.length; p++) {
       sim.world.players[p].explored.fill(1);

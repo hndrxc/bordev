@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react';
+import type { Faction } from '../data/types';
 import type { MatchResult } from '../game/matchResult';
 import { readUrlFlags } from '../game/urlFlags';
 import type { PlayerColourId } from '../render/playerColours';
@@ -11,7 +12,9 @@ export interface SkirmishConfig {
   mapUrl: string;
   seed: number;
   humanColour: PlayerColourId;
+  humanFaction: Faction;
   opponent: 'normal' | 'none';
+  opponentFaction: Faction;
 }
 
 type Screen =
@@ -29,7 +32,9 @@ export function App() {
             mapUrl: '/maps/alpha_test.json',
             seed: 7,
             humanColour: 'blue',
+            humanFaction: 'crown',
             opponent: 'none',
+            opponentFaction: 'crown',
           },
         }
       : { name: 'menu' },

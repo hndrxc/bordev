@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "id": "clans_mead_hall",
+  "pages": [
+    {
+      "image": "clans_mead_hall_0.png",
+      "mask": "clans_mead_hall_0_mask.png",
+      "shadow": "clans_mead_hall_0_shadow.png"
+    }
+  ],
+  "fps": 12,
+  "anims": {
+    "construct": {
+      "frames": 3,
+      "loop": false,
+      "dirs": 1
+    },
+    "damaged": {
+      "frames": 1,
+      "loop": false,
+      "dirs": 1
+    },
+    "idle": {
+      "frames": 1,
+      "loop": true,
+      "dirs": 1
+    },
+    "rubble": {
+      "frames": 1,
+      "loop": false,
+      "dirs": 1
+    }
+  },
+  "frames": {
+    "construct/0/0": {
+      "page": 0,
+      "x": 2,
+      "y": 564,
+      "w": 360,
+      "h": 244,
+      "ax": 144,
+      "ay": 172
+    },
+    "construct/0/1": {
+      "page": 0,
+      "x": 416,
+      "y": 2,
+      "w": 372,
+      "h": 248,
+      "ax": 144,
+      "ay": 172
+    },
+    "construct/0/2": {
+      "page": 0,
+      "x": 2,
+      "y": 2,
+      "w": 412,
+      "h": 283,
+      "ax": 144,
+      "ay": 196
+    },
+    "damaged/0/0": {
+      "page": 0,
+      "x": 2,
+      "y": 287,
+      "w": 406,
+      "h": 275,
+      "ax": 137,
+      "ay": 189
+    },
+    "idle/0/0": {
+      "page": 0,
+      "x": 416,
+      "y": 252,
+      "w": 372,
+      "h": 267,
+      "ax": 154,
+      "ay": 196
+    },
+    "rubble/0/0": {
+      "page": 0,
+      "x": 410,
+      "y": 521,
+      "w": 287,
+      "h": 136,
+      "ax": 161,
+      "ay": 76
+    }
+  }
+}

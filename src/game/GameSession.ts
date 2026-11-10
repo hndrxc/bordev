@@ -1,3 +1,5 @@
+import { FACTIONS } from '../data/factions';
+import type { Faction } from '../data/types';
 import { Renderer, type RendererStats } from '../render/Renderer';
 import { setupDebugScene } from '../render/DebugScene';
 import {
@@ -107,6 +109,8 @@ export interface GameSessionOptions {
   debugScene?: boolean;
   ai?: Readonly<Record<number, AiDifficulty>>;
   playerColours?: readonly PlayerColourId[];
+  /** Faction per sim player, indexed by player id; unlisted players are Crown. */
+  playerFactions?: readonly Faction[];
   onMatchEnd?: (result: MatchResult) => void;
 }
 
@@ -350,7 +354,7 @@ export class GameSession {
           const pt = points[i];
           const unit = world.spawnUnit(
             0,
-            'peasant',
+            FACTIONS[player0Faction].workerId,
             pt.x,
             pt.z,
             player0Faction,
@@ -834,7 +838,12 @@ export class GameSession {
       if (this._disposed) return;
 
       this._map = gameMap;
-      const sim = new Sim(gameMap, seed, undefined, this._options.ai);
+      const sim = new Sim(
+        gameMap,
+        seed,
+        this._options.playerFactions,
+        this._options.ai,
+      );
       if (this._disposed) return;
 
       if (this._debugSceneEnabled) {

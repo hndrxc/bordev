@@ -4,6 +4,7 @@ import { screenToGround } from '../render/iso';
 import type { EntityKind } from '../sim/entity';
 import { getUnitData } from '../data/units';
 import { getBuildingData } from '../data/buildings';
+import type { Faction } from '../data/types';
 import type { World } from '../sim/world';
 import { getResearchDefinition } from '../sim/systems/research';
 import { isEntityVisibleTo } from '../sim/systems/fog';
@@ -16,7 +17,7 @@ export interface HudResources {
   pop: number;
   popCap: number;
   age: 1 | 2 | 3;
-  faction: string;
+  faction: Faction;
   lowFaith: boolean;
 }
 
