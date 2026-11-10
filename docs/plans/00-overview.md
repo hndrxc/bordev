@@ -391,3 +391,5 @@ Final `npm run typecheck && npm run lint && npm test` passed, including 506 test
 - [x] User-owned Alpha exit gate: user confirmed completion of a full browser match against Normal AI. All Alpha exit gates are complete; Beta entry criteria are met, but Beta has not started.
 
 Rules for agents: each phase is one task; mark `- [x]` in the stage file when its goalposts pass; never start a stage before the previous stage's exit gate is checked by the user; any design change edits this overview first.
+
+**Beta milestone Git workflow**: for each Beta milestone, create a dedicated branch from the latest `beta` branch, named `beta/m<N>-<short-name>`. Work on that milestone branch, not directly on `beta`. After verifying each goalpost, tick its checkbox in the Beta stage plan and immediately commit the corresponding changes and checked goalpost together. Once all goalposts for the milestone are complete, push the milestone branch and open a pull request targeting `beta`.
