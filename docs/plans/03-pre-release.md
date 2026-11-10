@@ -75,7 +75,7 @@ Phases:
 1. itch.io restricted page (password) with web RC build.
 2. Playtest round: ≥ 5 testers × ≥ 2 matches; feedback form fields: faction, difficulty, won?, most confusing thing, most fun thing, bugs.
 3. Triage into GitHub issues with labels `P0` (crash/data loss/softlock), `P1` (major gameplay/visual bug), `P2`, `P3`; fix all P0/P1.
-4. Balance adjustments from feedback go through `npm run balance` and must keep Beta M6 targets.
+4. Balance adjustments from feedback, including a gold-economy recheck against the Beta M6 banked-resource goalpost, go through `npm run balance` and must keep Beta M6 targets.
 
 Goalposts:
 - [ ] `docs/playtests/rc-round1.md` summarises feedback and resulting changes.

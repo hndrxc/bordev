@@ -8,7 +8,7 @@
 
 - [ ] All M0–M8 goalposts checked.
 - [ ] `npm run balance` report committed to `docs/balance/beta.md` meeting M6 targets.
-- [ ] `npm run e2e` Beta smoke spec: 4-player match (human + 3 AI, both factions) runs 10 game-minutes at 8× speed via debug hook without errors.
+- [ ] `npm run e2e` Beta smoke spec: 4-player match (human + 3 AI, both factions) runs 10 game-minutes at 8× speed via `__bordev.cheats.speed(8)` without errors.
 - [ ] User plays one full match as each faction (vs Normal) and one 2v2; files issues; no issue labelled `blocker` remains open.
 
 ### M0 — Clans faction systems
@@ -48,7 +48,7 @@ Phases:
      - Masonry boxes use bevel 0.03; merlons use 0.02.
    - **`crown_peasant`**: overview proportions, segmented arms with a slight elbow bend, and the hoe held diagonally at idle.
 5. Runtime:
-   - Change the tints in `PLAYER_COLOURS` in `src/render/playerColours.ts` to the overview player colours, and change the team gain in `src/render/SpriteBatch.ts` from 1.25 to 1.1.
+   - Change the Blue, Red, Green and Yellow entries of `PLAYER_COLOURS` in `src/render/playerColours.ts` to the overview player-colour tints, `css` and `ghostCss` (Purple, Orange, Teal and Pink arrive in M4 phase 5), and change the team gain in `src/render/SpriteBatch.ts` from 1.25 to 1.1.
    - Attach the overview grade as an `ImageProcessingPostProcess` on `IsoCamera.camera`.
    - In `src/render/overlays/DebugGrid.ts`, implement the grid as always visible in rendering group 1 with the overview colour/alpha, and hide footprints by default.
    - Rename `Renderer.toggleDebugGrid` → `toggleDebugFootprints`, `Overlays.toggleGrid` → `toggleFootprints`, `isGridVisible` → `areFootprintsVisible` and `setGridVisible` → `setFootprintsVisible`, updating `src/input/Hotkeys.ts` and `src/input/Hotkeys.test.ts`.
@@ -107,10 +107,13 @@ Goalposts:
 Phases:
 
 1. All 16 upgrades implemented with tooltips; upgrade icons.
-2. UX: idle-peasant button + `.` hotkey; idle military counter; `Space` alert jump; rally point to mine auto-assigns carts; drag-select filters workers out when mixed with military; attack-move ground marker; Tab cycles subgroups in multi-selection; production queue display with cancel on click; building HP/queue in selection panel; double-click a military building selects all owned on-screen buildings of that type (not off-screen or other types) and training orders split evenly across the selection; unit food/gold prices shown immediately in the training UI (not only on hover).
-3. Notifications: under attack (throttled 1 per 10 s per area), building complete, research complete, unit trained (only when idle building), mine depleted, player eliminated.
-4. Game speed setting (0.5×, 1×, 1.5×, 2×) and pause (`P`).
-5. Teams: `SkirmishSetup` 2–4 slots, each Human (slot 1 only) / AI (Easy/Normal/Hard) / Closed, faction, colour (8 options, unique), team 1–4; allies share vision, gates, no friendly fire; victory by last team standing.
+2. UX: idle-peasant button in the bottom bar showing the idle count (click or `Shift+.` selects all idle peasants and centres on the first; `.` keeps cycling one at a time); placement stays active after each placement (overview Controls), replacing Shift-to-repeat; idle military counter; `Space` alert jump; rally point to mine auto-assigns carts; drag-select filters workers out when mixed with military; attack-move ground marker; Tab cycles subgroups in multi-selection; production queue display with cancel on click; building HP/queue in selection panel; double-click a military building selects all owned on-screen buildings of that type (not off-screen or other types) and training orders split evenly across the selection; unit food/gold prices shown immediately in the training UI (not only on hover).
+3. Notifications: under attack (throttled 1 per 10 s per area), building complete, research complete, unit trained (only when that unit empties its building's queue), mine depleted, player eliminated.
+4. Game speed setting (0.5×, 1×, 1.5×, 2×) and pause (`P`). Debug builds add `__bordev.cheats.speed(x)` accepting 0.5–8 for tests; the settings UI offers only the four listed speeds.
+5. Teams: `SkirmishSetup` 2–4 slots, each Human (slot 1, sim player 0, only) / AI (Easy/Normal/Hard) / Closed, faction, colour (the 8 overview palette colours, unique per slot), team 1–4; allies share vision, gates, no friendly fire; victory by last team standing.
+6. Worker auto-work: workers finishing a build or repair job seek work per the overview Economy **Worker auto-work** rule (12 tiles; unfinished building first, then unworked farm).
+7. Formations: `setFormation` command, per-unit stored formation, Line / Staggered / Box / Flank slot layouts, slowest-member speed matching and `A`/`S`/`D`/`F` card slots per overview Controls.
+8. Melee engagement: contact slots and swing anchoring per the overview Combat model **Melee contact slots** bullet, fixing crowded melee units whose swings fail to land.
 
 Goalposts:
 
@@ -118,6 +121,13 @@ Goalposts:
 - [ ] E2E: pause freezes sim tick counter; 2× speed doubles ticks per real second ±10 %.
 - [ ] Player-facing: double-clicking one owned military building selects every owned on-screen building of that type; off-screen buildings of that type and other building types stay unselected, and queued training is split evenly across the selected buildings.
 - [ ] Player-facing: the training UI shows each unit's food and gold price as soon as it opens, with no hover needed.
+- [ ] Vitest: a peasant finishing a cottage with a second unfinished own cottage 8 tiles away and an unworked farm 4 tiles away walks to and builds the cottage. With only a farm 13 tiles away, it stays idle.
+- [ ] Player-facing: after one Cottage placement the ghost stays active, and a second click queues a second Cottage for the same peasants without reselecting. `Esc` ends placement.
+- [ ] Player-facing: clicking the idle-peasant button (or `Shift+.`) selects every idle peasant.
+- [ ] Vitest: 6 spearmen and 4 longbowmen in Line moved 20 tiles east on open grass arrive with every longbowman behind every spearman along the move direction, and arrival times are within 2 s of each other. In a knight + trebuchet Line group, no knight exceeds trebuchet speed before arriving.
+- [ ] Vitest: in Box, every ranged unit of a 12-unit mixed group ends inside the convex hull of the melee units.
+- [ ] Vitest: 12 spearmen ordered to attack one stationary man-at-arms (HP staged to 10 000) on open grass: within 20 s, ≥ 6 distinct spearmen land hits, and zero swings start without dealing damage while the target is stationary.
+- [ ] Existing M7 duel matrix still passes unchanged.
 
 ### M5 — AI: three difficulties, both factions
 
@@ -136,6 +146,8 @@ Phases:
 | counter-composition        | no   | no                | yes (spear/halberd/shield vs cavalry, cavalry vs archers, siege vs towers) |
 | walls/towers               | no   | towers only       | towers + gated wall at chokepoints                                         |
 
+The Normal column replaces the Alpha tuning recorded in the overview Simulation contract (12 peasants, 4 carts, first attack tick 9000 or army 10). For every difficulty, no attack wave launches before the listed first-attack minute; after it, waves follow the existing Alpha wave logic (army size ≥ 10, minimum wave size 3). M5 updates the overview's tuned-Normal sentence to the final values.
+
 2. Build orders: `buildOrders/{crown,clans}_{easy,normal,hard}.json`.
 3. Team AI: allies attack the same target; AI helps an ally under attack within 25 tiles.
 4. Target selection: nearest known enemy building cluster; Hard prioritises carts/mines then TC.
@@ -149,14 +161,15 @@ Goalposts (headless, `npm run balance -- --matrix ai`):
 
 Phases:
 
-1. `tools/balance.ts`: runs matrices across maps/seeds/factions, outputs markdown with win rates, average game length, unit usage and kill/death per unit type.
-2. Tune numbers in `src/data` and overview tables together (overview updated in the same change).
+1. `tools/balance.ts`: runs matrices across maps/seeds/factions, outputs markdown with win rates, average game length, unit usage and kill/death per unit type, plus per-faction median gold and food collected per minute and banked gold and food at minutes 5, 10, 15 and 20.
+2. Tune numbers in `src/data` and overview tables together (overview updated in the same change). Gold-economy tuning (playtest feedback) happens here: adjust mine gold, cart capacity/load times and unit gold costs until the banked-resource goalpost holds.
 
 Goalposts:
 
 - [ ] Crown vs Clans, Normal vs Normal, 40 seeds × 4 maps: each faction wins 40–60 %.
 - [ ] Median game length Normal vs Normal 1v1: 18–30 minutes.
 - [ ] Every unit type has ≥ 3 % share of AI army production for its faction (no dead units).
+- [ ] Normal vs Normal, 40 seeds × 4 maps: median banked gold and median banked food at minutes 10 and 20 are each ≤ 500 for both factions (neither resource floats).
 
 ### M7 — Maps
 
